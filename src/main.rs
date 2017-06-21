@@ -1,5 +1,4 @@
 extern crate nix;
-extern crate mio;
 extern crate moproxy;
 use std::net::{TcpListener, TcpStream, SocketAddrV4, Shutdown};
 use std::io::{self, Write, Read, ErrorKind};
@@ -7,7 +6,6 @@ use std::os::unix::io::{RawFd, AsRawFd};
 use std::{env, thread};
 use std::sync::{Mutex, Arc};
 use std::time::Duration;
-use mio::{Ready, PollOpt};
 use nix::sys::socket::{getsockopt, sockopt};
 
 use moproxy::{socks5, monitor};
@@ -84,47 +82,6 @@ fn get_original_dest(fd: RawFd) -> io::Result<SocketAddrV4> {
                          addr.sin_port.to_be()))
 }
 
-fn pipe_streams(mut a: TcpStream, mut b: TcpStream) -> io::Result<()> {
-    let a = mio::net::TcpStream::from_stream(a)?;
-    let b = mio::net::TcpStream::from_stream(b)?;
-    const A: Token = mio::Token(0);
-    const B: Token = mio::Token(1);
-    let poll = mio::Poll::new()?;
-    let poll_opt = PollOpt::level();
-    pool.register(&a, A, Ready::readable(), poll_opt)?;
-    pool.register(&b, B, Ready::readable(), poll_opt)?;
-    let mut events = Events::with_capacity(8);
-    let mut buf_a = vec![0; 8192];
-    let mut buf_b = vec![0; 8192];
-    loop {
-        poll.poll(&mut events, Duration::from_secs(300))?;
-        for event in events.iter() {
-            let (left, right, l_token, r_token,
-                 mut l_buf, mut r_buf) = match event.token() {
-                A => (a, b, A, B, buf_a, buf_b),
-                B => (b, a, B, A, buf_b, buf_a),
-            };
-            if event.readiness().is_writable() {
-                poll.register(&right, r_token, Ready::readable(), poll_opt)?;
-            } else if event.readiness().is_readable() {
-                r_buf.resize(8192);
-                let n = left.read(&mut r_buf)?;
-                r_buf.truncate(n);
-                let n = right.write(&r_buf)?;
-                if n >= r_buf.len() {
-                    r_buf.clear();
-                } else {
-                    r_buf = r_buf.drain(n..).collect();
-                    pool.deregister(l_token)?;
-                    pool.reregister(r_token)
-                }
-
-            }
-        }
-    }
-
-}
-/*
 fn pipe_streams(mut from: TcpStream, mut to: TcpStream) {
     thread::spawn(move || {
         let mut buffer = [0; 8192];
@@ -149,4 +106,3 @@ fn pipe_streams(mut from: TcpStream, mut to: TcpStream) {
         to.shutdown(Shutdown::Write).ok();
     });
 }
-*/

@@ -7,3 +7,6 @@ authors = ["sorz <me@sorz.org>"]
 libc = "0.2.24"
 nix = "0.8.1"
 rand = "0.3"
+futures = "0.1.14"
+tokio-core = "0.1.8"
+tokio-io = "0.1.2"

@@ -1,11 +1,21 @@
 extern crate nix;
+extern crate futures;
+extern crate tokio_core;
+extern crate tokio_io;
 extern crate moproxy;
-use std::net::{TcpListener, TcpStream, SocketAddrV4, Shutdown};
-use std::io::{self, Write, Read, ErrorKind};
+use std::net::{TcpListener, TcpStream, SocketAddrV4};
+use std::io::{self, ErrorKind};
 use std::os::unix::io::{RawFd, AsRawFd};
 use std::{env, thread};
 use std::sync::{Mutex, Arc};
 use std::time::Duration;
+use tokio_core::net as tnet;
+use tokio_core::reactor;
+use tokio_io::io as tio;
+use tokio_io::AsyncRead;
+use futures::future::Future;
+
+
 use nix::sys::socket::{getsockopt, sockopt};
 
 use moproxy::{socks5, monitor};
@@ -51,8 +61,9 @@ fn handle_client(client: TcpStream, servers: &Arc<Mutex<Vec<SocketAddrV4>>>)
             println!("via :{}", server.port());
             client.set_read_timeout(Some(Duration::from_secs(555)))?;
             client.set_write_timeout(Some(Duration::from_secs(60)))?;
-            pipe_streams(client.try_clone()?, socks.try_clone()?);
-            pipe_streams(socks, client);
+            thread::spawn(move || pipe_streams(client, socks));
+            //pipe_streams(client.try_clone()?, socks.try_clone()?);
+            //pipe_streams(socks, client);
             return Ok(())
         } else {
             println!("fail to connect {}", server);
@@ -82,27 +93,16 @@ fn get_original_dest(fd: RawFd) -> io::Result<SocketAddrV4> {
                          addr.sin_port.to_be()))
 }
 
-fn pipe_streams(mut from: TcpStream, mut to: TcpStream) {
-    thread::spawn(move || {
-        let mut buffer = [0; 8192];
-        loop {
-            let n = match from.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(n) => n,
-                Err(e) => {
-                    println!("error on read: {}", e);
-                    break;
-                }
-            };
-            match to.write_all(&buffer[..n]) {
-                Err(e) => {
-                    println!("error on write: {}", e);
-                    break;
-                },
-                Ok(_) => (),
-            }
-        }
-        from.shutdown(Shutdown::Read).ok();
-        to.shutdown(Shutdown::Write).ok();
-    });
+
+fn pipe_streams(local: TcpStream, remote: TcpStream) -> io::Result<()> {
+    let mut core = reactor::Core::new()?;
+    let handle = core.handle();
+    let (lr, lw) = tnet::TcpStream::from_stream(local, &handle)?.split();
+    let (rr, rw) = tnet::TcpStream::from_stream(remote, &handle)?.split();
+    let piping = tio::copy(lr, rw)
+        .join(tio::copy(rr, lw))
+        .map(|((tx, ..), (rx, ..))| {
+            println!("tx {}, rx {} bytes", tx, rx);
+        });
+    core.run(piping)
 }

@@ -42,10 +42,14 @@ fn main() {
     thread::spawn(move || piping_worker(rx));
 
     for client in listener.incoming() {
-        client.and_then(|client| connect_server(client, &servers))
-            .and_then(|pair| tx.clone().send(pair).wait().map_err(io_error))
-            .map_err(|e| println!("error: {}", e))
-            .ok();
+        match client.and_then(|c| connect_server(c, &servers)) {
+            Ok(pair) => tx.clone().send(pair).wait()
+                .expect("fail send to piping thread"),
+            Err(e) => {
+                println!("error: {}", e);
+                continue;
+            }
+        }
     }
 }
 
@@ -76,9 +80,6 @@ fn init_socks(server: SocketAddrV4, dest: SocketAddrV4)
     socks.set_read_timeout(Some(Duration::from_millis(100)))?;
     socks.set_write_timeout(Some(Duration::from_millis(100)))?;
     socks5::handshake(&mut socks, dest)?;
-
-    socks.set_read_timeout(Some(Duration::from_secs(555)))?;
-    socks.set_write_timeout(Some(Duration::from_secs(60)))?;
     Ok(socks)
 }
 

@@ -13,11 +13,9 @@ use tokio_core::net as tnet;
 use tokio_core::reactor;
 use tokio_io::io as tio;
 use tokio_io::AsyncRead;
-use futures::future::Future;
-
-
+use futures::{Stream, Sink, Future};
+use futures::sync::mpsc;
 use nix::sys::socket::{getsockopt, sockopt};
-
 use moproxy::{socks5, monitor};
 
 
@@ -39,34 +37,47 @@ fn main() {
         thread::spawn(move || monitor::monitoring_servers(servers));
     }
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
-                if let Err(e) = handle_client(stream, &servers) {
-                    println!("error: {}", e);
+    let (tx, rx) = mpsc::channel(1);
+    thread::spawn(move || {
+        let mut core = reactor::Core::new().unwrap();
+        let handle = core.handle();
+        let server = rx.for_each(|(local, remote)| {
+            let (lr, lw) = tnet::TcpStream::from_stream(local, &handle).unwrap().split();
+            let (rr, rw) = tnet::TcpStream::from_stream(remote, &handle).unwrap().split();
+            let piping = tio::copy(lr, rw)
+                .join(tio::copy(rr, lw))
+                .map(|((tx, ..), (rx, ..))| {
+                    println!("tx {}, rx {} bytes", tx, rx);
+                }).map_err(|e| println!("piping error: {}", e));
+            handle.spawn(piping);
+            Ok(())
+        });
+        core.run(server).unwrap();
+    });
+
+    for client in listener.incoming() {
+        match client {
+            Ok(client) => {
+                let server = get_original_dest(client.as_raw_fd())
+                    .and_then(|dest| connect_server(dest, &servers));
+                match server {
+                    Ok(server) => {
+                        tx.clone().send((client, server)).wait().unwrap();
+                    },
+                    Err(e) => println!("error: {}", e),
                 }
-            }
+            },
             Err(e) => println!("error: {}", e)
         }
     }
 }
 
-fn handle_client(client: TcpStream, servers: &Arc<Mutex<Vec<SocketAddrV4>>>)
-        -> io::Result<()> {
-    let dest = get_original_dest(client.as_raw_fd())?;
-    print!("{} => {} ", client.peer_addr()?.ip(), dest);
-
+fn connect_server(dest: SocketAddrV4, servers: &Arc<Mutex<Vec<SocketAddrV4>>>)
+        -> io::Result<TcpStream> {
     for server in servers.lock().unwrap().iter() {
-        if let Ok(socks) = init_socks(*server, dest) {
-            println!("via :{}", server.port());
-            client.set_read_timeout(Some(Duration::from_secs(555)))?;
-            client.set_write_timeout(Some(Duration::from_secs(60)))?;
-            thread::spawn(move || pipe_streams(client, socks));
-            //pipe_streams(client.try_clone()?, socks.try_clone()?);
-            //pipe_streams(socks, client);
-            return Ok(())
-        } else {
-            println!("fail to connect {}", server);
+        match init_socks(*server, dest) {
+            Ok(s) => return Ok(s),
+            Err(_) => println!("fail to connect {}", server),
         }
     }
     Err(io::Error::new(ErrorKind::Other, "all socks server down"))
@@ -93,16 +104,3 @@ fn get_original_dest(fd: RawFd) -> io::Result<SocketAddrV4> {
                          addr.sin_port.to_be()))
 }
 
-
-fn pipe_streams(local: TcpStream, remote: TcpStream) -> io::Result<()> {
-    let mut core = reactor::Core::new()?;
-    let handle = core.handle();
-    let (lr, lw) = tnet::TcpStream::from_stream(local, &handle)?.split();
-    let (rr, rw) = tnet::TcpStream::from_stream(remote, &handle)?.split();
-    let piping = tio::copy(lr, rw)
-        .join(tio::copy(rr, lw))
-        .map(|((tx, ..), (rx, ..))| {
-            println!("tx {}, rx {} bytes", tx, rx);
-        });
-    core.run(piping)
-}

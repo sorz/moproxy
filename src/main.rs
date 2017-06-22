@@ -5,6 +5,7 @@ extern crate tokio_io;
 extern crate moproxy;
 use std::net::{TcpListener, TcpStream, SocketAddrV4};
 use std::io::{self, ErrorKind};
+use std::error::Error;
 use std::os::unix::io::{RawFd, AsRawFd};
 use std::{env, thread};
 use std::sync::{Mutex, Arc};
@@ -38,51 +39,35 @@ fn main() {
     }
 
     let (tx, rx) = mpsc::channel(1);
-    thread::spawn(move || {
-        let mut core = reactor::Core::new().unwrap();
-        let handle = core.handle();
-        let server = rx.for_each(|(local, remote)| {
-            let (lr, lw) = tnet::TcpStream::from_stream(local, &handle).unwrap().split();
-            let (rr, rw) = tnet::TcpStream::from_stream(remote, &handle).unwrap().split();
-            let piping = tio::copy(lr, rw)
-                .join(tio::copy(rr, lw))
-                .map(|((tx, ..), (rx, ..))| {
-                    println!("tx {}, rx {} bytes", tx, rx);
-                }).map_err(|e| println!("piping error: {}", e));
-            handle.spawn(piping);
-            Ok(())
-        });
-        core.run(server).unwrap();
-    });
+    thread::spawn(move || piping_worker(rx));
 
     for client in listener.incoming() {
-        match client {
-            Ok(client) => {
-                let server = get_original_dest(client.as_raw_fd())
-                    .and_then(|dest| connect_server(dest, &servers));
-                match server {
-                    Ok(server) => {
-                        tx.clone().send((client, server)).wait().unwrap();
-                    },
-                    Err(e) => println!("error: {}", e),
-                }
-            },
-            Err(e) => println!("error: {}", e)
-        }
+        client.and_then(|client| connect_server(client, &servers))
+            .and_then(|pair| tx.clone().send(pair).wait().map_err(io_error))
+            .map_err(|e| println!("error: {}", e))
+            .ok();
     }
 }
 
-fn connect_server(dest: SocketAddrV4, servers: &Arc<Mutex<Vec<SocketAddrV4>>>)
-        -> io::Result<TcpStream> {
+fn io_error<E: Into<Box<Error + Send + Sync>>>(e: E) -> io::Error {
+    io::Error::new(ErrorKind::Other, e)
+}
+
+fn connect_server(client: TcpStream, servers: &Arc<Mutex<Vec<SocketAddrV4>>>)
+        -> io::Result<(TcpStream, TcpStream)> {
+    let dest = get_original_dest(client.as_raw_fd())?;
     for server in servers.lock().unwrap().iter() {
         match init_socks(*server, dest) {
-            Ok(s) => return Ok(s),
+            Ok(server) => {
+                println!("{} => {} via :{}", client.peer_addr()?,
+                    dest, server.peer_addr()?.port());
+                return Ok((client, server));
+            },
             Err(_) => println!("fail to connect {}", server),
         }
     }
-    Err(io::Error::new(ErrorKind::Other, "all socks server down"))
+    Err(io_error("all socks server down"))
 }
-
 
 fn init_socks(server: SocketAddrV4, dest: SocketAddrV4)
         -> io::Result<TcpStream> {
@@ -104,3 +89,21 @@ fn get_original_dest(fd: RawFd) -> io::Result<SocketAddrV4> {
                          addr.sin_port.to_be()))
 }
 
+fn piping_worker(rx: mpsc::Receiver<(TcpStream, TcpStream)>) {
+    let mut core = reactor::Core::new().unwrap();
+    let handle = core.handle();
+    let server = rx.for_each(|(local, remote)| {
+        let (lr, lw) = tnet::TcpStream::from_stream(local, &handle)
+            .expect("cannot create asycn tcp stream").split();
+        let (rr, rw) = tnet::TcpStream::from_stream(remote, &handle)
+            .expect("cannot create asycn tcp stream").split();
+        let piping = tio::copy(lr, rw)
+            .join(tio::copy(rr, lw))
+            .map(|((tx, ..), (rx, ..))| {
+                println!("tx {}, rx {} bytes", tx, rx);
+            }).map_err(|e| println!("piping error: {}", e));
+        handle.spawn(piping);
+        Ok(())
+    });
+    core.run(server).unwrap();
+}

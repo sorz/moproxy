@@ -8,7 +8,8 @@ use std::collections::HashMap;
 use self::rand::Rng;
 use ::socks5;
 
-pub fn monitoring_servers(servers: Arc<Mutex<Vec<SocketAddrV4>>>) {
+pub fn monitoring_servers(servers: Arc<Mutex<Vec<SocketAddrV4>>>,
+                          probe: u64) {
     let mut rng = rand::thread_rng();
     let mut avg_delay = HashMap::new();
     for server in servers.lock().unwrap().iter() {
@@ -35,7 +36,7 @@ pub fn monitoring_servers(servers: Arc<Mutex<Vec<SocketAddrV4>>>) {
                 avg_delay.get(s).unwrap().unwrap_or(0));
         }
         println!();
-        thread::sleep(Duration::from_secs(30));
+        thread::sleep(Duration::from_secs(probe));
     }
 }
 

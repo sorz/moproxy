@@ -52,8 +52,11 @@ fn main() {
 
     let servers = Arc::new(Mutex::new(servers));
     {
+        let probe = args.value_of("probe-secs")
+            .expect("missing probe secs").parse()
+            .expect("not a vaild probe secs");
         let servers = servers.clone();
-        thread::spawn(move || monitor::monitoring_servers(servers));
+        thread::spawn(move || monitor::monitoring_servers(servers, probe));
     }
 
     let (tx, rx) = mpsc::channel(1);

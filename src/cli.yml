@@ -25,4 +25,10 @@ args:
         takes_value: true
         required: true
         multiple: true
+    - probe-secs:
+        short: i
+        long: probe
+        value_name: SECONDS
+        help: period of time to make one probe
+        default_value: "30"
 

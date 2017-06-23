@@ -1,4 +1,5 @@
 extern crate nix;
+extern crate net2;
 extern crate futures;
 extern crate tokio_core;
 extern crate tokio_io;
@@ -10,6 +11,7 @@ use std::os::unix::io::{RawFd, AsRawFd};
 use std::{env, thread};
 use std::sync::{Mutex, Arc};
 use std::time::Duration;
+use net2::TcpStreamExt;
 use tokio_core::net as tnet;
 use tokio_core::reactor;
 use tokio_io::io as tio;
@@ -49,7 +51,7 @@ fn main() {
                 println!("error: {}", e);
                 continue;
             }
-        }
+        };
     }
 }
 
@@ -65,6 +67,8 @@ fn connect_server(client: TcpStream, servers: &Arc<Mutex<Vec<SocketAddrV4>>>)
             Ok(server) => {
                 println!("{} => {} via :{}", client.peer_addr()?,
                     dest, server.peer_addr()?.port());
+                server.set_keepalive(Some(Duration::from_secs(300)))?;
+                client.set_keepalive(Some(Duration::from_secs(300)))?;
                 return Ok((client, server));
             },
             Err(_) => println!("fail to connect {}", server),
@@ -100,9 +104,11 @@ fn piping_worker(rx: mpsc::Receiver<(TcpStream, TcpStream)>) {
             .expect("cannot create asycn tcp stream").split();
         let piping = tio::copy(lr, rw)
             .join(tio::copy(rr, lw))
-            .map(|((tx, ..), (rx, ..))| {
+            .and_then(|((tx, _, rw), (rx, _, lw))| {
                 println!("tx {}, rx {} bytes", tx, rx);
-            }).map_err(|e| println!("piping error: {}", e));
+                tio::shutdown(rw)
+                    .join(tio::shutdown(lw))
+            }).map(|_| ()).map_err(|e| println!("piping error: {}", e));
         handle.spawn(piping);
         Ok(())
     });

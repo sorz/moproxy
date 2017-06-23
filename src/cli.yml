@@ -1,0 +1,28 @@
+name: moproxy
+version: "0.1"
+author: "Shell Chen <me@sorz.org>"
+about: "Transparent TCP proxy to a group of SOCKSv5 servers"
+args:
+    - host:
+        short: h
+        long: host
+        value_name: IP-ADDRESS
+        help: address to bind on
+        takes_value: true
+        default_value: 0.0.0.0
+    - port:
+        short: p
+        long: port
+        value_name: PORT
+        help: port number to bind on
+        takes_value: true
+        required: true
+    - servers:
+        short: l
+        long: servers
+        value_name: SERVER-LIST
+        help: SOCKSv5 server list. IP address can omit for localhost.
+        takes_value: true
+        required: true
+        multiple: true
+

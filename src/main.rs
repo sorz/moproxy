@@ -3,12 +3,14 @@ extern crate net2;
 extern crate futures;
 extern crate tokio_core;
 extern crate tokio_io;
+#[macro_use]
+extern crate clap;
 extern crate moproxy;
 use std::net::{TcpListener, TcpStream, SocketAddrV4};
 use std::io::{self, ErrorKind};
 use std::error::Error;
 use std::os::unix::io::{RawFd, AsRawFd};
-use std::{env, thread};
+use std::thread;
 use std::sync::{Mutex, Arc};
 use std::time::Duration;
 use net2::TcpStreamExt;
@@ -19,20 +21,34 @@ use tokio_io::AsyncRead;
 use futures::{Stream, Sink, Future};
 use futures::sync::mpsc;
 use nix::sys::socket::{getsockopt, sockopt};
+
 use moproxy::{socks5, monitor};
 
 
 fn main() {
-    let port = env::args().nth(1).unwrap_or(String::from("10081")).parse()
+    let yaml = load_yaml!("cli.yml");
+    let args = clap::App::from_yaml(yaml).get_matches();
+
+    let host = args.value_of("host")
+        .expect("missing host");
+    let port = args.value_of("port")
+        .expect("missing port number").parse()
         .expect("invalid port number");
-    let listener = TcpListener::bind(("0.0.0.0", port))
+    let listener = TcpListener::bind((host, port))
         .expect("cannot bind to port");
+    println!("listen on {}:{}", host, port);
+
 
     let mut servers = vec![];
-    servers.push("127.0.0.1:8130".parse().unwrap());
-    servers.push("127.0.0.1:8131".parse().unwrap());
-    servers.push("127.0.0.1:8132".parse().unwrap());
-    servers.push("127.0.0.1:8133".parse().unwrap());
+    for server in args.values_of("servers").expect("missing server list") {
+        let server = if server.contains(":") {
+            server.parse()
+        } else {
+            format!("127.0.0.1:{}", server).parse()
+        }.expect("not a valid server address");
+        servers.push(server);
+    }
+    println!("{} servers added: {:?}", servers.len(), servers);
 
     let servers = Arc::new(Mutex::new(servers));
     {

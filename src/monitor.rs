@@ -20,10 +20,17 @@ pub fn monitoring_servers(servers: Arc<Mutex<Vec<SocketAddrV4>>>,
     }
 
     loop {
+        debug!("probing started");
         for (server, delay) in avg_delay.iter_mut() {
             *delay = match socks5::alive_test(*server) {
-                Ok(t) => Some((delay.unwrap_or(t + 1000) * 9 + t) / 10),
-                Err(_) => None,
+                Ok(t) => {
+                    debug!("{} up: {}ms", server, t);
+                    Some((delay.unwrap_or(t + 1000) * 9 + t) / 10)
+                },
+                Err(e) => {
+                    debug!("{} down: {}", server, e);
+                    None
+                }
             };
         }
 
@@ -31,11 +38,14 @@ pub fn monitoring_servers(servers: Arc<Mutex<Vec<SocketAddrV4>>>,
             avg_delay.get(s).unwrap().unwrap_or(std::u32::MAX - 50)
             + (rng.next_u32() % 20));
 
-        for s in servers.lock().unwrap().iter() {
-            print!("{}: {}ms\t", s.port(),
-                avg_delay.get(s).unwrap().unwrap_or(0));
+        let mut stats = String::new();
+        for s in servers.lock().unwrap().iter().take(5) {
+            stats += format!(" {}: {}ms,", s.port(),
+                avg_delay.get(s).unwrap().unwrap_or(0)).as_str();
         }
-        println!();
+        stats.pop();
+        info!("average delay:{}", stats);
+
         thread::sleep(Duration::from_secs(probe));
     }
 }

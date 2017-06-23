@@ -12,3 +12,5 @@ tokio-core = "0.1.8"
 tokio-io = "0.1.2"
 net2 = "0.2"
 clap = {version = "2.25", features = ["yaml"]}
+log = "0.3"
+simplelog = "0.4"

@@ -17,15 +17,11 @@ use std::thread;
 use std::sync::{Mutex, Arc};
 use std::time::Duration;
 use net2::TcpStreamExt;
-use tokio_core::net as tnet;
-use tokio_core::reactor;
-use tokio_io::io as tio;
-use tokio_io::AsyncRead;
-use futures::{Stream, Sink, Future};
 use futures::sync::mpsc;
+use futures::{Sink, Future};
 use nix::sys::socket::{getsockopt, sockopt};
 use simplelog::{SimpleLogger, LogLevelFilter};
-use moproxy::{socks5, monitor};
+use moproxy::{socks5, monitor, proxy};
 
 
 fn main() {
@@ -76,7 +72,7 @@ fn main() {
     }
 
     let (tx, rx) = mpsc::channel(1);
-    thread::spawn(move || piping_worker(rx));
+    thread::spawn(move || proxy::piping_worker(rx));
 
     for client in listener.incoming() {
         match client.and_then(|c| connect_server(c, &servers)) {
@@ -129,23 +125,3 @@ fn get_original_dest(fd: RawFd) -> io::Result<SocketAddrV4> {
                          addr.sin_port.to_be()))
 }
 
-fn piping_worker(rx: mpsc::Receiver<(TcpStream, TcpStream)>) {
-    let mut core = reactor::Core::new().unwrap();
-    let handle = core.handle();
-    let server = rx.for_each(|(local, remote)| {
-        let (lr, lw) = tnet::TcpStream::from_stream(local, &handle)
-            .expect("cannot create asycn tcp stream").split();
-        let (rr, rw) = tnet::TcpStream::from_stream(remote, &handle)
-            .expect("cannot create asycn tcp stream").split();
-        let piping = tio::copy(lr, rw)
-            .join(tio::copy(rr, lw))
-            .and_then(|((tx, _, rw), (rx, _, lw))| {
-                debug!("tx {}, rx {} bytes", tx, rx);
-                tio::shutdown(rw)
-                    .join(tio::shutdown(lw))
-            }).map(|_| ()).map_err(|e| warn!("piping error: {}", e));
-        handle.spawn(piping);
-        Ok(())
-    });
-    core.run(server).unwrap();
-}

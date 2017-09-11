@@ -98,8 +98,8 @@ fn connect_server(client: TcpStream, servers: &Arc<Mutex<Vec<SocketAddrV4>>>)
             Ok(server) => {
                 info!("{} => {} via :{}", client.peer_addr()?,
                     dest, server.peer_addr()?.port());
-                server.set_keepalive(Some(Duration::from_secs(300)))?;
-                client.set_keepalive(Some(Duration::from_secs(300)))?;
+                server.set_keepalive(Some(Duration::from_secs(180)))?;
+                client.set_keepalive(Some(Duration::from_secs(180)))?;
                 return Ok((client, server));
             },
             Err(_) => warn!("fail to connect {}", server),
@@ -115,6 +115,8 @@ fn init_socks(server: SocketAddrV4, dest: SocketAddrV4)
     socks.set_read_timeout(Some(Duration::from_millis(100)))?;
     socks.set_write_timeout(Some(Duration::from_millis(100)))?;
     socks5::handshake(&mut socks, dest)?;
+    socks.set_read_timeout(None)?;
+    socks.set_write_timeout(None)?;
     Ok(socks)
 }
 

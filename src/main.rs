@@ -9,7 +9,8 @@ extern crate clap;
 #[macro_use]
 extern crate log;
 extern crate moproxy;
-use std::net::{TcpListener, TcpStream, SocketAddrV4};
+use std::fmt;
+use std::net::{TcpListener, TcpStream, SocketAddr, SocketAddrV4};
 use std::io::{self, ErrorKind};
 use std::error::Error;
 use std::os::unix::io::{RawFd, AsRawFd};
@@ -19,9 +20,11 @@ use std::time::Duration;
 use net2::TcpStreamExt;
 use futures::sync::mpsc;
 use futures::{Sink, Future};
-use nix::sys::socket::{getsockopt, sockopt};
+use nix::sys::socket;
 use simplelog::{SimpleLogger, LogLevelFilter};
-use moproxy::{socks5, monitor, proxy};
+use moproxy::monitor;
+use moproxy::socks5::Socks5Server;
+use moproxy::proxy::{self, ProxyServer};
 
 
 fn main() {
@@ -51,14 +54,15 @@ fn main() {
     info!("listen on {}:{}", host, port);
 
     let mut servers = vec![];
-    for server in args.values_of("servers").expect("missing server list") {
-        let server = if server.contains(":") {
-            server.parse()
+    for addr in args.values_of("servers").expect("missing server list") {
+        let addr = if addr.contains(":") {
+            addr.parse()
         } else {
-            format!("127.0.0.1:{}", server).parse()
+            format!("127.0.0.1:{}", addr).parse()
         }.expect("not a valid server address");
-        servers.push(server);
+        let server = Socks5Server::new(addr);
         debug!("server {} added", server);
+        servers.push(server);
     }
     info!("total {} server(s) added", servers.len());
 
@@ -90,11 +94,12 @@ fn io_error<E: Into<Box<Error + Send + Sync>>>(e: E) -> io::Error {
     io::Error::new(ErrorKind::Other, e)
 }
 
-fn connect_server(client: TcpStream, servers: &Arc<Mutex<Vec<SocketAddrV4>>>)
-        -> io::Result<(TcpStream, TcpStream)> {
+fn connect_server<S>(client: TcpStream, servers: &Arc<Mutex<Vec<S>>>)
+        -> io::Result<(TcpStream, TcpStream)>
+where S: ProxyServer + fmt::Display {
     let dest = get_original_dest(client.as_raw_fd())?;
     for server in servers.lock().unwrap().iter() {
-        match init_socks(*server, dest) {
+        match server.connect(dest) {
             Ok(server) => {
                 info!("{} => {} via :{}", client.peer_addr()?,
                     dest, server.peer_addr()?.port());
@@ -108,22 +113,12 @@ fn connect_server(client: TcpStream, servers: &Arc<Mutex<Vec<SocketAddrV4>>>)
     Err(io_error("all socks server down"))
 }
 
-fn init_socks(server: SocketAddrV4, dest: SocketAddrV4)
-        -> io::Result<TcpStream> {
-    let mut socks = TcpStream::connect(server)?;
-    socks.set_nodelay(true)?;
-    socks.set_read_timeout(Some(Duration::from_millis(100)))?;
-    socks.set_write_timeout(Some(Duration::from_millis(100)))?;
-    socks5::handshake(&mut socks, dest)?;
-    socks.set_read_timeout(None)?;
-    socks.set_write_timeout(None)?;
-    Ok(socks)
-}
 
-
-fn get_original_dest(fd: RawFd) -> io::Result<SocketAddrV4> {
-    let addr = getsockopt(fd, sockopt::OriginalDst)?;
-    Ok(SocketAddrV4::new(addr.sin_addr.s_addr.to_be().into(),
-                         addr.sin_port.to_be()))
+fn get_original_dest(fd: RawFd) -> io::Result<SocketAddr> {
+    let addr = socket::getsockopt(fd, socket::sockopt::OriginalDst)?;
+    let addr = SocketAddrV4::new(addr.sin_addr.s_addr.to_be().into(),
+                                 addr.sin_port.to_be());
+    // TODO: support IPv6
+    Ok(SocketAddr::V4(addr))
 }
 

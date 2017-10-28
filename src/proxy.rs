@@ -2,7 +2,7 @@ extern crate tokio_core;
 extern crate tokio_io;
 extern crate futures;
 use std::io::{self, Read, Write};
-use std::net::{TcpStream, Shutdown};
+use std::net::{TcpStream, Shutdown, SocketAddr};
 use std::sync::Arc;
 use self::futures::{Stream,  Future, Poll};
 use self::futures::sync::mpsc;
@@ -11,6 +11,11 @@ use self::tokio_core::reactor::{Core, Handle};
 use self::tokio_io::io as tio;
 use self::tokio_io::{AsyncRead, AsyncWrite};
 
+
+pub trait ProxyServer {
+    fn tag(&self) -> &str;
+    fn connect(&self, addr: SocketAddr) -> io::Result<TcpStream>;
+}
 
 pub fn piping_worker(rx: mpsc::Receiver<(TcpStream, TcpStream)>) {
     let mut core = Core::new().unwrap();

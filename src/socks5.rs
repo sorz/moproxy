@@ -1,55 +1,67 @@
-extern crate rand;
-use std::net::{TcpStream, SocketAddrV4};
+use std::fmt;
+use std::time::Duration;
+use std::net::{TcpStream, SocketAddr, IpAddr};
 use std::io::{self, Write, Read};
-use std::time::{Instant, Duration};
+use ::proxy::ProxyServer;
 
-pub fn handshake(stream: &mut TcpStream, addr: SocketAddrV4)
-        -> io::Result<()> {
-    let mut buffer = Vec::with_capacity(13);
-    buffer.write(&[5, 1, 0])?;
-    buffer.write(&[5, 1, 0, 1])?;
-    buffer.write(&addr.ip().octets())?;
-    let port = addr.port();
-    buffer.push((port >> 8) as u8);
-    buffer.push(port as u8);
-    //println!("{:?}", &buffer);
-    stream.write_all(&buffer)?;
 
-    let mut buffer = [0; 12];
-    stream.read_exact(&mut buffer)?;
-    Ok(())
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub struct Socks5Server {
+    tag: String,
+    addr: SocketAddr,
 }
 
-pub fn alive_test(server: SocketAddrV4) -> io::Result<u32> {
-    let request = [
-        0, 17,  // length
-        rand::random(), rand::random(),  // transaction ID
-        1, 32,  // standard query
-        0, 1,  // one query
-        0, 0,  // answer
-        0, 0,  // authority
-        0, 0,  // addition
-        0,     // query: root
-        0, 1,  // query: type A
-        0, 1,  // query: class IN
-    ];
-    
-    let mut socks = TcpStream::connect(server)?;
-    socks.set_nodelay(true)?;
-    socks.set_read_timeout(Some(Duration::from_secs(5)))?;
-    socks.set_write_timeout(Some(Duration::from_secs(5)))?;
-    handshake(&mut socks, "8.8.8.8:53".parse().unwrap())?;
+impl Socks5Server {
+    pub fn new(addr: SocketAddr) -> Socks5Server {
+        let tag = format!("{}", addr.port());
+        Socks5Server {
+            tag: tag,
+            addr: addr,
+        }
+    }
+}
 
-    socks.write_all(&request)?;
+impl fmt::Display for Socks5Server {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} (SOCKSv5 {})", self.tag, self.addr)
+    }
+}
 
-    let mut buffer = [0; 128];
-    let now = Instant::now();
-    let n = socks.read(&mut buffer)?;
-    if n > 4 && buffer[2..3] == request[2..3] {
-        let delay = now.elapsed();
-        Ok(delay.as_secs() as u32 * 1000 + delay.subsec_nanos() / 1_000_000)
-    } else {
-        Err(io::Error::new(io::ErrorKind::Other, "unknown response"))
+impl ProxyServer for Socks5Server {
+    fn tag(&self) -> &str {
+        &self.tag
+    }
+
+    fn connect(&self, addr: SocketAddr) -> io::Result<TcpStream> {
+        let mut stream = TcpStream::connect(self.addr)?;
+        stream.set_nodelay(true)?;
+        stream.set_read_timeout(Some(Duration::from_millis(100)))?;
+        stream.set_write_timeout(Some(Duration::from_millis(100)))?;
+
+        let mut buffer = Vec::with_capacity(13);
+        buffer.write(&[5, 1, 0])?;
+        buffer.write(&[5, 1, 0])?;
+        match addr.ip() {
+            IpAddr::V4(ip) => {
+                buffer.write(&[0x01])?;
+                buffer.write(&ip.octets())?;
+            }
+            IpAddr::V6(ip) => {
+                buffer.write(&[0x04])?;
+                buffer.write(&ip.octets())?;
+            }
+        };
+        let port = addr.port();
+        buffer.push((port >> 8) as u8);
+        buffer.push(port as u8);
+        //println!("{:?}", &buffer);
+        stream.write_all(&buffer)?;
+
+        let mut buffer = [0; 12];
+        stream.read_exact(&mut buffer)?;
+        stream.set_read_timeout(None)?;
+        stream.set_write_timeout(None)?;
+        Ok(stream)
     }
 }
 

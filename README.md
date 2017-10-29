@@ -31,6 +31,29 @@ servers.
 It's also a personal practice on Rust language. (The first workable program
 I have written in Rust (
 
+## Usage
+
+Print usage:
+```bash
+moproxy --help
+```
+Examples:
+
+Assume there are three SOCKSv5 servers on `localhost:2001`, `localhost:2002`,
+and `localhost:2003`, and two HTTP proxy servers listen on `localhost:3128`
+and `192.0.2.0:3128`.
+Following commands forward all TCP connections that connect to 80 and 443 to
+these proxy servers.
+
+```bash
+moproxy --port 2080 --socks5 2001 2002 2003 --http 3128 192.0.2.0:3128
+
+# redirect local-initiated connections
+iptables -t nat -A OUTPUT -p tcp -m multiport --dports 80,443 -j REDIRECT --to-port 2080
+# redirect connections initiated by other hosts (if you are router)
+iptables -t nat -A PREROUTING -p tcp -m multiport --dports 80,443 -j REDIRECT --to-port 2080
+```
+
 ## Details
 
 ### Latency probing

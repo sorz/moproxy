@@ -125,7 +125,11 @@ fn connect_server(client: TcpStream, servers: &Arc<ServerList>)
 
 
 fn get_original_dest(fd: RawFd) -> io::Result<SocketAddr> {
-    let addr = socket::getsockopt(fd, socket::sockopt::OriginalDst)?;
+    let addr = socket::getsockopt(fd, socket::sockopt::OriginalDst)
+        .map_err(|e| match e {
+            nix::Error::Sys(err) => io::Error::from(err),
+            _ => io::Error::new(ErrorKind::Other, e),
+        })?;
     let addr = SocketAddrV4::new(addr.sin_addr.s_addr.to_be().into(),
                                  addr.sin_port.to_be());
     // TODO: support IPv6

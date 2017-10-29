@@ -35,8 +35,9 @@ impl ProxyServer for HttpProxyServer {
     fn connect(&self, addr: SocketAddr) -> io::Result<TcpStream> {
         let mut stream = TcpStream::connect(self.addr)?;
         stream.set_nodelay(true)?;
-        stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-        stream.set_write_timeout(Some(Duration::from_secs(1)))?;
+        // FIXME: would block accepting connections
+        stream.set_read_timeout(Some(Duration::from_secs(1)))?;
+        stream.set_write_timeout(Some(Duration::from_millis(100)))?;
         debug!("creating proxy tunnel to {} via {}", addr, self.tag());
 
         let host = match addr {
@@ -44,7 +45,9 @@ impl ProxyServer for HttpProxyServer {
             SocketAddr::V6(s) => format!("[{}]:{}", s.ip(), s.port()),
         };
         let request = format!(
-            "CONNECT {host} HTTP/1.1\r\nHost: {host}\r\n\r\n",
+            "CONNECT {host} HTTP/1.1\r\n\
+            Host: {host}\r\n\
+            Connection: close\r\n\r\n",
             host=host
         );
         stream.write_all(request.as_bytes())?;

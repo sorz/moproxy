@@ -22,8 +22,9 @@ use futures::{Sink, Future};
 use nix::sys::socket;
 use simplelog::{SimpleLogger, LogLevelFilter};
 use moproxy::monitor::{self, ServerList};
-use moproxy::socks5::Socks5Server;
 use moproxy::proxy::{self, ProxyServer};
+use moproxy::socks5::Socks5Server;
+use moproxy::http::HttpProxyServer;
 
 
 fn main() {
@@ -52,16 +53,19 @@ fn main() {
         .expect("cannot bind to port");
     info!("listen on {}:{}", host, port);
 
-    let mut servers = vec![];
-    for addr in args.values_of("servers").expect("missing server list") {
-        let addr = if addr.contains(":") {
-            addr.parse()
-        } else {
-            format!("127.0.0.1:{}", addr).parse()
-        }.expect("not a valid server address");
-        let server = Socks5Server::new(addr);
-        debug!("server {} added", server);
-        servers.push(Box::new(server) as Box<ProxyServer>);
+    let mut servers: Vec<Box<ProxyServer>> = vec![];
+    if let Some(s) = args.values_of("socks5-servers") {
+        for s in s.map(parse_server) {
+            servers.push(Box::new(Socks5Server::new(s)));
+        }
+    }
+    if let Some(s) = args.values_of("http-servers") {
+        for s in s.map(parse_server) {
+            servers.push(Box::new(HttpProxyServer::new(s)));
+        }
+    }
+    if servers.len() == 0 {
+        panic!("missing server list");
     }
     info!("total {} server(s) added", servers.len());
     let servers = Arc::new(ServerList::new(servers));
@@ -87,6 +91,14 @@ fn main() {
             }
         };
     }
+}
+
+fn parse_server(addr: &str) -> SocketAddr {
+    if addr.contains(":") {
+        addr.parse()
+    } else {
+        format!("127.0.0.1:{}", addr).parse()
+    }.expect("not a valid server address")
 }
 
 fn io_error<E: Into<Box<Error + Send + Sync>>>(e: E) -> io::Error {

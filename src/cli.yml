@@ -17,13 +17,19 @@ args:
         help: port number to bind on
         takes_value: true
         required: true
-    - servers:
-        short: l
-        long: servers
-        value_name: SERVER-LIST
+    - socks5-servers:
+        short: s
+        long: socks5
+        value_name: SOCKS5-SERVERS
         help: SOCKSv5 server list. IP address can omit for localhost.
         takes_value: true
-        required: true
+        multiple: true
+    - http-servers:
+        short: t
+        long: http
+        value_name: HTTP-SERVERS
+        help: HTTP proxy server list. IP address can omit for localhost.
+        takes_value: true
         multiple: true
     - probe-secs:
         short: i

@@ -2,48 +2,79 @@ extern crate rand;
 use std;
 use std::thread;
 use std::time::{Instant, Duration};
-use std::sync::{Mutex, Arc};
-use std::collections::HashMap;
+use std::sync::{Mutex, Arc, MutexGuard};
 use std::io::{self, Write, Read};
 use self::rand::Rng;
-use std::hash::Hash;
 use ::proxy::ProxyServer;
 
-pub fn monitoring_servers<S>(servers: Arc<Mutex<Vec<S>>>,
-                          probe: u64)
-where S: ProxyServer + Hash + Eq + Clone {
-    let mut rng = rand::thread_rng();
-    let mut avg_delay = HashMap::new();
-    for server in servers.lock().unwrap().iter() {
-        avg_delay.insert(server.clone(), None);
+
+#[derive(Clone)]
+pub struct ServerInfo<'a> {
+    pub server: Arc<Box<ProxyServer + 'a>>,
+    pub delay: Option<u32>,
+}
+
+pub struct ServerList<'a> {
+    inner: Mutex<Vec<ServerInfo<'a>>>,
+}
+
+impl<'a> ServerList<'a> {
+    pub fn new(servers: Vec<Box<ProxyServer>>) -> ServerList<'a> {
+        let mut infos: Vec<ServerInfo> = vec![];
+        for s in servers {
+            let info = ServerInfo {
+                server: Arc::new(s),
+                delay: None,
+            };
+            infos.push(info);
+        }
+        ServerList {
+            inner: Mutex::new(infos),
+        }
     }
-    for (server, delay) in avg_delay.iter_mut() {
-        *delay = alive_test(server).ok();
+
+    pub fn get(&self) -> MutexGuard<Vec<ServerInfo<'a>>> {
+        self.inner.lock().unwrap()
+    }
+
+    fn set(&self, infos: Vec<ServerInfo<'a>>) {
+        *self.inner.lock().unwrap() = infos;
+    }
+}
+
+pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64) {
+    let mut rng = rand::thread_rng();
+    let mut infos = servers.get().clone();
+    for info in infos.iter_mut() {
+        info.delay = alive_test(&**info.server).ok();
     }
 
     loop {
         debug!("probing started");
-        for (server, delay) in avg_delay.iter_mut() {
-            *delay = match alive_test(server) {
+        for info in infos.iter_mut() {
+            info.delay = match alive_test(&**info.server) {
                 Ok(t) => {
-                    debug!("{} up: {}ms", server.tag(), t);
-                    Some((delay.unwrap_or(t + 1000) * 9 + t) / 10)
+                    debug!("{} up: {}ms", info.server.tag(), t);
+                    Some((info.delay.unwrap_or(t + 1000) * 9 + t) / 10)
                 },
                 Err(e) => {
-                    debug!("{} down: {}", server.tag(), e);
+                    debug!("{} down: {}", info.server.tag(), e);
                     None
                 }
             };
         }
 
-        servers.lock().unwrap().sort_by_key(|s|
-            avg_delay.get(s).unwrap().unwrap_or(std::u32::MAX - 50)
-            + (rng.next_u32() % 20));
+        infos.sort_by_key(|info|
+              info.delay.unwrap_or(std::u32::MAX - 50) +
+              (rng.next_u32() % 20));
+        servers.set(infos.clone());
 
         let mut stats = String::new();
-        for s in servers.lock().unwrap().iter().take(5) {
-            stats += format!(" {}: {}ms,", s.tag(),
-                avg_delay.get(s).unwrap().unwrap_or(0)).as_str();
+        for info in infos.iter().take(5) {
+            stats += &match info.delay {
+                None => format!(" {}: --,", info.server.tag()),
+                Some(t) => format!(" {}: {}ms,", info.server.tag(), t),
+            };
         }
         stats.pop();
         info!("average delay:{}", stats);
@@ -52,7 +83,7 @@ where S: ProxyServer + Hash + Eq + Clone {
     }
 }
 
-pub fn alive_test<T: ProxyServer>(server: &T) -> io::Result<u32> {
+pub fn alive_test(server: &ProxyServer) -> io::Result<u32> {
     let request = [
         0, 17,  // length
         rand::random(), rand::random(),  // transaction ID

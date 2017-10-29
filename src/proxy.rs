@@ -1,6 +1,7 @@
 extern crate tokio_core;
 extern crate tokio_io;
 extern crate futures;
+use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, Shutdown, SocketAddr};
 use std::sync::Arc;
@@ -12,7 +13,7 @@ use self::tokio_io::io as tio;
 use self::tokio_io::{AsyncRead, AsyncWrite};
 
 
-pub trait ProxyServer {
+pub trait ProxyServer: Send + Sync + fmt::Display {
     fn tag(&self) -> &str;
     fn connect(&self, addr: SocketAddr) -> io::Result<TcpStream>;
 }

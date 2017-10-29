@@ -9,20 +9,19 @@ extern crate clap;
 #[macro_use]
 extern crate log;
 extern crate moproxy;
-use std::fmt;
 use std::net::{TcpListener, TcpStream, SocketAddr, SocketAddrV4};
 use std::io::{self, ErrorKind};
 use std::error::Error;
 use std::os::unix::io::{RawFd, AsRawFd};
 use std::thread;
-use std::sync::{Mutex, Arc};
+use std::sync::Arc;
 use std::time::Duration;
 use net2::TcpStreamExt;
 use futures::sync::mpsc;
 use futures::{Sink, Future};
 use nix::sys::socket;
 use simplelog::{SimpleLogger, LogLevelFilter};
-use moproxy::monitor;
+use moproxy::monitor::{self, ServerList};
 use moproxy::socks5::Socks5Server;
 use moproxy::proxy::{self, ProxyServer};
 
@@ -62,11 +61,11 @@ fn main() {
         }.expect("not a valid server address");
         let server = Socks5Server::new(addr);
         debug!("server {} added", server);
-        servers.push(server);
+        servers.push(Box::new(server) as Box<ProxyServer>);
     }
     info!("total {} server(s) added", servers.len());
+    let servers = Arc::new(ServerList::new(servers));
 
-    let servers = Arc::new(Mutex::new(servers));
     {
         let probe = args.value_of("probe-secs")
             .expect("missing probe secs").parse()
@@ -94,11 +93,10 @@ fn io_error<E: Into<Box<Error + Send + Sync>>>(e: E) -> io::Error {
     io::Error::new(ErrorKind::Other, e)
 }
 
-fn connect_server<S>(client: TcpStream, servers: &Arc<Mutex<Vec<S>>>)
-        -> io::Result<(TcpStream, TcpStream)>
-where S: ProxyServer + fmt::Display {
+fn connect_server(client: TcpStream, servers: &Arc<ServerList>)
+        -> io::Result<(TcpStream, TcpStream)> {
     let dest = get_original_dest(client.as_raw_fd())?;
-    for server in servers.lock().unwrap().iter() {
+    for server in servers.get().iter().map(|info| &info.server) {
         match server.connect(dest) {
             Ok(server) => {
                 info!("{} => {} via :{}", client.peer_addr()?,
@@ -107,7 +105,7 @@ where S: ProxyServer + fmt::Display {
                 client.set_keepalive(Some(Duration::from_secs(180)))?;
                 return Ok((client, server));
             },
-            Err(_) => warn!("fail to connect {}", server),
+            Err(_) => warn!("fail to connect {}", server.tag()),
         }
     }
     Err(io_error("all socks server down"))

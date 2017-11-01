@@ -22,31 +22,47 @@ pub fn piping_worker(rx: mpsc::Receiver<(TcpStream, TcpStream)>) {
     let mut core = Core::new().unwrap();
     let handle = core.handle();
     let server = rx.for_each(|(local, remote)| {
-        let local_r = HalfTcpStream::new(local, &handle)
-            .expect("cannot create asycn tcp stream");
-        let remote_r = HalfTcpStream::new(remote, &handle)
-            .expect("cannot create asycn tcp stream");
-        let local_w = local_r.clone();
-        let remote_w = remote_r.clone();
-
-        let to_remote = tio::copy(local_r, remote_w)
-            .and_then(|(n, _, remote_w)| {
-                tio::shutdown(remote_w).map(move |_| n)
-            });
-        let to_local = tio::copy(remote_r, local_w)
-            .and_then(|(n, _, local_w)| {
-                tio::shutdown(local_w).map(move |_| n)
-            });
-
-        let piping = to_remote.join(to_local)
-            .map(|(tx, rx)| debug!("tx {}, rx {} bytes", tx, rx))
-            .map_err(|e| warn!("piping error: {}", e));
-        handle.spawn(piping);
+        let local = match tnet::TcpStream::from_stream(local, &handle) {
+            Ok(s) => s,
+            Err(_) => {
+                warn!("cannot create asycn tcp stream");
+                return Ok(());
+            },
+        };
+        let remote = match tnet::TcpStream::from_stream(remote, &handle) {
+            Ok(s) => s,
+            Err(_) => {
+                warn!("cannot create asycn tcp stream");
+                return Ok(());
+            },
+        };
+        handle.spawn(piping(local, remote));
         Ok(())
     });
     core.run(server).unwrap();
 }
 
+pub fn piping(local: tnet::TcpStream, remote: tnet::TcpStream)
+        -> Box<Future<Item=(), Error=()>> {
+    let local_r = HalfTcpStream::new(local);
+    let remote_r = HalfTcpStream::new(remote);
+    let local_w = local_r.clone();
+    let remote_w = remote_r.clone();
+
+    let to_remote = tio::copy(local_r, remote_w)
+        .and_then(|(n, _, remote_w)| {
+            tio::shutdown(remote_w).map(move |_| n)
+        });
+    let to_local = tio::copy(remote_r, local_w)
+        .and_then(|(n, _, local_w)| {
+            tio::shutdown(local_w).map(move |_| n)
+        });
+
+    let piping = to_remote.join(to_local)
+        .map(|(tx, rx)| debug!("tx {}, rx {} bytes", tx, rx))
+        .map_err(|e| warn!("piping error: {}", e));
+    Box::new(piping)
+}
 
 // The default `AsyncWrite::shutdown` for TcpStream does nothing.
 // Here overrite it to shutdown write half of TCP connection.
@@ -56,11 +72,8 @@ pub fn piping_worker(rx: mpsc::Receiver<(TcpStream, TcpStream)>) {
 struct HalfTcpStream(Arc<tnet::TcpStream>);
 
 impl HalfTcpStream {
-    fn new(stream: TcpStream, handle: &Handle) -> io::Result<HalfTcpStream> {
-        match tnet::TcpStream::from_stream(stream, handle) {
-            Ok(s) => Ok(HalfTcpStream(Arc::new(s))),
-            Err(e) => Err(e),
-        }
+    fn new(stream: tnet::TcpStream) -> HalfTcpStream {
+        HalfTcpStream(Arc::new(stream))
     }
 }
 

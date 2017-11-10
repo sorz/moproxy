@@ -9,17 +9,17 @@ use ::proxy::ProxyServer;
 
 
 #[derive(Clone)]
-pub struct ServerInfo<'a> {
-    pub server: Arc<Box<ProxyServer + 'a>>,
+pub struct ServerInfo {
+    pub server: Arc<Box<ProxyServer + 'static>>,
     pub delay: Option<u32>,
 }
 
-pub struct ServerList<'a> {
-    inner: Mutex<Vec<ServerInfo<'a>>>,
+pub struct ServerList {
+    inner: Mutex<Vec<ServerInfo>>,
 }
 
-impl<'a> ServerList<'a> {
-    pub fn new(servers: Vec<Box<ProxyServer>>) -> ServerList<'a> {
+impl ServerList {
+    pub fn new(servers: Vec<Box<ProxyServer>>) -> ServerList {
         let mut infos: Vec<ServerInfo> = vec![];
         for s in servers {
             let info = ServerInfo {
@@ -33,11 +33,11 @@ impl<'a> ServerList<'a> {
         }
     }
 
-    pub fn get(&self) -> MutexGuard<Vec<ServerInfo<'a>>> {
+    pub fn get(&self) -> MutexGuard<Vec<ServerInfo>> {
         self.inner.lock().unwrap()
     }
 
-    fn set(&self, infos: Vec<ServerInfo<'a>>) {
+    fn set(&self, infos: Vec<ServerInfo>) {
         *self.inner.lock().unwrap() = infos;
     }
 }

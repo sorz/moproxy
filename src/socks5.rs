@@ -54,9 +54,6 @@ impl ProxyServer for Socks5Server {
         stream.set_write_timeout(None)?;
         Ok(stream)
     }
-}
-
-impl Socks5Server {
 
     fn connect_async(&self, addr: SocketAddr, handle: Handle)
             -> Box<Future<Item=tnet::TcpStream, Error=io::Error>> {
@@ -64,7 +61,7 @@ impl Socks5Server {
         Box::new(conn.and_then(move |stream| {
             if let Err(e) = stream.set_nodelay(true) {
                 warn!("fail to set nodelay: {}", e);
-            }
+            };
             write_all(stream, build_request(&addr))
         }).and_then(|(stream, _)| {
             read_exact(stream, vec![0; 12])

@@ -1,7 +1,13 @@
+extern crate tokio_core;
+extern crate tokio_io;
+extern crate futures;
 use std::fmt;
 use std::time::Duration;
 use std::net::{TcpStream, SocketAddr};
 use std::io::{self, Write, BufReader, BufRead, ErrorKind};
+use self::futures::{future, Future};
+use self::tokio_core::reactor::{Handle, Timeout};
+use self::tokio_core::net as tnet;
 use ::proxy::ProxyServer;
 
 
@@ -74,6 +80,11 @@ impl ProxyServer for HttpProxyServer {
         stream.set_read_timeout(None)?;
         stream.set_write_timeout(None)?;
         Ok(stream)
+    }
+
+    fn connect_async(&self, addr: SocketAddr, handle: Handle)
+            -> Box<Future<Item=tnet::TcpStream, Error=io::Error>> {
+        unimplemented!()
     }
 }
 

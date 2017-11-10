@@ -9,16 +9,16 @@ extern crate clap;
 #[macro_use]
 extern crate log;
 extern crate moproxy;
-use std::net::{TcpListener, TcpStream, SocketAddr, SocketAddrV4};
+use std::net::{TcpStream, SocketAddr, SocketAddrV4};
 use std::io::{self, ErrorKind};
-use std::error::Error;
 use std::os::unix::io::{RawFd, AsRawFd};
 use std::thread;
 use std::sync::Arc;
 use std::time::Duration;
 use net2::TcpStreamExt;
-use futures::sync::mpsc;
-use futures::{Sink, Future};
+use futures::{future, Future, Stream};
+use tokio_core::net as tnet;
+use tokio_core::reactor::{Core, Handle};
 use nix::sys::socket;
 use simplelog::{SimpleLogger, LogLevelFilter};
 use moproxy::monitor::{self, ServerList};
@@ -45,13 +45,12 @@ fn main() {
         .expect("cannot set logger");
 
     let host = args.value_of("host")
-        .expect("missing host");
+        .expect("missing host").parse()
+        .expect("invalid address");
     let port = args.value_of("port")
         .expect("missing port number").parse()
         .expect("invalid port number");
-    let listener = TcpListener::bind((host, port))
-        .expect("cannot bind to port");
-    info!("listen on {}:{}", host, port);
+    let addr = SocketAddr::new(host, port);
 
     let mut servers: Vec<Box<ProxyServer>> = vec![];
     if let Some(s) = args.values_of("socks5-servers") {
@@ -78,19 +77,24 @@ fn main() {
         thread::spawn(move || monitor::monitoring_servers(servers, probe));
     }
 
-    let (tx, rx) = mpsc::channel(1);
-    thread::spawn(move || proxy::piping_worker(rx));
+    //let (tx, rx) = mpsc::channel(1);
+    //thread::spawn(move || proxy::piping_worker(rx));
 
-    for client in listener.incoming() {
-        match client.and_then(|c| connect_server(c, &servers)) {
-            Ok(pair) => tx.clone().send(pair).wait()
-                .expect("fail send to piping thread"),
-            Err(e) => {
-                warn!("error: {}", e);
-                continue;
-            }
-        };
-    }
+    let mut lp = Core::new().expect("fail to create event loop");
+    let handle = lp.handle();
+
+    let listener = tnet::TcpListener::bind(&addr, &handle)
+        .expect("cannot bind to port");
+    info!("listen on {}", addr);
+    let server = listener.incoming().for_each(move |(client, addr)| {
+        debug!("incoming {}", addr);
+        let conn = connect_server(client, servers.clone(), handle.clone());
+        let serv = conn.and_then(|(client, proxy)|
+                                 proxy::piping(client, proxy));
+        handle.spawn(serv);
+        Ok(())
+    });
+    lp.run(server).expect("fail to start event loop");
 }
 
 fn parse_server(addr: &str) -> SocketAddr {
@@ -101,11 +105,35 @@ fn parse_server(addr: &str) -> SocketAddr {
     }.expect("not a valid server address")
 }
 
-fn io_error<E: Into<Box<Error + Send + Sync>>>(e: E) -> io::Error {
-    io::Error::new(ErrorKind::Other, e)
+fn connect_server(client: tnet::TcpStream, servers: Arc<ServerList>,
+                  handle: Handle)
+        -> Box<Future<Item=(tnet::TcpStream, tnet::TcpStream), Error=()>> {
+    let orig = client.peer_addr().ok();
+    let dest = future::result(get_original_dest(client.as_raw_fd()))
+            .map_err(|err| warn!("fail to get original destination."));
+    let try_connect_all = dest.and_then(move |dest| {
+        let conns: Vec<Box<Future<Item=tnet::TcpStream, Error=()>>>
+        = servers.get().iter().map(|info| info.server.clone()).map(|server| {
+            let s1 = server.clone();
+            let s2 = server.clone();
+            let conn = server.connect_async(dest, handle.clone())
+                .map_err(move |err|
+                         warn!("fail to connect {}: {}", s1.tag(), err))
+                .and_then(move |conn| {
+                    let orig = orig.map_or_else(
+                            || String::from("(?)"), |o| o.to_string());
+                    info!("{} => {} via {}", orig, dest, s2.tag());
+                    future::ok(conn)
+                });
+            Box::new(conn) as Box<Future<Item=tnet::TcpStream, Error=()>>
+        }).collect();
+        future::select_ok(conns)
+    }).map(|(server, _)| (client, server));
+    Box::new(try_connect_all)
 }
 
-fn connect_server(client: TcpStream, servers: &Arc<ServerList>)
+/*
+fn connect_server_(client: TcpStream, servers: &Arc<ServerList>)
         -> io::Result<(TcpStream, TcpStream)> {
     let dest = get_original_dest(client.as_raw_fd())?;
     for server in servers.get().iter().map(|info| &info.server) {
@@ -120,8 +148,9 @@ fn connect_server(client: TcpStream, servers: &Arc<ServerList>)
             Err(_) => warn!("fail to connect {}", server.tag()),
         }
     }
-    Err(io_error("all socks server down"))
+    //Err(io_error("all socks server down"))
 }
+*/
 
 
 fn get_original_dest(fd: RawFd) -> io::Result<SocketAddr> {

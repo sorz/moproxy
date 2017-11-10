@@ -5,7 +5,7 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, Shutdown, SocketAddr};
 use std::sync::Arc;
-use self::futures::{Stream,  Future, Poll};
+use self::futures::{Stream, Future, Poll};
 use self::futures::sync::mpsc;
 use self::tokio_core::net as tnet;
 use self::tokio_core::reactor::{Core, Handle};
@@ -16,6 +16,8 @@ use self::tokio_io::{AsyncRead, AsyncWrite};
 pub trait ProxyServer: Send + Sync + fmt::Display {
     fn tag(&self) -> &str;
     fn connect(&self, addr: SocketAddr) -> io::Result<TcpStream>;
+    fn connect_async(&self, addr: SocketAddr, handle: Handle)
+            -> Box<Future<Item=tnet::TcpStream, Error=io::Error>>;
 }
 
 pub fn piping_worker(rx: mpsc::Receiver<(TcpStream, TcpStream)>) {

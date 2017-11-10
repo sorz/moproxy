@@ -3,6 +3,7 @@ extern crate net2;
 extern crate futures;
 extern crate tokio_core;
 extern crate tokio_io;
+extern crate tokio_timer;
 extern crate simplelog;
 #[macro_use]
 extern crate clap;
@@ -16,8 +17,9 @@ use std::thread;
 use std::sync::Arc;
 use std::time::Duration;
 use futures::{future, Future, Stream};
-use tokio_core::net as tnet;
+use tokio_core::net::{TcpListener, TcpStream};
 use tokio_core::reactor::{Core, Handle};
+use tokio_timer::Timer;
 use nix::sys::socket;
 use simplelog::{SimpleLogger, LogLevelFilter};
 use moproxy::monitor::{self, ServerList};
@@ -79,7 +81,7 @@ fn main() {
     let mut lp = Core::new().expect("fail to create event loop");
     let handle = lp.handle();
 
-    let listener = tnet::TcpListener::bind(&addr, &handle)
+    let listener = TcpListener::bind(&addr, &handle)
         .expect("cannot bind to port");
     info!("listen on {}", addr);
     let server = listener.incoming().for_each(move |(client, addr)| {
@@ -108,19 +110,21 @@ fn parse_server(addr: &str) -> SocketAddr {
     }.expect("not a valid server address")
 }
 
-fn connect_server(client: tnet::TcpStream, servers: Arc<ServerList>,
-                  handle: Handle)
-        -> Box<Future<Item=(tnet::TcpStream, tnet::TcpStream), Error=()>> {
+fn connect_server(client: TcpStream, servers: Arc<ServerList>, handle: Handle)
+        -> Box<Future<Item=(TcpStream, TcpStream), Error=()>> {
     let orig = client.peer_addr().ok();
     let dest = future::result(get_original_dest(client.as_raw_fd()))
             .map_err(|err| warn!("fail to get original destination: {}", err));
+    // TODO: reuse timer?
+    let timer = Timer::default();
     let try_connect_all = dest.and_then(move |dest| {
-        let conns: Vec<Box<Future<Item=tnet::TcpStream, Error=()>>> = servers
+        let conns: Vec<Box<Future<Item=TcpStream, Error=()>>> = servers
             .get().iter()
             .map(|info| info.server.clone())
             .map(|server| {
                 let s1 = server.clone();
                 let s2 = server.clone();
+                let s3 = server.clone();
                 let conn = server.connect_async(dest, handle.clone())
                     .map_err(move |err|
                              warn!("fail to connect {}: {}", s1.tag(), err))
@@ -130,7 +134,11 @@ fn connect_server(client: tnet::TcpStream, servers: Arc<ServerList>,
                         info!("{} => {} via {}", orig, dest, s2.tag());
                         future::ok(conn)
                     });
-                Box::new(conn) as Box<Future<Item=tnet::TcpStream, Error=()>>
+                // TODO: configurable timeout
+                let try = timer.timeout(conn, Duration::from_secs(5))
+                    .map_err(move |_|
+                            warn!("fail to connect {}: timeout", s3.tag()));
+                Box::new(try) as Box<Future<Item=TcpStream, Error=()>>
             }).collect();
         future::select_ok(conns)
     }).map(|(server, _)| (client, server))

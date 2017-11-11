@@ -1,10 +1,18 @@
 extern crate rand;
+extern crate tokio_core;
+extern crate tokio_io;
+extern crate tokio_timer;
+extern crate futures;
 use std;
 use std::thread;
 use std::time::{Instant, Duration};
 use std::sync::{Mutex, Arc, MutexGuard};
 use std::io::{self, Write, Read};
 use self::rand::Rng;
+use self::tokio_timer::Timer;
+use self::tokio_core::reactor::Handle;
+use self::tokio_io::io::{write_all, read_exact};
+use self::futures::{future, Future};
 use ::proxy::ProxyServer;
 
 
@@ -42,12 +50,14 @@ impl ServerList {
     }
 }
 
-pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64) {
+pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64)
+        -> Box<Future<Item=(), Error=()>> {
     let mut rng = rand::thread_rng();
     let mut infos = servers.get().clone();
     for info in infos.iter_mut() {
         info.delay = alive_test(&**info.server).ok();
     }
+    // TODO: refactor to async
 
     loop {
         debug!("probing started");
@@ -83,7 +93,8 @@ pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64) {
     }
 }
 
-pub fn alive_test(server: &ProxyServer) -> io::Result<u32> {
+pub fn alive_test(server: &ProxyServer, handle: Handle)
+        -> Box<Future<Item=u32, Error=io::Error>> {
     let request = [
         0, 17,  // length
         rand::random(), rand::random(),  // transaction ID
@@ -96,21 +107,31 @@ pub fn alive_test(server: &ProxyServer) -> io::Result<u32> {
         0, 1,  // query: type A
         0, 1,  // query: class IN
     ];
+    let tid = (request[2] as u16) << 8 | (request[3] as u16);
 
-    let mut socks = server.connect("8.8.8.8:53".parse().unwrap())?;
-    socks.set_read_timeout(Some(Duration::from_secs(5)))?;
-    socks.set_write_timeout(Some(Duration::from_secs(5)))?;
-
-    socks.write_all(&request)?;
-
-    let mut buffer = [0; 128];
+    // TODO: reuse timer?
+    let timer = Timer::default();
     let now = Instant::now();
-    let n = socks.read(&mut buffer)?;
-    if n > 4 && buffer[2..3] == request[2..3] {
-        let delay = now.elapsed();
-        Ok(delay.as_secs() as u32 * 1000 + delay.subsec_nanos() / 1_000_000)
-    } else {
-        Err(io::Error::new(io::ErrorKind::Other, "unknown response"))
-    }
+    let addr = "8.8.8.8:53".parse().unwrap();
+    let conn = server.connect_async(addr, handle);
+    let try_conn = timer.timeout(conn, Duration::from_secs(5))
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut,
+                                    "handshake timed out"));
+    let query = try_conn.and_then(move |stream| {
+        write_all(stream, request)
+    }).and_then(|(stream, _)| {
+        read_exact(stream, [0u8; 12])
+    }).and_then(move |(stream, buf)| {
+        let resp_tid = (buf[2] as u16) << 8 | (buf[3] as u16);
+        if resp_tid == tid {
+            let delay = now.elapsed();
+            future::ok(delay.as_secs() as u32 * 1000 +
+                       delay.subsec_nanos() / 1_000_000)
+        } else {
+            future::err(io::Error::new(io::ErrorKind::Other,
+                                       "unknown response"))
+        }
+    });
+    Box::new(query)
 }
 

@@ -69,14 +69,9 @@ fn main() {
     }
     info!("total {} server(s) added", servers.len());
     let servers = Arc::new(ServerList::new(servers));
-
-    {
-        let probe = args.value_of("probe-secs")
-            .expect("missing probe secs").parse()
-            .expect("not a vaild probe secs");
-        let servers = servers.clone();
-        thread::spawn(move || monitor::monitoring_servers(servers, probe));
-    }
+    let probe = args.value_of("probe-secs")
+        .expect("missing probe secs").parse()
+        .expect("not a vaild probe secs");
 
     let mut lp = Core::new().expect("fail to create event loop");
     let handle = lp.handle();
@@ -84,6 +79,9 @@ fn main() {
     let listener = TcpListener::bind(&addr, &handle)
         .expect("cannot bind to port");
     info!("listen on {}", addr);
+    let mon = monitor::monitoring_servers(servers.clone(), probe, lp.handle());
+        //.then(|_| panic!("monitoring stopped unexpectedly"));
+    handle.spawn(mon);
     let server = listener.incoming().for_each(move |(client, addr)| {
         debug!("incoming {}", addr);
         let conn = connect_server(client, servers.clone(), handle.clone());

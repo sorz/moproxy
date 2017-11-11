@@ -13,6 +13,7 @@ use self::tokio_timer::Timer;
 use self::tokio_core::reactor::Handle;
 use self::tokio_io::io::{write_all, read_exact};
 use self::futures::{future, Future};
+use self::futures::stream::iter_ok;
 use ::proxy::ProxyServer;
 
 
@@ -50,29 +51,52 @@ impl ServerList {
     }
 }
 
-pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64)
+pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64,
+                          handle: Handle)
         -> Box<Future<Item=(), Error=()>> {
     let mut rng = rand::thread_rng();
-    let mut infos = servers.get().clone();
-    for info in infos.iter_mut() {
-        info.delay = alive_test(&**info.server).ok();
-    }
-    // TODO: refactor to async
+    let tests = servers.get().clone().into_iter().map(move |info| {
+        // TODO: timeout
+        alive_test(&**info.server, &handle)
+            .then(|t| future::ok(t.ok()))
+    });
+    let servers_ = servers.clone();
+    let init = future::join_all(tests).and_then(move |delays| {
+        info!("prob init done");
+        let mut infos = servers_.get().clone();
+        infos.iter_mut().zip(delays.iter()).for_each(|(info, t)| {
+            info.delay = *t;
+        });
+        infos.sort_by_key(|info|
+              info.delay.unwrap_or(std::u32::MAX - 50) +
+              (rng.next_u32() % 20));
+        servers_.set(infos.clone());
+        future::ok(infos)
+    }).map(|_| ());
+    Box::new(init)
+
+    /*
+    let infos = servers.get().clone();
+    let udpate = iter_ok(infos).for_each(|info| {
+        alive_test(info.server.clone()).then(move |delay| {
+            info.delay = match delay {
+                Ok(t) => Some((info.delay.unwrap_or(t + 1000) * 9 + t) / 10),
+                Err(e) => None,
+            };
+            future::ok(())
+        })
+    }).and_then(|_| {
+
+    let timer = Timer::default();
+    let forever = future::loop_fn(servers.clone(), move |servers| {
+        timer.sleep(Duration::from_secs(probe)).and_then(|_| {
+            
+            
+        })
+    });
 
     loop {
         debug!("probing started");
-        for info in infos.iter_mut() {
-            info.delay = match alive_test(&**info.server) {
-                Ok(t) => {
-                    debug!("{} up: {}ms", info.server.tag(), t);
-                    Some((info.delay.unwrap_or(t + 1000) * 9 + t) / 10)
-                },
-                Err(e) => {
-                    debug!("{} down: {}", info.server.tag(), e);
-                    None
-                }
-            };
-        }
 
         infos.sort_by_key(|info|
               info.delay.unwrap_or(std::u32::MAX - 50) +
@@ -90,10 +114,10 @@ pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64)
         info!("average delay:{}", stats);
 
         thread::sleep(Duration::from_secs(probe));
-    }
+    }*/
 }
 
-pub fn alive_test(server: &ProxyServer, handle: Handle)
+pub fn alive_test(server: &ProxyServer, handle: &Handle)
         -> Box<Future<Item=u32, Error=io::Error>> {
     let request = [
         0, 17,  // length

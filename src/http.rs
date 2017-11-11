@@ -72,9 +72,9 @@ impl ProxyServer for HttpProxyServer {
         Ok(stream)
     }
 
-    fn connect_async(&self, addr: SocketAddr, handle: Handle)
+    fn connect_async(&self, addr: SocketAddr, handle: &Handle)
             -> Box<Future<Item=tnet::TcpStream, Error=io::Error>> {
-        let conn = tnet::TcpStream::connect(&self.addr, &handle);
+        let conn = tnet::TcpStream::connect(&self.addr, handle);
         let request = conn.and_then(move |stream| {
             write_all(stream, build_request(&addr))
         });

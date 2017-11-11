@@ -125,7 +125,7 @@ fn connect_server(client: TcpStream, servers: Arc<ServerList>, handle: Handle)
                 let s1 = server.clone();
                 let s2 = server.clone();
                 let s3 = server.clone();
-                let conn = server.connect_async(dest, handle.clone())
+                let conn = server.connect_async(dest, &handle)
                     .map_err(move |err|
                              warn!("fail to connect {}: {}", s1.tag(), err))
                     .and_then(move |conn| {

@@ -4,16 +4,14 @@ extern crate tokio_io;
 extern crate tokio_timer;
 extern crate futures;
 use std;
-use std::thread;
 use std::time::{Instant, Duration};
 use std::sync::{Mutex, Arc, MutexGuard};
-use std::io::{self, Write, Read};
+use std::io;
 use self::rand::Rng;
 use self::tokio_timer::Timer;
 use self::tokio_core::reactor::Handle;
 use self::tokio_io::io::{write_all, read_exact};
 use self::futures::{future, Future};
-use self::futures::stream::iter_ok;
 use ::proxy::ProxyServer;
 
 
@@ -56,7 +54,6 @@ pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64,
         -> Box<Future<Item=(), Error=()>> {
     let handle_ = handle.clone();
     let tests = servers.get().clone().into_iter().map(move |info| {
-        // TODO: timeout
         alive_test(&**info.server, &handle_)
             .then(|t| future::ok(t.ok()))
     });
@@ -138,7 +135,7 @@ pub fn alive_test(server: &ProxyServer, handle: &Handle)
     let now = Instant::now();
     let addr = "8.8.8.8:53".parse().unwrap();
     let tag = String::from(server.tag());
-    let conn = server.connect_async(addr, handle);
+    let conn = server.connect(addr, handle);
     let try_conn = timer.timeout(conn, Duration::from_secs(5))
         .map_err(|_| io::Error::new(io::ErrorKind::TimedOut,
                                     "handshake timed out"));
@@ -146,7 +143,7 @@ pub fn alive_test(server: &ProxyServer, handle: &Handle)
         write_all(stream, request)
     }).and_then(|(stream, _)| {
         read_exact(stream, [0u8; 12])
-    }).and_then(move |(stream, buf)| {
+    }).and_then(move |(_, buf)| {
         let resp_tid = (buf[2] as u16) << 8 | (buf[3] as u16);
         if resp_tid == tid {
             let delay = now.elapsed();

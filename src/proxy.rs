@@ -15,8 +15,7 @@ use self::tokio_io::{AsyncRead, AsyncWrite};
 
 pub trait ProxyServer: Send + Sync + fmt::Display {
     fn tag(&self) -> &str;
-    fn connect(&self, addr: SocketAddr) -> io::Result<TcpStream>;
-    fn connect_async(&self, addr: SocketAddr, handle: &Handle)
+    fn connect(&self, addr: SocketAddr, handle: &Handle)
             -> Box<Future<Item=tnet::TcpStream, Error=io::Error>>;
 }
 

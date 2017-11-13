@@ -2,9 +2,8 @@ extern crate tokio_core;
 extern crate tokio_io;
 extern crate futures;
 use std::fmt;
-use std::time::Duration;
-use std::net::{TcpStream, SocketAddr};
-use std::io::{self, Write, Read, BufReader, BufRead, ErrorKind};
+use std::net::SocketAddr;
+use std::io::{self, Read, BufReader, ErrorKind};
 use self::futures::{future, Future};
 use self::tokio_core::reactor::Handle;
 use self::tokio_core::net as tnet;
@@ -39,40 +38,7 @@ impl ProxyServer for HttpProxyServer {
         &self.tag
     }
 
-    fn connect(&self, addr: SocketAddr) -> io::Result<TcpStream> {
-        let mut stream = TcpStream::connect(self.addr)?;
-        stream.set_nodelay(true)?;
-        stream.set_read_timeout(Some(Duration::from_secs(1)))?;
-        stream.set_write_timeout(Some(Duration::from_millis(100)))?;
-        debug!("creating proxy tunnel to {} via {}", addr, self.tag());
-
-        stream.write_all(build_request(&addr).as_bytes())?;
-
-        let mut reader = BufReader::new(stream);
-        let mut line = String::new();
-        reader.read_line(&mut line)?;
-        if !line.starts_with("HTTP/1.1 2") {
-            info!("{} return {}", self.tag(), line.trim());
-            let err = format!("proxy server return error: {}", line.trim());
-            return Err(io::Error::new(ErrorKind::Other, err));
-        }
-        loop {
-            line.clear();
-            reader.read_line(&mut line)?;
-            if line == "\r\n" || line == "\n" {
-                break;
-            }
-        }
-        // FIXME: may lost data in buffer
-        let stream = reader.into_inner();
-
-        debug!("proxy tunnel connected");
-        stream.set_read_timeout(None)?;
-        stream.set_write_timeout(None)?;
-        Ok(stream)
-    }
-
-    fn connect_async(&self, addr: SocketAddr, handle: &Handle)
+    fn connect(&self, addr: SocketAddr, handle: &Handle)
             -> Box<Future<Item=tnet::TcpStream, Error=io::Error>> {
         let conn = tnet::TcpStream::connect(&self.addr, handle);
         let request = conn.and_then(move |stream| {

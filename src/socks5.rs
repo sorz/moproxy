@@ -2,9 +2,8 @@ extern crate tokio_core;
 extern crate tokio_io;
 extern crate futures;
 use std::fmt;
-use std::time::Duration;
-use std::net::{TcpStream, SocketAddr, IpAddr};
-use std::io::{self, Write, Read};
+use std::net::{SocketAddr, IpAddr};
+use std::io::{self, Write};
 use self::futures::Future;
 use self::tokio_core::reactor::Handle;
 use self::tokio_core::net as tnet;
@@ -39,23 +38,7 @@ impl ProxyServer for Socks5Server {
         &self.tag
     }
 
-    fn connect(&self, addr: SocketAddr) -> io::Result<TcpStream> {
-        let mut stream = TcpStream::connect(self.addr)?;
-        stream.set_nodelay(true)?;
-        stream.set_read_timeout(Some(Duration::from_millis(100)))?;
-        stream.set_write_timeout(Some(Duration::from_millis(100)))?;
-
-        let request = build_request(&addr);
-        stream.write_all(&request)?;
-
-        let mut buffer = [0; 12];
-        stream.read_exact(&mut buffer)?;
-        stream.set_read_timeout(None)?;
-        stream.set_write_timeout(None)?;
-        Ok(stream)
-    }
-
-    fn connect_async(&self, addr: SocketAddr, handle: &Handle)
+    fn connect(&self, addr: SocketAddr, handle: &Handle)
             -> Box<Future<Item=tnet::TcpStream, Error=io::Error>> {
         let conn = tnet::TcpStream::connect(&self.addr, handle);
         Box::new(conn.and_then(move |stream| {

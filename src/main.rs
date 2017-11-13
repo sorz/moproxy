@@ -13,7 +13,6 @@ extern crate moproxy;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::io::{self, ErrorKind};
 use std::os::unix::io::{RawFd, AsRawFd};
-use std::thread;
 use std::sync::Arc;
 use std::time::Duration;
 use futures::{future, Future, Stream};
@@ -123,7 +122,7 @@ fn connect_server(client: TcpStream, servers: Arc<ServerList>, handle: Handle)
                 let s1 = server.clone();
                 let s2 = server.clone();
                 let s3 = server.clone();
-                let conn = server.connect_async(dest, &handle)
+                let conn = server.connect(dest, &handle)
                     .map_err(move |err|
                              warn!("fail to connect {}: {}", s1.tag(), err))
                     .and_then(move |conn| {

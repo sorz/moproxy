@@ -62,7 +62,7 @@ pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64,
     });
     let servers_ = servers.clone();
     let init = future::join_all(tests).and_then(move |delays| {
-        info!("prob init done");
+        info!("probe init done");
         let mut infos = servers_.get().clone();
         infos.iter_mut().zip(delays.iter()).for_each(|(info, t)| {
             info.delay = *t;
@@ -74,9 +74,9 @@ pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64,
     let servers_ = servers.clone();
     let handle_ = handle.clone();
     let timer = Timer::default();
-    let mut rng = rand::thread_rng();
     let update = init.and_then(move |infos| {
         future::loop_fn((infos, servers_), move |(infos, servers)| {
+            let handle_ = handle_.clone();
             timer.sleep(Duration::from_secs(probe)).map_err(|err| {
                 io::Error::new(io::ErrorKind::Other, err)
             }).and_then(move |_| {
@@ -91,29 +91,30 @@ pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64,
                         (info.delay.unwrap_or(t + 1000) * 9 + t) / 10
                     });
                 });
-                infos.sort_by_key(|info| {
+                let mut rng = rand::thread_rng();
+                infos.sort_by_key(move |info| {
                   info.delay.unwrap_or(std::u32::MAX - 50) +
                   (rng.next_u32() % 20)
                 });
                 servers.set(infos.clone());
+                info!("scores: {}", info_stats(infos.as_slice()));
                 future::ok((infos, servers))
             }).and_then(|args| Ok(future::Loop::Continue(args)))
         })
     }).map_err(|_: io::Error| ());
     Box::new(update)
-    /*
-        let mut stats = String::new();
-        for info in infos.iter().take(5) {
-            stats += &match info.delay {
-                None => format!(" {}: --,", info.server.tag()),
-                Some(t) => format!(" {}: {}ms,", info.server.tag(), t),
-            };
-        }
-        stats.pop();
-        info!("average delay:{}", stats);
+}
 
-        thread::sleep(Duration::from_secs(probe));
-    }*/
+fn info_stats(infos: &[ServerInfo]) -> String {
+    let mut stats = String::new();
+    for info in infos.iter().take(5) {
+        stats += &match info.delay {
+            None => format!(" {}: --,", info.server.tag()),
+            Some(t) => format!(" {}: {}ms,", info.server.tag(), t),
+        };
+    }
+    stats.pop();
+    stats
 }
 
 pub fn alive_test(server: &ProxyServer, handle: &Handle)

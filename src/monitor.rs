@@ -54,10 +54,10 @@ impl ServerList {
 pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64,
                           handle: Handle)
         -> Box<Future<Item=(), Error=()>> {
-    let mut rng = rand::thread_rng();
+    let handle_ = handle.clone();
     let tests = servers.get().clone().into_iter().map(move |info| {
         // TODO: timeout
-        alive_test(&**info.server, &handle)
+        alive_test(&**info.server, &handle_)
             .then(|t| future::ok(t.ok()))
     });
     let servers_ = servers.clone();
@@ -67,42 +67,41 @@ pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64,
         infos.iter_mut().zip(delays.iter()).for_each(|(info, t)| {
             info.delay = *t;
         });
-        infos.sort_by_key(|info|
-              info.delay.unwrap_or(std::u32::MAX - 50) +
-              (rng.next_u32() % 20));
+        infos.sort_by_key(|info| info.delay.unwrap_or(std::u32::MAX));
         servers_.set(infos.clone());
         future::ok(infos)
-    }).map(|_| ());
-    Box::new(init)
-
-    /*
-    let infos = servers.get().clone();
-    let udpate = iter_ok(infos).for_each(|info| {
-        alive_test(info.server.clone()).then(move |delay| {
-            info.delay = match delay {
-                Ok(t) => Some((info.delay.unwrap_or(t + 1000) * 9 + t) / 10),
-                Err(e) => None,
-            };
-            future::ok(())
-        })
-    }).and_then(|_| {
-
-    let timer = Timer::default();
-    let forever = future::loop_fn(servers.clone(), move |servers| {
-        timer.sleep(Duration::from_secs(probe)).and_then(|_| {
-            
-            
-        })
     });
-
-    loop {
-        debug!("probing started");
-
-        infos.sort_by_key(|info|
-              info.delay.unwrap_or(std::u32::MAX - 50) +
-              (rng.next_u32() % 20));
-        servers.set(infos.clone());
-
+    let servers_ = servers.clone();
+    let handle_ = handle.clone();
+    let timer = Timer::default();
+    let mut rng = rand::thread_rng();
+    let update = init.and_then(move |infos| {
+        future::loop_fn((infos, servers_), move |(infos, servers)| {
+            timer.sleep(Duration::from_secs(probe)).map_err(|err| {
+                io::Error::new(io::ErrorKind::Other, err)
+            }).and_then(move |_| {
+                let tests = infos.clone().into_iter().map(move |info| {
+                    alive_test(&**info.server, &handle_)
+                        .then(|t| future::ok(t.ok()))
+                });
+                future::join_all(tests).map(|ts| (ts, infos, servers))
+            }).and_then(move |(ts, mut infos, servers)| {
+                infos.iter_mut().zip(ts.iter()).for_each(|(info, t)| {
+                    info.delay = t.map(|t| {
+                        (info.delay.unwrap_or(t + 1000) * 9 + t) / 10
+                    });
+                });
+                infos.sort_by_key(|info| {
+                  info.delay.unwrap_or(std::u32::MAX - 50) +
+                  (rng.next_u32() % 20)
+                });
+                servers.set(infos.clone());
+                future::ok((infos, servers))
+            }).and_then(|args| Ok(future::Loop::Continue(args)))
+        })
+    }).map_err(|_: io::Error| ());
+    Box::new(update)
+    /*
         let mut stats = String::new();
         for info in infos.iter().take(5) {
             stats += &match info.delay {
@@ -137,6 +136,7 @@ pub fn alive_test(server: &ProxyServer, handle: &Handle)
     let timer = Timer::default();
     let now = Instant::now();
     let addr = "8.8.8.8:53".parse().unwrap();
+    let tag = String::from(server.tag());
     let conn = server.connect_async(addr, handle);
     let try_conn = timer.timeout(conn, Duration::from_secs(5))
         .map_err(|_| io::Error::new(io::ErrorKind::TimedOut,
@@ -149,8 +149,10 @@ pub fn alive_test(server: &ProxyServer, handle: &Handle)
         let resp_tid = (buf[2] as u16) << 8 | (buf[3] as u16);
         if resp_tid == tid {
             let delay = now.elapsed();
-            future::ok(delay.as_secs() as u32 * 1000 +
-                       delay.subsec_nanos() / 1_000_000)
+            let t = delay.as_secs() as u32 * 1000 +
+                    delay.subsec_nanos() / 1_000_000;
+            debug!("[{}] delay {}ms", tag, t);
+            future::ok(t)
         } else {
             future::err(io::Error::new(io::ErrorKind::Other,
                                        "unknown response"))

@@ -12,8 +12,8 @@ extern crate log;
 extern crate moproxy;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::io::{self, ErrorKind};
+use std::rc::Rc;
 use std::os::unix::io::{RawFd, AsRawFd};
-use std::sync::Arc;
 use std::time::Duration;
 use futures::{future, Future, Stream};
 use tokio_core::net::{TcpListener, TcpStream};
@@ -67,7 +67,7 @@ fn main() {
         panic!("missing server list");
     }
     info!("total {} server(s) added", servers.len());
-    let servers = Arc::new(ServerList::new(servers));
+    let servers = Rc::new(ServerList::new(servers));
     let probe = args.value_of("probe-secs")
         .expect("missing probe secs").parse()
         .expect("not a vaild probe secs");
@@ -107,7 +107,7 @@ fn parse_server(addr: &str) -> SocketAddr {
     }.expect("not a valid server address")
 }
 
-fn connect_server(client: TcpStream, servers: Arc<ServerList>, handle: Handle)
+fn connect_server(client: TcpStream, servers: Rc<ServerList>, handle: Handle)
         -> Box<Future<Item=(TcpStream, TcpStream), Error=()>> {
     let orig = client.peer_addr().ok();
     let dest = future::result(get_original_dest(client.as_raw_fd()))

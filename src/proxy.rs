@@ -2,9 +2,9 @@ extern crate tokio_core;
 extern crate tokio_io;
 extern crate futures;
 use std::fmt;
+use std::rc::Rc;
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, Shutdown, SocketAddr};
-use std::sync::Arc;
 use self::futures::{Stream, Future, Poll};
 use self::futures::sync::mpsc;
 use self::tokio_core::net as tnet;
@@ -70,11 +70,11 @@ pub fn piping(local: tnet::TcpStream, remote: tnet::TcpStream)
 // Modified on:
 // https://github.com/tokio-rs/tokio-core/blob/master/examples/proxy.rs
 #[derive(Clone)]
-struct HalfTcpStream(Arc<tnet::TcpStream>);
+struct HalfTcpStream(Rc<tnet::TcpStream>);
 
 impl HalfTcpStream {
     fn new(stream: tnet::TcpStream) -> HalfTcpStream {
-        HalfTcpStream(Arc::new(stream))
+        HalfTcpStream(Rc::new(stream))
     }
 }
 

@@ -8,7 +8,7 @@ use self::futures::{future, Future};
 use self::tokio_core::reactor::Handle;
 use self::tokio_core::net as tnet;
 use self::tokio_io::io::{write_all, read_until};
-use ::proxy::ProxyServer;
+use ::proxy::{ProxyServer, Connect};
 
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
@@ -38,8 +38,7 @@ impl ProxyServer for HttpProxyServer {
         &self.tag
     }
 
-    fn connect(&self, addr: SocketAddr, handle: &Handle)
-            -> Box<Future<Item=tnet::TcpStream, Error=io::Error>> {
+    fn connect(&self, addr: SocketAddr, handle: &Handle) -> Box<Connect> {
         let conn = tnet::TcpStream::connect(&self.addr, handle);
         let request = conn.and_then(move |stream| {
             write_all(stream, build_request(&addr))

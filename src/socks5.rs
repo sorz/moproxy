@@ -3,12 +3,12 @@ extern crate tokio_io;
 extern crate futures;
 use std::fmt;
 use std::net::{SocketAddr, IpAddr};
-use std::io::{self, Write};
+use std::io::Write;
 use self::futures::Future;
 use self::tokio_core::reactor::Handle;
 use self::tokio_core::net as tnet;
 use self::tokio_io::io::{read_exact, write_all};
-use ::proxy::ProxyServer;
+use ::proxy::{ProxyServer, Connect};
 
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
@@ -38,8 +38,7 @@ impl ProxyServer for Socks5Server {
         &self.tag
     }
 
-    fn connect(&self, addr: SocketAddr, handle: &Handle)
-            -> Box<Future<Item=tnet::TcpStream, Error=io::Error>> {
+    fn connect(&self, addr: SocketAddr, handle: &Handle) -> Box<Connect> {
         let conn = tnet::TcpStream::connect(&self.addr, handle);
         Box::new(conn.and_then(move |stream| {
             if let Err(e) = stream.set_nodelay(true) {

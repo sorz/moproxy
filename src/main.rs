@@ -10,11 +10,12 @@ extern crate clap;
 #[macro_use]
 extern crate log;
 extern crate moproxy;
+use std::cmp;
+use std::rc::Rc;
+use std::time::Duration;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::io::{self, ErrorKind};
-use std::rc::Rc;
 use std::os::unix::io::{RawFd, AsRawFd};
-use std::time::Duration;
 use futures::{future, Future, Stream};
 use tokio_core::net::{TcpListener, TcpStream};
 use tokio_core::reactor::{Core, Handle};
@@ -22,7 +23,7 @@ use tokio_timer::Timer;
 use nix::sys::socket;
 use simplelog::{SimpleLogger, LogLevelFilter};
 use moproxy::monitor::{self, ServerList};
-use moproxy::proxy::{self, ProxyServer};
+use moproxy::proxy::{self, ProxyServer, Connect};
 use moproxy::socks5::Socks5Server;
 use moproxy::http::HttpProxyServer;
 
@@ -78,8 +79,8 @@ fn main() {
     let listener = TcpListener::bind(&addr, &handle)
         .expect("cannot bind to port");
     info!("listen on {}", addr);
-    let mon = monitor::monitoring_servers(servers.clone(), probe, lp.handle());
-        //.then(|_| panic!("monitoring stopped unexpectedly"));
+    let mon = monitor::monitoring_servers(
+        servers.clone(), probe, lp.handle());
     handle.spawn(mon);
     let server = listener.incoming().for_each(move |(client, addr)| {
         debug!("incoming {}", addr);
@@ -109,35 +110,31 @@ fn parse_server(addr: &str) -> SocketAddr {
 
 fn connect_server(client: TcpStream, servers: Rc<ServerList>, handle: Handle)
         -> Box<Future<Item=(TcpStream, TcpStream), Error=()>> {
-    let orig = client.peer_addr().ok();
-    let dest = future::result(get_original_dest(client.as_raw_fd()))
-            .map_err(|err| warn!("fail to get original destination: {}", err));
+    let src_dst = future::result(client.peer_addr())
+        .join(future::result(get_original_dest(client.as_raw_fd())))
+        .map_err(|err| warn!("fail to get original destination: {}", err));
     // TODO: reuse timer?
     let timer = Timer::default();
-    let try_connect_all = dest.and_then(move |dest| {
-        let conns: Vec<Box<Future<Item=TcpStream, Error=()>>> = servers
-            .get().iter()
-            .map(|info| info.server.clone())
-            .map(|server| {
-                let s1 = server.clone();
-                let s2 = server.clone();
-                let s3 = server.clone();
-                let conn = server.connect(dest, &handle)
-                    .map_err(move |err|
-                             warn!("fail to connect {}: {}", s1.tag(), err))
-                    .and_then(move |conn| {
-                        let orig = orig.map_or_else(
-                                || String::from("(?)"), |o| o.to_string());
-                        info!("{} => {} via {}", orig, dest, s2.tag());
-                        future::ok(conn)
-                    });
-                // TODO: configurable timeout
-                let try = timer.timeout(conn, Duration::from_secs(5))
-                    .map_err(move |_|
-                            warn!("fail to connect {}: timeout", s3.tag()));
-                Box::new(try) as Box<Future<Item=TcpStream, Error=()>>
-            }).collect();
-        future::select_ok(conns)
+    let try_connect_all = src_dst.and_then(move |(src, dest)| {
+        let conns: Vec<Box<Connect>> = servers.get().iter().map(|info| {
+            let server = info.server.clone();
+            let conn = server.connect(dest, &handle);
+            let wait = Duration::from_millis(
+                cmp::max(2_000, info.delay.unwrap_or(1_000) as u64 * 2));
+            // Standard proxy server need more time (e.g. DNS resolving)
+            let try = timer.timeout(conn, wait).then(move |r| match r {
+                Ok(conn) => {
+                    info!("{} => {} via {}", src, dest, server.tag());
+                    future::ok(conn)
+                },
+                Err(err) => {
+                    warn!("fail to connect {}: {}", server.tag(), err);
+                    future::err(err)
+                },
+            });
+            Box::new(try) as Box<Connect>
+        }).collect();
+        future::select_ok(conns).map_err(|_| ())
     }).map(|(server, _)| (client, server))
     .map_err(|_| warn!("all proxy server down"));
     Box::new(try_connect_all)

@@ -4,46 +4,22 @@ extern crate futures;
 use std::fmt;
 use std::rc::Rc;
 use std::io::{self, Read, Write};
-use std::net::{TcpStream, Shutdown, SocketAddr};
-use self::futures::{Stream, Future, Poll};
-use self::futures::sync::mpsc;
-use self::tokio_core::net as tnet;
-use self::tokio_core::reactor::{Core, Handle};
+use std::net::{Shutdown, SocketAddr};
+use self::futures::{Future, Poll};
+use self::tokio_core::net::TcpStream;
+use self::tokio_core::reactor::Handle;
 use self::tokio_io::io as tio;
 use self::tokio_io::{AsyncRead, AsyncWrite};
 
 
+pub type Connect = Future<Item=TcpStream, Error=io::Error>;
 pub trait ProxyServer: Send + Sync + fmt::Display {
     fn tag(&self) -> &str;
-    fn connect(&self, addr: SocketAddr, handle: &Handle)
-            -> Box<Future<Item=tnet::TcpStream, Error=io::Error>>;
+    fn connect(&self, addr: SocketAddr, handle: &Handle) -> Box<Connect>;
 }
 
-pub fn piping_worker(rx: mpsc::Receiver<(TcpStream, TcpStream)>) {
-    let mut core = Core::new().unwrap();
-    let handle = core.handle();
-    let server = rx.for_each(|(local, remote)| {
-        let local = match tnet::TcpStream::from_stream(local, &handle) {
-            Ok(s) => s,
-            Err(_) => {
-                warn!("cannot create asycn tcp stream");
-                return Ok(());
-            },
-        };
-        let remote = match tnet::TcpStream::from_stream(remote, &handle) {
-            Ok(s) => s,
-            Err(_) => {
-                warn!("cannot create asycn tcp stream");
-                return Ok(());
-            },
-        };
-        handle.spawn(piping(local, remote));
-        Ok(())
-    });
-    core.run(server).unwrap();
-}
 
-pub fn piping(local: tnet::TcpStream, remote: tnet::TcpStream)
+pub fn piping(local: TcpStream, remote: TcpStream)
         -> Box<Future<Item=(), Error=()>> {
     let local_r = HalfTcpStream::new(local);
     let remote_r = HalfTcpStream::new(remote);
@@ -70,10 +46,10 @@ pub fn piping(local: tnet::TcpStream, remote: tnet::TcpStream)
 // Modified on:
 // https://github.com/tokio-rs/tokio-core/blob/master/examples/proxy.rs
 #[derive(Clone)]
-struct HalfTcpStream(Rc<tnet::TcpStream>);
+struct HalfTcpStream(Rc<TcpStream>);
 
 impl HalfTcpStream {
-    fn new(stream: tnet::TcpStream) -> HalfTcpStream {
+    fn new(stream: TcpStream) -> HalfTcpStream {
         HalfTcpStream(Rc::new(stream))
     }
 }

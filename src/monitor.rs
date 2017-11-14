@@ -95,7 +95,7 @@ pub fn monitoring_servers(servers: Rc<ServerList>, probe: u64,
                   (rng.next_u32() % 20)
                 });
                 servers.set(infos.clone());
-                info!("scores: {}", info_stats(infos.as_slice()));
+                info!("scores:{}", info_stats(infos.as_slice()));
                 future::ok((infos, servers))
             }).and_then(|args| Ok(future::Loop::Continue(args)))
         })

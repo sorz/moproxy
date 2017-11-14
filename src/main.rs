@@ -87,9 +87,8 @@ fn main() {
         let conn = connect_server(client, servers.clone(), handle.clone());
         let serv = conn.and_then(|(client, proxy)| {
             let timeout = Some(Duration::from_secs(180));
-            let result = client.set_keepalive(timeout)
-                .and(proxy.set_keepalive(timeout));
-            if let Err(e) = result {
+            if let Err(e) = client.set_keepalive(timeout)
+                    .and(proxy.set_keepalive(timeout)) {
                 warn!("fail to set keepalive: {}", e);
             }
             proxy::piping(client, proxy)

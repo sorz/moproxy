@@ -50,40 +50,29 @@ impl ServerList {
     }
 }
 
-pub fn monitoring_servers(servers: Rc<ServerList>, probe: u64,
-                          handle: Handle)
+pub fn monitoring_servers(servers: Rc<ServerList>, probe: u64, handle: Handle)
         -> Box<Future<Item=(), Error=()>> {
-    let handle_ = handle.clone();
-    let tests = servers.get().clone().into_iter().map(move |info| {
-        alive_test(&**info.server, &handle_)
-            .then(|t| future::ok(t.ok()))
-    });
-    let servers_ = servers.clone();
-    let init = future::join_all(tests).and_then(move |delays| {
-        info!("probe init done");
-        let mut infos = servers_.get().clone();
+    let init = test_all(&servers, &handle).and_then(move |delays| {
+        let mut infos = servers.get().clone();
         infos.iter_mut().zip(delays.iter()).for_each(|(info, t)| {
             info.delay = *t;
         });
         infos.sort_by_key(|info| info.delay.unwrap_or(std::u32::MAX));
-        servers_.set(infos.clone());
-        future::ok(infos)
+        info!("scores:{}", info_stats(infos.as_slice()));
+        servers.set(infos.clone());
+        future::ok(servers)
     });
-    let servers_ = servers.clone();
-    let handle_ = handle.clone();
     let timer = Timer::default();
-    let update = init.and_then(move |infos| {
-        future::loop_fn((infos, servers_), move |(infos, servers)| {
-            let handle_ = handle_.clone();
-            timer.sleep(Duration::from_secs(probe)).map_err(|err| {
+    let interval = Duration::from_secs(probe);
+    let update = init.and_then(move |servers| {
+        future::loop_fn((servers, handle), move |(servers, handle)| {
+            timer.sleep(interval).map_err(|err| {
                 io::Error::new(io::ErrorKind::Other, err)
             }).and_then(move |_| {
-                let tests = infos.clone().into_iter().map(move |info| {
-                    alive_test(&**info.server, &handle_)
-                        .then(|t| future::ok(t.ok()))
-                });
-                future::join_all(tests).map(|ts| (ts, infos, servers))
-            }).and_then(move |(ts, mut infos, servers)| {
+                test_all(&servers, &handle)
+                    .map(|ts| (ts, servers, handle))
+            }).and_then(|(ts, servers, handle)| {
+                let mut infos = servers.get().clone();
                 infos.iter_mut().zip(ts.iter()).for_each(|(info, t)| {
                     info.delay = t.map(|t| {
                         (info.delay.unwrap_or(t + 1000) * 9 + t) / 10
@@ -91,15 +80,15 @@ pub fn monitoring_servers(servers: Rc<ServerList>, probe: u64,
                 });
                 let mut rng = rand::thread_rng();
                 infos.sort_by_key(move |info| {
-                  info.delay.unwrap_or(std::u32::MAX - 50) +
-                  (rng.next_u32() % 20)
+                    info.delay.unwrap_or(std::u32::MAX - 50) +
+                    (rng.next_u32() % 20)
                 });
-                servers.set(infos.clone());
                 info!("scores:{}", info_stats(infos.as_slice()));
-                future::ok((infos, servers))
+                servers.set(infos);
+                future::ok((servers, handle))
             }).and_then(|args| Ok(future::Loop::Continue(args)))
         })
-    }).map_err(|_: io::Error| ());
+    }).map_err(|_| ());
     Box::new(update)
 }
 
@@ -113,6 +102,14 @@ fn info_stats(infos: &[ServerInfo]) -> String {
     }
     stats.pop();
     stats
+}
+
+fn test_all(servers: &ServerList, handle: &Handle)
+        -> Box<Future<Item=Vec<Option<u32>>, Error=io::Error>> {
+    let tests: Vec<_> = servers.get().clone().into_iter().map(move |info| {
+        alive_test(&**info.server, handle).then(|t| future::ok(t.ok()))
+    }).collect();
+    Box::new(future::join_all(tests))
 }
 
 pub fn alive_test(server: &ProxyServer, handle: &Handle)
@@ -129,7 +126,8 @@ pub fn alive_test(server: &ProxyServer, handle: &Handle)
         0, 1,  // query: type A
         0, 1,  // query: class IN
     ];
-    let tid = (request[2] as u16) << 8 | (request[3] as u16);
+    let tid = |req: &[u8]| (req[2] as u16) << 8 | (req[3] as u16);
+    let req_tid = tid(&request);
 
     // TODO: reuse timer?
     let timer = Timer::default();
@@ -137,24 +135,21 @@ pub fn alive_test(server: &ProxyServer, handle: &Handle)
     let addr = "8.8.8.8:53".parse().unwrap();
     let tag = String::from(server.tag());
     let conn = server.connect(addr, handle);
-    let try_conn = timer.timeout(conn, Duration::from_secs(5))
-        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut,
-                                    "handshake timed out"));
+    let try_conn = timer.timeout(conn, Duration::from_secs(5));
     let query = try_conn.and_then(move |stream| {
         write_all(stream, request)
     }).and_then(|(stream, _)| {
         read_exact(stream, [0u8; 12])
     }).and_then(move |(_, buf)| {
-        let resp_tid = (buf[2] as u16) << 8 | (buf[3] as u16);
-        if resp_tid == tid {
+        if req_tid == tid(&buf) {
             let delay = now.elapsed();
             let t = delay.as_secs() as u32 * 1000 +
                     delay.subsec_nanos() / 1_000_000;
             debug!("[{}] delay {}ms", tag, t);
             future::ok(t)
         } else {
-            future::err(io::Error::new(io::ErrorKind::Other,
-                                       "unknown response"))
+            let err = io::Error::new(io::ErrorKind::Other, "unknown response");
+            future::err(err)
         }
     });
     Box::new(query)

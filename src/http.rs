@@ -41,6 +41,9 @@ impl ProxyServer for HttpProxyServer {
     fn connect(&self, addr: SocketAddr, handle: &Handle) -> Box<Connect> {
         let conn = tnet::TcpStream::connect(&self.addr, handle);
         let request = conn.and_then(move |stream| {
+            if let Err(e) = stream.set_nodelay(true) {
+                warn!("fail to set nodelay: {}", e);
+            };
             write_all(stream, build_request(&addr))
         });
         let response = request.and_then(|(stream, _)| {

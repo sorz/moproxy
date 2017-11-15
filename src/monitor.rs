@@ -69,6 +69,7 @@ pub fn monitoring_servers(servers: Rc<ServerList>, probe: u64, handle: Handle)
             timer.sleep(interval).map_err(|err| {
                 io::Error::new(io::ErrorKind::Other, err)
             }).and_then(move |_| {
+                debug!("testing all servers...");
                 test_all(&servers, &handle)
                     .map(|ts| (ts, servers, handle))
             }).and_then(|(ts, servers, handle)| {

@@ -14,4 +14,4 @@ tokio-timer = "0.1"
 net2 = "0.2"
 clap = {version = "2.27", features = ["yaml"]}
 log = "0.3"
-simplelog = "0.4"
+env_logger = "0.4"

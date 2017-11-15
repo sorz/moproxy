@@ -4,13 +4,14 @@ extern crate futures;
 extern crate tokio_core;
 extern crate tokio_io;
 extern crate tokio_timer;
-extern crate simplelog;
+extern crate env_logger;
 #[macro_use]
 extern crate clap;
 #[macro_use]
 extern crate log;
 extern crate moproxy;
 use std::cmp;
+use std::env;
 use std::rc::Rc;
 use std::time::Duration;
 use std::net::{SocketAddr, SocketAddrV4};
@@ -21,7 +22,8 @@ use tokio_core::net::{TcpListener, TcpStream};
 use tokio_core::reactor::{Core, Handle};
 use tokio_timer::Timer;
 use nix::sys::socket;
-use simplelog::{SimpleLogger, LogLevelFilter};
+use log::LogLevelFilter;
+use env_logger::{LogBuilder, LogTarget};
 use moproxy::monitor::{self, ServerList};
 use moproxy::proxy::{self, ProxyServer, Connect};
 use moproxy::socks5::Socks5Server;
@@ -32,17 +34,18 @@ fn main() {
     let yaml = load_yaml!("cli.yml");
     let args = clap::App::from_yaml(yaml).get_matches();
 
-    let log_level = match args.value_of("log-level") {
-        None => LogLevelFilter::Info,
-        Some("off") => LogLevelFilter::Off,
-        Some("error") => LogLevelFilter::Error,
-        Some("warn") => LogLevelFilter::Warn,
-        Some("info") => LogLevelFilter::Info,
-        Some("debug") => LogLevelFilter::Debug,
-        Some("trace") => LogLevelFilter::Trace,
-        Some(_) => panic!("unknown log level"),
-    };
-    SimpleLogger::init(log_level, simplelog::Config::default())
+    let mut logger = LogBuilder::new();
+    if let Ok(env_log) = env::var("RUST_LOG") {
+        logger.parse(&env_log);
+    }
+    let log_level = args.value_of("log-level")
+        .unwrap_or("info").parse()
+        .expect("unknown log level");
+    logger.filter(None, log_level)
+        .filter(Some("tokio_core"), LogLevelFilter::Warn)
+        .target(LogTarget::Stdout)
+        .format(|r| format!("[{}] {}", r.level(), r.args()))
+        .init()
         .expect("cannot set logger");
 
     let host = args.value_of("host")
@@ -96,7 +99,7 @@ fn main() {
         handle.spawn(serv);
         Ok(())
     });
-    lp.run(server).expect("fail to start event loop");
+    lp.run(server).expect("error on event loop");
 }
 
 fn parse_server(addr: &str) -> SocketAddr {

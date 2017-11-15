@@ -41,6 +41,7 @@ impl ProxyServer for Socks5Server {
     fn connect(&self, addr: SocketAddr, handle: &Handle) -> Box<Connect> {
         let conn = tnet::TcpStream::connect(&self.addr, handle);
         Box::new(conn.and_then(move |stream| {
+            debug!("connected with {:?}", stream.peer_addr());
             if let Err(e) = stream.set_nodelay(true) {
                 warn!("fail to set nodelay: {}", e);
             };

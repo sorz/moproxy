@@ -17,7 +17,7 @@ use std::time::Duration;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::io::{self, ErrorKind};
 use std::os::unix::io::{RawFd, AsRawFd};
-use futures::{future, Future, Stream};
+use futures::{future, stream, Future, Stream};
 use tokio_core::net::{TcpListener, TcpStream};
 use tokio_core::reactor::{Core, Handle};
 use tokio_timer::Timer;
@@ -25,7 +25,7 @@ use nix::sys::socket;
 use log::LogLevelFilter;
 use env_logger::{LogBuilder, LogTarget};
 use moproxy::monitor::{self, ServerList};
-use moproxy::proxy::{self, ProxyServer, Connect};
+use moproxy::proxy::{self, ProxyServer};
 use moproxy::socks5::Socks5Server;
 use moproxy::http::HttpProxyServer;
 
@@ -87,7 +87,7 @@ fn main() {
     handle.spawn(mon);
     let server = listener.incoming().for_each(move |(client, addr)| {
         debug!("incoming {}", addr);
-        let conn = connect_server(client, servers.clone(), handle.clone());
+        let conn = connect_server(client, &servers, handle.clone());
         let serv = conn.and_then(|(client, proxy)| {
             let timeout = Some(Duration::from_secs(180));
             if let Err(e) = client.set_keepalive(timeout)
@@ -110,35 +110,39 @@ fn parse_server(addr: &str) -> SocketAddr {
     }.expect("not a valid server address")
 }
 
-fn connect_server(client: TcpStream, servers: Rc<ServerList>, handle: Handle)
+fn connect_server(client: TcpStream, servers: &ServerList, handle: Handle)
         -> Box<Future<Item=(TcpStream, TcpStream), Error=()>> {
     let src_dst = future::result(client.peer_addr())
         .join(future::result(get_original_dest(client.as_raw_fd())))
         .map_err(|err| warn!("fail to get original destination: {}", err));
     // TODO: reuse timer?
     let timer = Timer::default();
+    let infos = servers.get().clone();
     let try_connect_all = src_dst.and_then(move |(src, dest)| {
-        let conns: Vec<Box<Connect>> = servers.get().iter().map(|info| {
-            let server = info.server.clone();
+        stream::iter_ok(infos).for_each(move |info| {
+            let server = info.server;
             let conn = server.connect(dest, &handle);
             let wait = Duration::from_millis(
-                cmp::max(2_000, info.delay.unwrap_or(1_000) as u64 * 2));
+                cmp::max(3_000, info.delay.unwrap_or(1_000) as u64 * 2));
             // Standard proxy server need more time (e.g. DNS resolving)
-            let try = timer.timeout(conn, wait).then(move |r| match r {
+            timer.timeout(conn, wait).then(move |result| match result {
                 Ok(conn) => {
                     info!("{} => {} via {}", src, dest, server.tag());
-                    future::ok(conn)
+                    Err(conn)
                 },
                 Err(err) => {
                     warn!("fail to connect {}: {}", server.tag(), err);
-                    future::err(err)
-                },
-            });
-            Box::new(try) as Box<Connect>
-        }).collect();
-        future::select_ok(conns).map_err(|_| ())
-    }).map(|(server, _)| (client, server))
-    .map_err(|_| warn!("all proxy server down"));
+                    Ok(())
+                }
+            })
+        }).then(|result| match result {
+            Err(conn) => Ok(conn),
+            Ok(_) => {
+                warn!("all proxy server down");
+                Err(())
+            },
+        })
+    }).map(|server| (client, server));
     Box::new(try_connect_all)
 }
 

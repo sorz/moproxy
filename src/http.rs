@@ -54,15 +54,15 @@ impl ProxyServer for HttpProxyServer {
         }).and_then(|(reader, status)| {
             let status = match str::from_utf8(&status) {
                 Ok(s) => s,
-                Err(e) => return future::err(io::Error::new(ErrorKind::Other,
+                Err(e) => return Err(io::Error::new(ErrorKind::Other,
                         format!("fail to parse http response: {}", e))),
             };
             debug!("recv response: {}", status.trim());
             if status.starts_with("HTTP/1.1 2") {
-                future::ok(reader.into_inner())
+                Ok(reader.into_inner())
             } else {
                 let err = format!("proxy return error: {}", status.trim());
-                future::err(io::Error::new(ErrorKind::Other, err))
+                Err(io::Error::new(ErrorKind::Other, err))
             }
         });
         let skip_headers = |(reader, mut buf): (io::Take<_>, Vec<u8>)| {

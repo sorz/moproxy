@@ -60,7 +60,7 @@ pub fn monitoring_servers(servers: Rc<ServerList>, probe: u64, handle: Handle)
         infos.sort_by_key(|info| info.delay.unwrap_or(std::u32::MAX));
         info!("scores:{}", info_stats(infos.as_slice()));
         servers.set(infos.clone());
-        future::ok(servers)
+        Ok(servers)
     });
     let timer = Timer::default();
     let interval = Duration::from_secs(probe);
@@ -86,7 +86,7 @@ pub fn monitoring_servers(servers: Rc<ServerList>, probe: u64, handle: Handle)
                 });
                 info!("scores:{}", info_stats(infos.as_slice()));
                 servers.set(infos);
-                future::ok((servers, handle))
+                Ok((servers, handle))
             }).and_then(|args| Ok(future::Loop::Continue(args)))
         })
     }).map_err(|_| ());
@@ -108,7 +108,7 @@ fn info_stats(infos: &[ServerInfo]) -> String {
 fn test_all(servers: &ServerList, handle: &Handle)
         -> Box<Future<Item=Vec<Option<u32>>, Error=io::Error>> {
     let tests: Vec<_> = servers.get().clone().into_iter().map(move |info| {
-        alive_test(&**info.server, handle).then(|t| future::ok(t.ok()))
+        alive_test(&**info.server, handle).then(|t| Ok(t.ok()))
     }).collect();
     Box::new(future::join_all(tests))
 }
@@ -147,10 +147,9 @@ pub fn alive_test(server: &ProxyServer, handle: &Handle)
             let t = delay.as_secs() as u32 * 1000 +
                     delay.subsec_nanos() / 1_000_000;
             debug!("[{}] delay {}ms", tag, t);
-            future::ok(t)
+            Ok(t)
         } else {
-            let err = io::Error::new(io::ErrorKind::Other, "unknown response");
-            future::err(err)
+            Err(io::Error::new(io::ErrorKind::Other, "unknown response"))
         }
     });
     Box::new(query)

@@ -12,13 +12,13 @@ use ::tokio_io::{AsyncRead, AsyncWrite};
 
 pub type Connect = Future<Item=TcpStream, Error=io::Error>;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Serialize)]
 pub enum ProxyProto {
     Socks5,
     Http,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ProxyServer {
     pub addr: SocketAddr,
     pub proto: ProxyProto,

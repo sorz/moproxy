@@ -2,8 +2,9 @@ use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use ::rustful::{Server, Context, Response, TreeRouter};
-use ::rustful::StatusCode::NotFound;
+use ::rustful::StatusCode::{NotFound, InternalServerError};
 use ::rustful::header::ContentType;
+use ::serde_json;
 use ::monitor::ServerList;
 
 fn index(_context: Context, response: Response) {
@@ -16,12 +17,19 @@ fn not_found(_context: Context, mut response: Response) {
 }
 
 fn servers_json(context: Context, mut response: Response) {
-    let json = ContentType(content_type!(Text / Json; Charset = Utf8));
+    let json_type = ContentType(content_type!(Text / Json; Charset = Utf8));
+    response.headers_mut().set(json_type);
     let servers: &Arc<ServerList> = context.global.get()
         .expect("not servers found in global");
-
-    response.headers_mut().set(json);
-    response.send(format!("{} servers", servers.get().len()));
+    let resp = match serde_json::to_string(&*servers.get()) {
+        Ok(json) => json,
+        Err(e) => {
+            response.set_status(InternalServerError);
+            error!("fail to serialize servers to json: {}", e);
+            format!("internal error: {}", e)
+        },
+    };
+    response.send(resp);
 }
 
 pub fn run_server(bind: SocketAddr, servers: Arc<ServerList>) {

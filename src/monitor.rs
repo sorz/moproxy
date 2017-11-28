@@ -11,7 +11,7 @@ use ::futures::{future, Future};
 use ::proxy::ProxyServer;
 
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ServerInfo {
     pub server: Arc<ProxyServer>,
     pub delay: Option<Duration>,

@@ -19,7 +19,8 @@ use ::proxy::ProxyServer;
 #[derive(Clone)]
 pub struct ServerInfo {
     pub server: Rc<ProxyServer>,
-    pub delay: Option<u32>,
+    pub delay: Option<Duration>,
+    pub score: Option<u32>,
 }
 
 pub struct ServerList {
@@ -33,6 +34,7 @@ impl ServerList {
             let info = ServerInfo {
                 server: Rc::new(s),
                 delay: None,
+                score: None,
             };
             infos.push(info);
         }
@@ -56,8 +58,9 @@ pub fn monitoring_servers(servers: Rc<ServerList>, probe: u64, handle: Handle)
         let mut infos = servers.get().clone();
         infos.iter_mut().zip(delays.iter()).for_each(|(info, t)| {
             info.delay = *t;
+            info.score = t.map(to_ms);
         });
-        infos.sort_by_key(|info| info.delay.unwrap_or(std::u32::MAX));
+        infos.sort_by_key(|info| info.score.unwrap_or(std::u32::MAX));
         info!("scores:{}", info_stats(infos.as_slice()));
         servers.set(infos.clone());
         Ok(servers)
@@ -75,13 +78,14 @@ pub fn monitoring_servers(servers: Rc<ServerList>, probe: u64, handle: Handle)
             }).and_then(|(ts, servers, handle)| {
                 let mut infos = servers.get().clone();
                 infos.iter_mut().zip(ts.iter()).for_each(|(info, t)| {
-                    info.delay = t.map(|t| {
-                        (info.delay.unwrap_or(t + 1000) * 9 + t) / 10
+                    info.delay = *t;
+                    info.score = t.map(to_ms).map(|t| {
+                        (info.score.unwrap_or(t + 1000) * 9 + t) / 10
                     });
                 });
                 let mut rng = rand::thread_rng();
                 infos.sort_by_key(move |info| {
-                    info.delay.unwrap_or(std::u32::MAX - 50) +
+                    info.score.unwrap_or(std::u32::MAX - 50) +
                     (rng.next_u32() % 20)
                 });
                 info!("scores:{}", info_stats(infos.as_slice()));
@@ -96,9 +100,9 @@ pub fn monitoring_servers(servers: Rc<ServerList>, probe: u64, handle: Handle)
 fn info_stats(infos: &[ServerInfo]) -> String {
     let mut stats = String::new();
     for info in infos.iter().take(5) {
-        stats += &match info.delay {
+        stats += &match info.score {
             None => format!(" {}: --,", info.server.tag),
-            Some(t) => format!(" {}: {}ms,", info.server.tag, t),
+            Some(t) => format!(" {}: {},", info.server.tag, t),
         };
     }
     stats.pop();
@@ -106,15 +110,15 @@ fn info_stats(infos: &[ServerInfo]) -> String {
 }
 
 fn test_all(servers: &ServerList, handle: &Handle)
-        -> Box<Future<Item=Vec<Option<u32>>, Error=io::Error>> {
+        -> Box<Future<Item=Vec<Option<Duration>>, Error=io::Error>> {
     let tests: Vec<_> = servers.get().clone().into_iter().map(move |info| {
         alive_test(&*info.server, handle).then(|t| Ok(t.ok()))
     }).collect();
     Box::new(future::join_all(tests))
 }
 
-pub fn alive_test(server: &ProxyServer, handle: &Handle)
-        -> Box<Future<Item=u32, Error=io::Error>> {
+fn alive_test(server: &ProxyServer, handle: &Handle)
+        -> Box<Future<Item=Duration, Error=io::Error>> {
     let request = [
         0, 17,  // length
         rand::random(), rand::random(),  // transaction ID
@@ -144,14 +148,16 @@ pub fn alive_test(server: &ProxyServer, handle: &Handle)
     }).and_then(move |(_, buf)| {
         if req_tid == tid(&buf) {
             let delay = now.elapsed();
-            let t = delay.as_secs() as u32 * 1000 +
-                    delay.subsec_nanos() / 1_000_000;
-            debug!("[{}] delay {}ms", tag, t);
-            Ok(t)
+            debug!("[{}] delay {}ms", tag, to_ms(delay));
+            Ok(delay)
         } else {
             Err(io::Error::new(io::ErrorKind::Other, "unknown response"))
         }
     });
     Box::new(query)
+}
+
+fn to_ms(t: Duration) -> u32 {
+    t.as_secs() as u32 * 1000 + t.subsec_nanos() / 1_000_000
 }
 

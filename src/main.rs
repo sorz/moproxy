@@ -120,8 +120,11 @@ fn connect_server(client: TcpStream, servers: &ServerList, handle: Handle)
         stream::iter_ok(infos).for_each(move |info| {
             let server = info.server;
             let conn = server.connect(dest, &handle);
-            let wait = Duration::from_millis(
-                cmp::max(3_000, info.delay.unwrap_or(1_000) as u64 * 2));
+            let wait = if let Some(delay) = info.delay {
+                cmp::max(Duration::from_secs(3), delay * 2)
+            } else {
+                Duration::from_secs(3)
+            };
             // Standard proxy server need more time (e.g. DNS resolving)
             timer.timeout(conn, wait).then(move |result| match result {
                 Ok(conn) => {

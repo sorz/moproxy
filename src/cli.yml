@@ -37,10 +37,13 @@ args:
         value_name: SECONDS
         help: period of time to make one probe
         default_value: "30"
+    - web-bind:
+        long: stats-bind
+        takes_value: true
+        help: where the web server that shows statistics bind to.
     - log-level:
         long: log-level
         takes_value: true
         help: level of verbosity
         possible_values: [off, error, warn, info, debug, trace]
         default_value: info
-

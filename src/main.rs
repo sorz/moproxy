@@ -12,6 +12,7 @@ extern crate log;
 extern crate moproxy;
 use std::cmp;
 use std::env;
+use std::thread;
 use std::rc::Rc;
 use std::time::Duration;
 use std::net::{SocketAddr, SocketAddrV4};
@@ -26,6 +27,7 @@ use log::LogLevelFilter;
 use env_logger::{LogBuilder, LogTarget};
 use moproxy::monitor::{self, ServerList};
 use moproxy::proxy::{self, ProxyServer, ProxyProto};
+use moproxy::web;
 
 
 fn main() {
@@ -97,6 +99,13 @@ fn main() {
         handle.spawn(serv);
         Ok(())
     });
+
+    if let Some(addr) = args.value_of("web-bind") {
+        let addr = addr.parse()
+            .expect("not a valid address");
+        thread::spawn(move || web::run_server(addr));
+    }
+
     lp.run(server).expect("error on event loop");
 }
 

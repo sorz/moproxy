@@ -1,18 +1,14 @@
 extern crate rand;
-extern crate tokio_core;
-extern crate tokio_io;
-extern crate tokio_timer;
-extern crate futures;
 use std;
 use std::time::{Instant, Duration};
 use std::io;
 use std::rc::Rc;
 use std::cell::{RefCell, Ref};
 use self::rand::Rng;
-use self::tokio_timer::Timer;
-use self::tokio_core::reactor::Handle;
-use self::tokio_io::io::{write_all, read_exact};
-use self::futures::{future, Future};
+use ::tokio_timer::Timer;
+use ::tokio_core::reactor::Handle;
+use ::tokio_io::io::{write_all, read_exact};
+use ::futures::{future, Future};
 use ::proxy::ProxyServer;
 
 

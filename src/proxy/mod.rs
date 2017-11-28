@@ -1,17 +1,14 @@
-extern crate tokio_core;
-extern crate tokio_io;
-extern crate futures;
 pub mod socks5;
 pub mod http;
 use std::fmt;
 use std::rc::Rc;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr};
-use self::futures::{Future, Poll};
-use self::tokio_core::net::TcpStream;
-use self::tokio_core::reactor::Handle;
-use self::tokio_io::io as tio;
-use self::tokio_io::{AsyncRead, AsyncWrite};
+use ::futures::{Future, Poll};
+use ::tokio_core::net::TcpStream;
+use ::tokio_core::reactor::Handle;
+use ::tokio_io::io as tio;
+use ::tokio_io::{AsyncRead, AsyncWrite};
 
 pub type Connect = Future<Item=TcpStream, Error=io::Error>;
 

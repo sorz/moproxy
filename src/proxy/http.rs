@@ -1,12 +1,9 @@
-extern crate tokio_core;
-extern crate tokio_io;
-extern crate futures;
 use std::str;
 use std::net::SocketAddr;
 use std::io::{self, Read, BufReader, ErrorKind};
-use self::futures::{future, Future};
-use self::tokio_core::net::TcpStream;
-use self::tokio_io::io::{write_all, read_until};
+use ::futures::{future, Future};
+use ::tokio_core::net::TcpStream;
+use ::tokio_io::io::{write_all, read_until};
 use ::proxy::Connect;
 
 

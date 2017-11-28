@@ -8,7 +8,7 @@ use ::serde_json;
 use ::monitor::ServerList;
 
 fn index(_context: Context, response: Response) {
-    response.send("It works!");
+    response.send(include_str!("index.html"));
 }
 
 fn not_found(_context: Context, mut response: Response) {

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>MoProxy</title>
+  <style>
+    body { margin: 1em 3em; color: #555; }
+    table { border-collapse: collapse; }
+    tbody { color: black; }
+    h1, h2 { color: darkslategray; }
+    th, td { border-bottom: 1px solid #ddd; }
+    td { line-height: 1.5em; font-size: 1.2em; padding: 0 0.8em; }
+    tr.offline { background: lightpink; }
+    tr:hover { background-color: #eee; }
+    #servers td:nth-last-child(-n+2) { text-align: right; }
+  </style>
+</head>
+<body>
+  <h1>MoProxy</h1>
+  <p>MoProxy is running.</p>
+  <button id="refresh">Refresh</button>
+
+  <h2>Proxy servers</h2>
+  <table>
+    <thead>
+      <tr><th>Tag<th>Protocol<th>Address<th>Score<th>Delay (ms)</tr>
+    </thead>
+    <tbody id="servers"></tbody>
+  </table>
+
+  <script
+    src="https://code.jquery.com/jquery-3.2.1.min.js"
+    integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4="
+    crossorigin="anonymous"></script>
+  <script>
+    const API_SERVERS = "servers";
+    $(document).ready(update);
+
+    function update() {
+      let $table = $('#servers').empty();
+      $.getJSON(API_SERVERS).done(function (servers) {
+        for (let server of servers) {
+          $table.append(newServerRow(server));
+        }
+      });
+    }
+
+    function newServerRow(info) {
+      let $row = $(
+          `<tr><td>${info.server.tag}
+          <td>${info.server.proto}
+          <td>${info.server.addr}
+          <td>${info.score || '-'}
+          <td>${durationToMills(info.delay) || '-'}</tr>`);
+      if (info.delay == null)
+        $row.addClass('offline');
+      return $row;
+    }
+
+    function durationToMills(t) {
+      if (t == null) return null;
+      return Math.round(t.secs * 1000 + t.nanos / 1e6);
+    }
+
+    $('#refresh').click(update);
+  </script>
+</body>
+</html>

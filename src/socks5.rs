@@ -6,7 +6,7 @@ use std::net::{SocketAddr, IpAddr};
 use std::io::Write;
 use self::futures::Future;
 use self::tokio_core::reactor::Handle;
-use self::tokio_core::net as tnet;
+use self::tokio_core::net::TcpStream;
 use self::tokio_io::io::{read_exact, write_all};
 use ::proxy::{ProxyServer, Connect};
 
@@ -39,7 +39,7 @@ impl ProxyServer for Socks5Server {
     }
 
     fn connect(&self, addr: SocketAddr, handle: &Handle) -> Box<Connect> {
-        let conn = tnet::TcpStream::connect(&self.addr, handle);
+        let conn = TcpStream::connect(&self.addr, handle);
         Box::new(conn.and_then(move |stream| {
             debug!("connected with {:?}", stream.peer_addr());
             if let Err(e) = stream.set_nodelay(true) {

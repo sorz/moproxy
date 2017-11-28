@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 use std::io::{self, Read, BufReader, ErrorKind};
 use self::futures::{future, Future};
 use self::tokio_core::reactor::Handle;
-use self::tokio_core::net as tnet;
+use self::tokio_core::net::TcpStream;
 use self::tokio_io::io::{write_all, read_until};
 use ::proxy::{ProxyServer, Connect};
 
@@ -40,7 +40,7 @@ impl ProxyServer for HttpProxyServer {
     }
 
     fn connect(&self, addr: SocketAddr, handle: &Handle) -> Box<Connect> {
-        let conn = tnet::TcpStream::connect(&self.addr, handle);
+        let conn = TcpStream::connect(&self.addr, handle);
         let request = conn.and_then(move |stream| {
             debug!("connected with {:?}", stream.peer_addr());
             if let Err(e) = stream.set_nodelay(true) {
@@ -107,3 +107,4 @@ fn build_request(addr: &SocketAddr) -> String {
         );
         return request;
 }
+

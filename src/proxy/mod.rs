@@ -1,6 +1,8 @@
 extern crate tokio_core;
 extern crate tokio_io;
 extern crate futures;
+pub mod socks5;
+pub mod http;
 use std::fmt;
 use std::rc::Rc;
 use std::io::{self, Read, Write};
@@ -10,8 +12,6 @@ use self::tokio_core::net::TcpStream;
 use self::tokio_core::reactor::Handle;
 use self::tokio_io::io as tio;
 use self::tokio_io::{AsyncRead, AsyncWrite};
-use ::{socks5, http};
-
 
 pub type Connect = Future<Item=TcpStream, Error=io::Error>;
 
@@ -129,3 +129,4 @@ impl AsyncWrite for HalfTcpStream {
         Ok(().into())
     }
 }
+

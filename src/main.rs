@@ -13,7 +13,7 @@ extern crate moproxy;
 use std::cmp;
 use std::env;
 use std::thread;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::io::{self, ErrorKind};
@@ -71,10 +71,17 @@ fn main() {
         panic!("missing server list");
     }
     info!("total {} server(s) added", servers.len());
-    let servers = Rc::new(ServerList::new(servers));
+    let servers = Arc::new(ServerList::new(servers));
     let probe = args.value_of("probe-secs")
         .expect("missing probe secs").parse()
         .expect("not a vaild probe secs");
+
+    if let Some(addr) = args.value_of("web-bind") {
+        let servers = servers.clone();
+        let addr = addr.parse()
+            .expect("not a valid address");
+        thread::spawn(move || web::run_server(addr, servers));
+    }
 
     let mut lp = Core::new().expect("fail to create event loop");
     let handle = lp.handle();
@@ -99,13 +106,6 @@ fn main() {
         handle.spawn(serv);
         Ok(())
     });
-
-    if let Some(addr) = args.value_of("web-bind") {
-        let addr = addr.parse()
-            .expect("not a valid address");
-        thread::spawn(move || web::run_server(addr));
-    }
-
     lp.run(server).expect("error on event loop");
 }
 

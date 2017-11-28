@@ -2,8 +2,7 @@ extern crate rand;
 use std;
 use std::time::{Instant, Duration};
 use std::io;
-use std::rc::Rc;
-use std::cell::{RefCell, Ref};
+use std::sync::{Mutex, Arc, MutexGuard};
 use self::rand::Rng;
 use ::tokio_timer::Timer;
 use ::tokio_core::reactor::Handle;
@@ -14,13 +13,13 @@ use ::proxy::ProxyServer;
 
 #[derive(Clone)]
 pub struct ServerInfo {
-    pub server: Rc<ProxyServer>,
+    pub server: Arc<ProxyServer>,
     pub delay: Option<Duration>,
     pub score: Option<u32>,
 }
 
 pub struct ServerList {
-    inner: RefCell<Vec<ServerInfo>>,
+    inner: Mutex<Vec<ServerInfo>>,
 }
 
 impl ServerList {
@@ -28,27 +27,27 @@ impl ServerList {
         let mut infos: Vec<ServerInfo> = vec![];
         for s in servers {
             let info = ServerInfo {
-                server: Rc::new(s),
+                server: Arc::new(s),
                 delay: None,
                 score: None,
             };
             infos.push(info);
         }
         ServerList {
-            inner: RefCell::new(infos),
+            inner: Mutex::new(infos),
         }
     }
 
-    pub fn get(&self) -> Ref<Vec<ServerInfo>> {
-        self.inner.borrow()
+    pub fn get(&self) -> MutexGuard<Vec<ServerInfo>> {
+        self.inner.lock().unwrap()
     }
 
     fn set(&self, infos: Vec<ServerInfo>) {
-        *self.inner.borrow_mut() = infos;
+        *self.inner.lock().unwrap() = infos;
     }
 }
 
-pub fn monitoring_servers(servers: Rc<ServerList>, probe: u64, handle: Handle)
+pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64, handle: Handle)
         -> Box<Future<Item=(), Error=()>> {
     let init = test_all(&servers, &handle).and_then(move |delays| {
         let mut infos = servers.get().clone();

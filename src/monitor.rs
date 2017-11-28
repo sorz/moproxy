@@ -18,7 +18,7 @@ use ::proxy::ProxyServer;
 
 #[derive(Clone)]
 pub struct ServerInfo {
-    pub server: Rc<Box<ProxyServer + 'static>>,
+    pub server: Rc<ProxyServer>,
     pub delay: Option<u32>,
 }
 
@@ -27,7 +27,7 @@ pub struct ServerList {
 }
 
 impl ServerList {
-    pub fn new(servers: Vec<Box<ProxyServer>>) -> ServerList {
+    pub fn new(servers: Vec<ProxyServer>) -> ServerList {
         let mut infos: Vec<ServerInfo> = vec![];
         for s in servers {
             let info = ServerInfo {
@@ -97,8 +97,8 @@ fn info_stats(infos: &[ServerInfo]) -> String {
     let mut stats = String::new();
     for info in infos.iter().take(5) {
         stats += &match info.delay {
-            None => format!(" {}: --,", info.server.tag()),
-            Some(t) => format!(" {}: {}ms,", info.server.tag(), t),
+            None => format!(" {}: --,", info.server.tag),
+            Some(t) => format!(" {}: {}ms,", info.server.tag, t),
         };
     }
     stats.pop();
@@ -108,7 +108,7 @@ fn info_stats(infos: &[ServerInfo]) -> String {
 fn test_all(servers: &ServerList, handle: &Handle)
         -> Box<Future<Item=Vec<Option<u32>>, Error=io::Error>> {
     let tests: Vec<_> = servers.get().clone().into_iter().map(move |info| {
-        alive_test(&**info.server, handle).then(|t| Ok(t.ok()))
+        alive_test(&*info.server, handle).then(|t| Ok(t.ok()))
     }).collect();
     Box::new(future::join_all(tests))
 }
@@ -134,7 +134,7 @@ pub fn alive_test(server: &ProxyServer, handle: &Handle)
     let timer = Timer::default();
     let now = Instant::now();
     let addr = "8.8.8.8:53".parse().unwrap();
-    let tag = String::from(server.tag());
+    let tag = server.tag.clone();
     let conn = server.connect(addr, handle);
     let try_conn = timer.timeout(conn, Duration::from_secs(5));
     let query = try_conn.and_then(move |stream| {

@@ -10,14 +10,65 @@ use self::tokio_core::net::TcpStream;
 use self::tokio_core::reactor::Handle;
 use self::tokio_io::io as tio;
 use self::tokio_io::{AsyncRead, AsyncWrite};
+use ::{socks5, http};
 
 
 pub type Connect = Future<Item=TcpStream, Error=io::Error>;
-pub trait ProxyServer: Send + Sync + fmt::Display {
-    fn tag(&self) -> &str;
-    fn connect(&self, addr: SocketAddr, handle: &Handle) -> Box<Connect>;
+
+#[derive(Copy, Clone, Debug)]
+pub enum ProxyProto {
+    Socks5,
+    Http,
 }
 
+#[derive(Clone, Debug)]
+pub struct ProxyServer {
+    pub addr: SocketAddr,
+    pub proto: ProxyProto,
+    pub tag: String,
+}
+
+impl ProxyServer {
+    pub fn new(addr: SocketAddr, proto: ProxyProto) -> ProxyServer {
+        let tag = format!("{}", addr.port());
+        ProxyServer {
+            addr: addr,
+            proto: proto,
+            tag: tag,
+        }
+    }
+
+    pub fn connect(&self, addr: SocketAddr, handle: &Handle) -> Box<Connect> {
+        let proto = self.proto;
+        let conn = TcpStream::connect(&self.addr, handle);
+        let handshake = conn.and_then(move |stream| {
+            debug!("connected with {:?}", stream.peer_addr());
+            if let Err(e) = stream.set_nodelay(true) {
+                warn!("fail to set nodelay: {}", e);
+            };
+            match proto {
+                ProxyProto::Socks5 => socks5::handshake(stream, addr),
+                ProxyProto::Http => http::handshake(stream, addr),
+            }
+        });
+        Box::new(handshake)
+    }
+}
+
+impl fmt::Display for ProxyServer {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} ({} {})", self.tag, self.proto, self.addr)
+    }
+}
+
+impl fmt::Display for ProxyProto {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            ProxyProto::Socks5 => write!(f, "SOCKSv5"),
+            ProxyProto::Http => write!(f, "HTTP"),
+        }
+    }
+}
 
 pub fn piping(local: TcpStream, remote: TcpStream)
         -> Box<Future<Item=(), Error=()>> {

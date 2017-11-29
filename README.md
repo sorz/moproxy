@@ -34,11 +34,11 @@ I have written in Rust (
 
 ## Usage
 
-Print usage:
+### Print usage
 ```bash
 moproxy --help
 ```
-Examples:
+### Examples
 
 Assume there are three SOCKSv5 servers on `localhost:2001`, `localhost:2002`,
 and `localhost:2003`, and two HTTP proxy servers listen on `localhost:3128`
@@ -54,6 +54,20 @@ iptables -t nat -A OUTPUT -p tcp -m multiport --dports 80,443 -j REDIRECT --to-p
 # redirect connections initiated by other hosts (if you are router)
 iptables -t nat -A PREROUTING -p tcp -m multiport --dports 80,443 -j REDIRECT --to-port 2080
 ```
+
+### Server list file
+You may list all proxy servers in a text file to avoid a messy CLI arguments.
+
+```ini
+[server-1]
+address=127.0.0.1:2001
+protocol=socks5
+[server-2]
+address=127.0.0.1:2001
+protocol=http
+```
+
+Pass the file path to `moproxy` via `--list` argument.
 
 ## Details
 

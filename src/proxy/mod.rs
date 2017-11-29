@@ -15,7 +15,9 @@ pub type Connect = Future<Item=TcpStream, Error=io::Error>;
 
 #[derive(Copy, Clone, Debug, Serialize)]
 pub enum ProxyProto {
+    #[serde(rename = "SOCKSv5")]
     Socks5,
+    #[serde(rename = "HTTP")]
     Http,
 }
 

@@ -19,7 +19,7 @@
 </head>
 <body>
   <h1>moproxy</h1>
-  <p>moproxy is running.</p>
+  <p>moproxy <span id="version"></span> is running.</p>
   <button id="refresh">Refresh</button>
 
   <h2>Proxy servers</h2>
@@ -36,6 +36,7 @@
     crossorigin="anonymous"></script>
   <script>
     const API_SERVERS = "servers";
+    const API_VERSION = "version";
     $(document).ready(update);
 
     function update() {
@@ -45,6 +46,7 @@
           $table.append(newServerRow(server));
         }
       });
+      $.get(API_VERSION).done((v) => $('#version').text(`(v${v})`));
     }
 
     function newServerRow(info) {

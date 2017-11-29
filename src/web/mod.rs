@@ -16,6 +16,10 @@ fn not_found(_context: Context, mut response: Response) {
     response.send("page not found");
 }
 
+fn version(_context: Context, response: Response) {
+    response.send(env!("CARGO_PKG_VERSION"));
+}
+
 fn servers_json(context: Context, mut response: Response) {
     let json_type = ContentType(content_type!(Text / Json; Charset = Utf8));
     response.headers_mut().set(json_type);
@@ -37,6 +41,7 @@ pub fn run_server(bind: SocketAddr, servers: Arc<ServerList>) {
         TreeRouter::new() => {
             "/" => Get: index as fn(Context, Response),
             "/servers" => Get: servers_json,
+            "/version" => Get: version,
             "/*" => Get: not_found,
         }
     };

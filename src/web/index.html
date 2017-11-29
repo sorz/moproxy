@@ -62,10 +62,14 @@
     function durationToMills(t) {
       if (t == null) return null;
       let ms = Math.round(t.secs * 1000 + t.nanos / 1e6);
-      if (ms < 1000)
-        return `${ms} ms`;
-      else
-        return `${Math.floor(ms / 1000)},${ms % 1000} ms`;
+      return `${numberWithCommas(ms)} ms`;
+    }
+
+    // https://stackoverflow.com/a/2901298/1833236
+    const numberWithCommas = (x) => {
+        var parts = x.toString().split(".");
+        parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        return parts.join(".");
     }
 
     $('#refresh').click(update);

@@ -2,6 +2,7 @@ pub mod socks5;
 pub mod http;
 use std::fmt;
 use std::rc::Rc;
+use std::str::FromStr;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr};
 use ::futures::{Future, Poll};
@@ -26,12 +27,15 @@ pub struct ProxyServer {
 }
 
 impl ProxyServer {
-    pub fn new(addr: SocketAddr, proto: ProxyProto) -> ProxyServer {
-        let tag = format!("{}", addr.port());
+    pub fn new(addr: SocketAddr, proto: ProxyProto, tag: Option<&str>)
+            -> ProxyServer {
         ProxyServer {
             addr: addr,
             proto: proto,
-            tag: tag,
+            tag: match tag {
+                None => format!("{}", addr.port()),
+                Some(s) => String::from(s),
+            },
         }
     }
 
@@ -63,6 +67,18 @@ impl fmt::Display for ProxyProto {
         match *self {
             ProxyProto::Socks5 => write!(f, "SOCKSv5"),
             ProxyProto::Http => write!(f, "HTTP"),
+        }
+    }
+}
+
+impl FromStr for ProxyProto {
+    type Err = ();
+    fn from_str(s: &str) -> Result<ProxyProto, ()> {
+        match s.to_lowercase().as_str() {
+            "socks5" => Ok(ProxyProto::Socks5),
+            "socksv5" => Ok(ProxyProto::Socks5),
+            "http" => Ok(ProxyProto::Http),
+            _ => Err(()),
         }
     }
 }

@@ -5,6 +5,7 @@ extern crate tokio_core;
 extern crate tokio_io;
 extern crate tokio_timer;
 extern crate env_logger;
+extern crate ini;
 #[macro_use]
 extern crate clap;
 #[macro_use]
@@ -18,6 +19,7 @@ use std::time::Duration;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::io::{self, ErrorKind};
 use std::os::unix::io::{RawFd, AsRawFd};
+use ini::Ini;
 use futures::{future, stream, Future, Stream};
 use tokio_core::net::{TcpListener, TcpStream};
 use tokio_core::reactor::{Core, Handle};
@@ -103,12 +105,32 @@ fn parse_servers(args: &clap::ArgMatches) -> Vec<ProxyServer> {
     let mut servers: Vec<ProxyServer> = vec![];
     if let Some(s) = args.values_of("socks5-servers") {
         for s in s.map(parse_server) {
-            servers.push(ProxyServer::new(s, ProxyProto::Socks5));
+            servers.push(ProxyServer::new(s, ProxyProto::Socks5, None));
         }
     }
     if let Some(s) = args.values_of("http-servers") {
         for s in s.map(parse_server) {
-            servers.push(ProxyServer::new(s, ProxyProto::Http));
+            servers.push(ProxyServer::new(s, ProxyProto::Http, None));
+        }
+    }
+    if let Some(path) = args.value_of("server-list") {
+        let ini = Ini::load_from_file(path)
+            .expect("cannot read server list file");
+        for (tag, props) in ini.iter() {
+            let tag = if let Some(s) = props.get("tag") {
+                Some(s.as_str())
+            } else if let Some(ref s) = *tag {
+                Some(s.as_str())
+            } else {
+                None
+            };
+            let addr: SocketAddr = props.get("address")
+                .expect("address not specified").parse()
+                .expect("not a valid socket address");
+            let proto = props.get("protocol")
+                .expect("protocol not specified").parse()
+                .expect("unknown proxy protocol");
+            servers.push(ProxyServer::new(addr, proto, tag));
         }
     }
     servers

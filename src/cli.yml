@@ -31,6 +31,12 @@ args:
         help: HTTP proxy server list. IP address can omit for localhost.
         takes_value: true
         multiple: true
+    - server-list:
+        short: l
+        long: list
+        value_name: SERVER-LIST
+        help: INI file contains list of proxy servers.
+        takes_value: true
     - probe-secs:
         short: i
         long: probe

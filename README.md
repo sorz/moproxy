@@ -63,8 +63,12 @@ You may list all proxy servers in a text file to avoid a messy CLI arguments.
 address=127.0.0.1:2001
 protocol=socks5
 [server-2]
-address=127.0.0.1:2001
+address=127.0.0.1:2002
 protocol=http
+[backup]
+address=127.0.0.1:2002
+protocol=socks5
+score base=5000 ;add 5k to pull away from preferred server.
 ```
 
 Pass the file path to `moproxy` via `--list` argument.

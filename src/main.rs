@@ -105,12 +105,12 @@ fn parse_servers(args: &clap::ArgMatches) -> Vec<ProxyServer> {
     let mut servers: Vec<ProxyServer> = vec![];
     if let Some(s) = args.values_of("socks5-servers") {
         for s in s.map(parse_server) {
-            servers.push(ProxyServer::new(s, ProxyProto::Socks5, None));
+            servers.push(ProxyServer::new(s, ProxyProto::Socks5, None, None));
         }
     }
     if let Some(s) = args.values_of("http-servers") {
         for s in s.map(parse_server) {
-            servers.push(ProxyServer::new(s, ProxyProto::Http, None));
+            servers.push(ProxyServer::new(s, ProxyProto::Http, None, None));
         }
     }
     if let Some(path) = args.value_of("server-list") {
@@ -130,7 +130,9 @@ fn parse_servers(args: &clap::ArgMatches) -> Vec<ProxyServer> {
             let proto = props.get("protocol")
                 .expect("protocol not specified").parse()
                 .expect("unknown proxy protocol");
-            servers.push(ProxyServer::new(addr, proto, tag));
+            let base = props.get("score base").map(|i| i.parse()
+                .expect("score base not a integer"));
+            servers.push(ProxyServer::new(addr, proto, tag, base));
         }
     }
     servers

@@ -15,7 +15,7 @@ use ::proxy::ProxyServer;
 pub struct ServerInfo {
     pub server: Arc<ProxyServer>,
     pub delay: Option<Duration>,
-    pub score: Option<u32>,
+    pub score: Option<i32>,
 }
 
 pub struct ServerList {
@@ -53,9 +53,9 @@ pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64, handle: Handle)
         let mut infos = servers.get().clone();
         infos.iter_mut().zip(delays.iter()).for_each(|(info, t)| {
             info.delay = *t;
-            info.score = t.map(to_ms);
+            info.score = t.map(|t| to_ms(t) + info.server.score_base);
         });
-        infos.sort_by_key(|info| info.score.unwrap_or(std::u32::MAX));
+        infos.sort_by_key(|info| info.score.unwrap_or(std::i32::MAX));
         info!("scores:{}", info_stats(infos.as_slice()));
         servers.set(infos.clone());
         Ok(servers)
@@ -74,14 +74,14 @@ pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64, handle: Handle)
                 let mut infos = servers.get().clone();
                 infos.iter_mut().zip(ts.iter()).for_each(|(info, t)| {
                     info.delay = *t;
-                    info.score = t.map(to_ms).map(|t| {
-                        (info.score.unwrap_or(t + 1000) * 9 + t) / 10
-                    });
+                    info.score = t.map(|t| to_ms(t) + info.server.score_base)
+                        .map(|t|
+                            (info.score.unwrap_or(t + 2000) * 9 + t) / 10);
                 });
                 let mut rng = rand::thread_rng();
                 infos.sort_by_key(move |info| {
-                    info.score.unwrap_or(std::u32::MAX - 50) +
-                    (rng.next_u32() % 20)
+                    info.score.unwrap_or(std::i32::MAX - 50) +
+                    (rng.next_u32() % 30) as i32
                 });
                 info!("scores:{}", info_stats(infos.as_slice()));
                 servers.set(infos);
@@ -152,7 +152,7 @@ fn alive_test(server: &ProxyServer, handle: &Handle)
     Box::new(query)
 }
 
-fn to_ms(t: Duration) -> u32 {
-    t.as_secs() as u32 * 1000 + t.subsec_nanos() / 1_000_000
+fn to_ms(t: Duration) -> i32 {
+    (t.as_secs() as u32 * 1000 + t.subsec_nanos() / 1_000_000) as i32
 }
 

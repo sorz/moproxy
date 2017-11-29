@@ -26,11 +26,12 @@ pub struct ProxyServer {
     pub addr: SocketAddr,
     pub proto: ProxyProto,
     pub tag: String,
+    pub score_base: i32,
 }
 
 impl ProxyServer {
-    pub fn new(addr: SocketAddr, proto: ProxyProto, tag: Option<&str>)
-            -> ProxyServer {
+    pub fn new(addr: SocketAddr, proto: ProxyProto, tag: Option<&str>,
+               score_base: Option<i32>) -> ProxyServer {
         ProxyServer {
             addr: addr,
             proto: proto,
@@ -38,6 +39,7 @@ impl ProxyServer {
                 None => format!("{}", addr.port()),
                 Some(s) => String::from(s),
             },
+            score_base: score_base.unwrap_or(0),
         }
     }
 

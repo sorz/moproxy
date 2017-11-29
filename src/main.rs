@@ -55,26 +55,16 @@ fn main() {
         .expect("missing port number").parse()
         .expect("invalid port number");
     let addr = SocketAddr::new(host, port);
+    let probe = args.value_of("probe-secs")
+        .expect("missing probe secs").parse()
+        .expect("not a vaild probe secs");
 
-    let mut servers: Vec<ProxyServer> = vec![];
-    if let Some(s) = args.values_of("socks5-servers") {
-        for s in s.map(parse_server) {
-            servers.push(ProxyServer::new(s, ProxyProto::Socks5));
-        }
-    }
-    if let Some(s) = args.values_of("http-servers") {
-        for s in s.map(parse_server) {
-            servers.push(ProxyServer::new(s, ProxyProto::Http));
-        }
-    }
+    let servers = parse_servers(&args);
     if servers.len() == 0 {
         panic!("missing server list");
     }
     info!("total {} server(s) added", servers.len());
     let servers = Arc::new(ServerList::new(servers));
-    let probe = args.value_of("probe-secs")
-        .expect("missing probe secs").parse()
-        .expect("not a vaild probe secs");
 
     if let Some(addr) = args.value_of("web-bind") {
         let servers = servers.clone();
@@ -107,6 +97,21 @@ fn main() {
         Ok(())
     });
     lp.run(server).expect("error on event loop");
+}
+
+fn parse_servers(args: &clap::ArgMatches) -> Vec<ProxyServer> {
+    let mut servers: Vec<ProxyServer> = vec![];
+    if let Some(s) = args.values_of("socks5-servers") {
+        for s in s.map(parse_server) {
+            servers.push(ProxyServer::new(s, ProxyProto::Socks5));
+        }
+    }
+    if let Some(s) = args.values_of("http-servers") {
+        for s in s.map(parse_server) {
+            servers.push(ProxyServer::new(s, ProxyProto::Http));
+        }
+    }
+    servers
 }
 
 fn parse_server(addr: &str) -> SocketAddr {

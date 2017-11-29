@@ -21,6 +21,8 @@
   <h1>moproxy</h1>
   <p>moproxy <span id="version"></span> is running.</p>
   <button id="refresh">Refresh</button>
+  <input id="auto-refresh" type="checkbox">
+  <label for="auto-refresh">auto</label>
 
   <h2>Proxy servers</h2>
   <table>
@@ -37,16 +39,19 @@
   <script>
     const API_SERVERS = "servers";
     const API_VERSION = "version";
-    $(document).ready(update);
+    const REFRESH_MILLS = 10 * 1000;
+    $(document).ready(function () {
+      update();
+      $.get(API_VERSION).done((v) => $('#version').text(`(v${v})`));
+    });
 
     function update() {
       let $table = $('#servers').empty();
+      let $button = $('#refresh').attr('disabled', true);
       $.getJSON(API_SERVERS).done(function (servers) {
-        for (let server of servers) {
+        for (let server of servers)
           $table.append(newServerRow(server));
-        }
-      });
-      $.get(API_VERSION).done((v) => $('#version').text(`(v${v})`));
+      }).always(() => $button.attr('disabled', false));
     }
 
     function newServerRow(info) {
@@ -75,6 +80,14 @@
     }
 
     $('#refresh').click(update);
+
+    let refreshId = 0;
+    $('#auto-refresh').change(function () {
+      if (this.checked)
+        refreshId = window.setInterval(update, REFRESH_MILLS);
+      else
+        clearInterval(refreshId);
+    });
   </script>
 </body>
 </html>

@@ -24,16 +24,14 @@ pub struct ServerList {
 }
 
 impl ServerList {
-    pub fn new(servers: Vec<ProxyServer>) -> ServerList {
-        let mut infos: Vec<ServerInfo> = vec![];
-        for s in servers {
-            let info = ServerInfo {
-                server: Arc::new(s),
+    pub fn new<T>(servers: T) -> ServerList
+    where T: IntoIterator<Item = ProxyServer> {
+        let infos = servers.into_iter().map(|server|
+            ServerInfo {
+                server: Arc::new(server),
                 delay: None,
                 score: None,
-            };
-            infos.push(info);
-        }
+            }).collect();
         ServerList {
             inner: Mutex::new(infos),
         }

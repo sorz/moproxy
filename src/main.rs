@@ -28,7 +28,8 @@ use nix::sys::socket;
 use log::LogLevelFilter;
 use env_logger::{LogBuilder, LogTarget};
 use moproxy::monitor::{self, ServerList};
-use moproxy::proxy::{self, ProxyServer, ProxyProto};
+use moproxy::proxy::{self, ProxyServer};
+use moproxy::proxy::ProxyProto::{Socks, Http};
 use moproxy::web;
 
 
@@ -105,12 +106,12 @@ fn parse_servers(args: &clap::ArgMatches) -> Vec<ProxyServer> {
     let mut servers: Vec<ProxyServer> = vec![];
     if let Some(s) = args.values_of("socks5-servers") {
         for s in s.map(parse_server) {
-            servers.push(ProxyServer::new(s, ProxyProto::Socks5, None, None));
+            servers.push(ProxyServer::new(s, Socks5, None, None));
         }
     }
     if let Some(s) = args.values_of("http-servers") {
         for s in s.map(parse_server) {
-            servers.push(ProxyServer::new(s, ProxyProto::Http, None, None));
+            servers.push(ProxyServer::new(s, Http, None, None));
         }
     }
     if let Some(path) = args.value_of("server-list") {

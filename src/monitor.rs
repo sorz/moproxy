@@ -42,22 +42,24 @@ impl ServerList {
         self.inner.lock().unwrap()
     }
 
-    fn set(&self, infos: Vec<ServerInfo>) {
-        *self.inner.lock().unwrap() = infos;
+    fn resort(&self) {
+        let mut rng = rand::thread_rng();
+        self.get().sort_by_key(move |info| {
+            info.score.unwrap_or(std::i32::MAX - 50) +
+            (rng.next_u32() % 30) as i32
+        });
     }
 }
 
 pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64, handle: Handle)
         -> Box<Future<Item=(), Error=()>> {
     let init = test_all(&servers, &handle).and_then(move |delays| {
-        let mut infos = servers.get().clone();
-        infos.iter_mut().zip(delays.iter()).for_each(|(info, t)| {
+        servers.get().iter_mut().zip(delays.iter()).for_each(|(info, t)| {
             info.delay = *t;
             info.score = t.map(|t| to_ms(t) + info.server.score_base);
         });
-        infos.sort_by_key(|info| info.score.unwrap_or(std::i32::MAX));
-        info!("scores:{}", info_stats(infos.as_slice()));
-        servers.set(infos.clone());
+        servers.resort();
+        info!("scores:{}", info_stats(servers.get().as_slice()));
         Ok(servers)
     });
     let timer = Timer::default();
@@ -71,20 +73,14 @@ pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64, handle: Handle)
                 test_all(&servers, &handle)
                     .map(|ts| (ts, servers, handle))
             }).and_then(|(ts, servers, handle)| {
-                let mut infos = servers.get().clone();
-                infos.iter_mut().zip(ts.iter()).for_each(|(info, t)| {
+                servers.get().iter_mut().zip(ts.iter()).for_each(|(info, t)| {
                     info.delay = *t;
                     info.score = t.map(|t| to_ms(t) + info.server.score_base)
                         .map(|t|
                             (info.score.unwrap_or(t + 2000) * 9 + t) / 10);
                 });
-                let mut rng = rand::thread_rng();
-                infos.sort_by_key(move |info| {
-                    info.score.unwrap_or(std::i32::MAX - 50) +
-                    (rng.next_u32() % 30) as i32
-                });
-                info!("scores:{}", info_stats(infos.as_slice()));
-                servers.set(infos);
+                servers.resort();
+                info!("scores:{}", info_stats(servers.get().as_slice()));
                 Ok((servers, handle))
             }).and_then(|args| Ok(future::Loop::Continue(args)))
         })

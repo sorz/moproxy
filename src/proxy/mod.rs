@@ -88,7 +88,7 @@ impl FromStr for ProxyProto {
 }
 
 pub fn piping(local: TcpStream, remote: TcpStream)
-        -> Box<Future<Item=(), Error=()>> {
+        -> Box<Future<Item=(u64, u64), Error=io::Error>> {
     let local_r = HalfTcpStream::new(local);
     let remote_r = HalfTcpStream::new(remote);
     let local_w = local_r.clone();
@@ -102,11 +102,7 @@ pub fn piping(local: TcpStream, remote: TcpStream)
         .and_then(|(n, _, local_w)| {
             tio::shutdown(local_w).map(move |_| n)
         });
-
-    let piping = to_remote.join(to_local)
-        .map(|(tx, rx)| debug!("tx {}, rx {} bytes", tx, rx))
-        .map_err(|e| warn!("piping error: {}", e));
-    Box::new(piping)
+    Box::new(to_remote.join(to_local))
 }
 
 // The default `AsyncWrite::shutdown` for TcpStream does nothing.

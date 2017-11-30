@@ -29,7 +29,7 @@ use log::LogLevelFilter;
 use env_logger::{LogBuilder, LogTarget};
 use moproxy::monitor::{self, ServerList};
 use moproxy::proxy::{self, ProxyServer};
-use moproxy::proxy::ProxyProto::{Socks, Http};
+use moproxy::proxy::ProxyProto::{Socks5, Http};
 use moproxy::web;
 
 
@@ -46,6 +46,7 @@ fn main() {
         .expect("unknown log level");
     logger.filter(None, log_level)
         .filter(Some("tokio_core"), LogLevelFilter::Warn)
+        .filter(Some("ini"), LogLevelFilter::Warn)
         .target(LogTarget::Stdout)
         .format(|r| format!("[{}] {}", r.level(), r.args()))
         .init()
@@ -88,13 +89,24 @@ fn main() {
     let server = listener.incoming().for_each(move |(client, addr)| {
         debug!("incoming {}", addr);
         let conn = connect_server(client, &servers, handle.clone());
-        let serv = conn.and_then(|(client, proxy)| {
+        let serv = conn.and_then(|(client, proxy, (dest, server))| {
             let timeout = Some(Duration::from_secs(180));
             if let Err(e) = client.set_keepalive(timeout)
                     .and(proxy.set_keepalive(timeout)) {
                 warn!("fail to set keepalive: {}", e);
             }
-            proxy::piping(client, proxy)
+            proxy::piping(client, proxy).then(move |result| match result {
+                Ok((tx, rx)) => {
+                    debug!("tx {}, rx {} bytes ({} => {})",
+                        tx, rx, server.tag, dest);
+                    Ok(())
+                },
+                Err(e) => {
+                    warn!("{} (=> {}) piping error: {}",
+                        server.tag, dest, e);
+                    Err(())
+                },
+            })
         });
         handle.spawn(serv);
         Ok(())
@@ -148,7 +160,8 @@ fn parse_server(addr: &str) -> SocketAddr {
 }
 
 fn connect_server(client: TcpStream, servers: &ServerList, handle: Handle)
-        -> Box<Future<Item=(TcpStream, TcpStream), Error=()>> {
+        -> Box<Future<Item=(TcpStream, TcpStream,
+                           (SocketAddr, Arc<ProxyServer>)), Error=()>> {
     let src_dst = future::result(client.peer_addr())
         .join(future::result(get_original_dest(client.as_raw_fd())))
         .map_err(|err| warn!("fail to get original destination: {}", err));
@@ -168,7 +181,7 @@ fn connect_server(client: TcpStream, servers: &ServerList, handle: Handle)
             timer.timeout(conn, wait).then(move |result| match result {
                 Ok(conn) => {
                     info!("{} => {} via {}", src, dest, server.tag);
-                    Err(conn)
+                    Err((conn, (dest, server)))
                 },
                 Err(err) => {
                     warn!("fail to connect {}: {}", server.tag, err);
@@ -176,13 +189,13 @@ fn connect_server(client: TcpStream, servers: &ServerList, handle: Handle)
                 }
             })
         }).then(|result| match result {
-            Err(conn) => Ok(conn),
+            Err(args) => Ok(args),
             Ok(_) => {
                 warn!("all proxy server down");
                 Err(())
             },
         })
-    }).map(|server| (client, server));
+    }).map(|(conn, meta)| (client, conn, meta));
     Box::new(try_connect_all)
 }
 

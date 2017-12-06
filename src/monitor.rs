@@ -11,11 +11,15 @@ use ::futures::{future, Future};
 use ::proxy::ProxyServer;
 
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct ServerInfo {
     pub idx: usize,
     pub delay: Option<Duration>,
     pub score: Option<i32>,
+    pub tx_bytes: u64,
+    pub rx_bytes: u64,
+    pub conn_alive: u32,
+    pub conn_total: u32,
 }
 
 pub struct ServerList {
@@ -28,8 +32,7 @@ impl ServerList {
         let infos = (0..servers.len()).map(|idx|
             ServerInfo {
                 idx: idx,
-                delay: None,
-                score: None,
+                ..Default::default()
             }).collect();
         ServerList {
             servers: servers,
@@ -59,6 +62,23 @@ impl ServerList {
             (rng.next_u32() % 30) as i32
         });
         info!("scores:{}", info_stats(&self.servers, &*infos));
+    }
+
+    pub fn update_stats_conn_open(&self, idx: usize) {
+        self.get_infos().iter_mut().find(|ref i| i.idx == idx)
+            .map(|ref mut info| {
+                info.conn_alive += 1;
+                info.conn_total += 1;
+        });
+    }
+
+    pub fn update_stats_conn_close(&self, idx: usize, tx: u64, rx: u64) {
+        self.get_infos().iter_mut().find(|ref i| i.idx == idx)
+            .map(|ref mut info| {
+                info.conn_alive -= 1;
+                info.tx_bytes += tx;
+                info.rx_bytes += rx;
+        });
     }
 }
 

@@ -14,7 +14,8 @@
     tr.offline { background: lightpink; }
     #servers { font-family: "Courier New", Courier, monospace; }
     #servers tr:hover { background-color: #eee; }
-    #servers td:nth-last-child(-n+2) { text-align: right; }
+    #servers td:nth-child(n+4) { text-align: right; }
+    thead th:nth-child(n+4) { text-align: right; }
   </style>
 </head>
 <body>
@@ -27,7 +28,8 @@
   <h2>Proxy servers</h2>
   <table>
     <thead>
-      <tr><th>Tag<th>Protocol<th>Address<th>Score<th>Lastest delay</tr>
+      <tr><th>Tag<th>Protocol<th>Address<th>Score<th>Lastest delay</th>
+        <th>CUR/TTL conns<th>UP/DN bytes</tr>
     </thead>
     <tbody id="servers"></tbody>
   </table>
@@ -56,11 +58,14 @@
 
     function newServerRow(server, info) {
       let $row = $(
-          `<tr><td>${server.tag}
-          <td>${server.proto}
-          <td>${server.addr}
-          <td>${info.score || '-'}
-          <td>${durationToMills(info.delay) || '-'}</tr>`);
+         `<tr><td>${server.tag}</td>
+         <td>${server.proto}</td>
+         <td>${server.addr}</td>
+         <td>${info.score || '-'}</td>
+         <td>${durationToMills(info.delay) || '-'}</td>
+         <td>${numberWithCommas(info.conn_alive)} /
+             ${numberWithCommas(info.conn_total)}</td>
+         <td>${info.tx_bytes} / ${info.rx_bytes}</tr>`);
       if (info.delay == null)
         $row.addClass('offline');
       return $row;

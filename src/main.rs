@@ -88,22 +88,26 @@ fn main() {
     handle.spawn(mon);
     let server = listener.incoming().for_each(move |(client, addr)| {
         debug!("incoming {}", addr);
-        let conn = connect_server(client, servers.clone(), handle.clone());
-        let serv = conn.and_then(|(client, proxy, (dest, server))| {
+        let list = servers.clone();
+        let conn = connect_server(client, list.clone(), handle.clone());
+        let serv = conn.and_then(|(client, proxy, (dest, idx))| {
             let timeout = Some(Duration::from_secs(180));
             if let Err(e) = client.set_keepalive(timeout)
                     .and(proxy.set_keepalive(timeout)) {
                 warn!("fail to set keepalive: {}", e);
             }
+            list.update_stats_conn_open(idx);
             proxy::piping(client, proxy).then(move |result| match result {
                 Ok((tx, rx)) => {
+                    list.update_stats_conn_close(idx, tx, rx);
                     debug!("tx {}, rx {} bytes ({} => {})",
-                        tx, rx, server.tag, dest);
+                        tx, rx, list.servers[idx].tag, dest);
                     Ok(())
                 },
                 Err(e) => {
+                    list.update_stats_conn_close(idx, 0, 0);
                     warn!("{} (=> {}) piping error: {}",
-                        server.tag, dest, e);
+                        list.servers[idx].tag, dest, e);
                     Err(())
                 },
             })
@@ -161,7 +165,7 @@ fn parse_server(addr: &str) -> SocketAddr {
 
 fn connect_server(client: TcpStream, list: Arc<ServerList>, handle: Handle)
         -> Box<Future<Item=(TcpStream, TcpStream,
-                           (SocketAddr, ProxyServer)), Error=()>> {
+                           (SocketAddr, usize)), Error=()>> {
     let src_dst = future::result(client.peer_addr())
         .join(future::result(get_original_dest(client.as_raw_fd())))
         .map_err(|err| warn!("fail to get original destination: {}", err));
@@ -181,7 +185,7 @@ fn connect_server(client: TcpStream, list: Arc<ServerList>, handle: Handle)
             timer.timeout(conn, wait).then(move |result| match result {
                 Ok(conn) => {
                     info!("{} => {} via {}", src, dest, server.tag);
-                    Err((conn, (dest, server)))
+                    Err((conn, (dest, info.idx)))
                 },
                 Err(err) => {
                     warn!("fail to connect {}: {}", server.tag, err);

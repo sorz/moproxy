@@ -48,17 +48,17 @@
     function update() {
       let $table = $('#servers').empty();
       let $button = $('#refresh').attr('disabled', true);
-      $.getJSON(API_SERVERS).done(function (servers) {
-        for (let server of servers)
-          $table.append(newServerRow(server));
+      $.getJSON(API_SERVERS).done(function (list) {
+        for (let info of list.infos)
+          $table.append(newServerRow(list.servers[info.idx], info));
       }).always(() => $button.attr('disabled', false));
     }
 
-    function newServerRow(info) {
+    function newServerRow(server, info) {
       let $row = $(
-          `<tr><td>${info.server.tag}
-          <td>${info.server.proto}
-          <td>${info.server.addr}
+          `<tr><td>${server.tag}
+          <td>${server.proto}
+          <td>${server.addr}
           <td>${info.score || '-'}
           <td>${durationToMills(info.delay) || '-'}</tr>`);
       if (info.delay == null)

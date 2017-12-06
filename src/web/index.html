@@ -10,7 +10,7 @@
     h1, h2 { color: darkslategray; }
     th, td { border-bottom: 1px solid #ddd; }
     td { line-height: 1.5; font-size: 1.2em; padding: 0 0.8em; }
-    th { line-height: 2; }
+    th { line-height: 2; padding: 0 0.8em; }
     tr.offline { background: lightpink; }
     #servers { font-family: "Courier New", Courier, monospace; }
     #servers tr:hover { background-color: #eee; }
@@ -28,8 +28,8 @@
   <h2>Proxy servers</h2>
   <table>
     <thead>
-      <tr><th>Tag<th>Protocol<th>Address<th>Score<th>Lastest delay</th>
-        <th>CUR/TTL conns<th>UP/DN bytes</tr>
+      <tr><th>Tag<th>Protocol<th>Address<th>Score<th>Delay</th>
+        <th>CUR / TTL<th>Up / Down</tr>
     </thead>
     <tbody id="servers"></tbody>
   </table>
@@ -65,7 +65,8 @@
          <td>${durationToMills(info.delay) || '-'}</td>
          <td>${numberWithCommas(info.conn_alive)} /
              ${numberWithCommas(info.conn_total)}</td>
-         <td>${info.tx_bytes} / ${info.rx_bytes}</tr>`);
+         <td>${humanFileSize(info.tx_bytes)} /
+             ${humanFileSize(info.rx_bytes)}</tr>`);
       if (info.delay == null)
         $row.addClass('offline');
       return $row;
@@ -83,6 +84,14 @@
         parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
         return parts.join(".");
     }
+
+    // https://stackoverflow.com/a/20732091/1833236
+    function humanFileSize(size) {
+      if (size == 0) return 0;
+      var i = Math.floor(Math.log(size) / Math.log(1024));
+      return (size / Math.pow(1024, i)).toFixed(2) * 1 + ' '
+        + ['B', 'KiB', 'MiB', 'GiB', 'TiB'][i];
+    };
 
     $('#refresh').click(update);
 

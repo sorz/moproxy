@@ -25,7 +25,8 @@ fn servers_json(context: Context, mut response: Response) {
     response.headers_mut().set(json_type);
     let servers: &Arc<ServerList> = context.global.get()
         .expect("not servers found in global");
-    let resp = match serde_json::to_string(&*servers.get()) {
+    // FIXME: combine servers & infos.
+    let resp = match serde_json::to_string(&*servers.get_infos()) {
         Ok(json) => json,
         Err(e) => {
             response.set_status(InternalServerError);

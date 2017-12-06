@@ -2,7 +2,6 @@ extern crate rand;
 use std;
 use std::time::{Instant, Duration};
 use std::io;
-use std::slice::Iter;
 use std::sync::{Mutex, Arc, MutexGuard};
 use self::rand::Rng;
 use ::tokio_timer::Timer;
@@ -14,42 +13,44 @@ use ::proxy::ProxyServer;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ServerInfo {
-    pub server: Arc<ProxyServer>,
+    pub idx: usize,
     pub delay: Option<Duration>,
     pub score: Option<i32>,
 }
 
 pub struct ServerList {
-    inner: Mutex<Vec<ServerInfo>>,
+    pub servers: Vec<ProxyServer>,
+    infos: Mutex<Vec<ServerInfo>>,
 }
 
 impl ServerList {
-    pub fn new<T>(servers: T) -> ServerList
-    where T: IntoIterator<Item = ProxyServer> {
-        let infos = servers.into_iter().map(|server|
+    pub fn new(servers: Vec<ProxyServer>) -> ServerList {
+        let infos = (0..servers.len()).map(|idx|
             ServerInfo {
-                server: Arc::new(server),
+                idx: idx,
                 delay: None,
                 score: None,
             }).collect();
         ServerList {
-            inner: Mutex::new(infos),
+            servers: servers,
+            infos: Mutex::new(infos),
         }
     }
 
-    pub fn get(&self) -> MutexGuard<Vec<ServerInfo>> {
-        self.inner.lock().unwrap()
+    pub fn get_infos(&self) -> MutexGuard<Vec<ServerInfo>> {
+        self.infos.lock().unwrap()
     }
 
     /// Update delays and scores, and resort server list.
     ///
     /// `delays` must have the same order of inner server list.
     /// `penalty` would be added to score when the last score is `None`.
-    fn update_delay(&self, delays: Iter<Option<Duration>>, penalty: i32) {
-        let mut infos = self.get();
-        infos.iter_mut().zip(delays).for_each(|(info, delay)| {
-            info.delay = *delay;
-            info.score = delay.map(|t| to_ms(t) + info.server.score_base)
+    fn update_delay(&self, delays: Vec<Option<Duration>>, penalty: i32) {
+        let mut infos = self.get_infos();
+        infos.iter_mut().for_each(|info| {
+            let server = &self.servers[info.idx];
+            info.delay = delays[info.idx];
+            info.score = info.delay.map(|t| to_ms(t) + server.score_base)
                 .map(|s| (info.score.unwrap_or(s + penalty) * 9 + s) / 10);
         });
         let mut rng = rand::thread_rng();
@@ -57,15 +58,16 @@ impl ServerList {
             info.score.unwrap_or(std::i32::MAX - 50) +
             (rng.next_u32() % 30) as i32
         });
-        info!("scores:{}", info_stats(infos.as_slice()));
+        info!("scores:{}", info_stats(&self.servers, &*infos));
     }
 }
 
-pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64, handle: Handle)
+pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64,
+                          handle: Handle)
         -> Box<Future<Item=(), Error=()>> {
     let timer = Timer::default();
     let init = test_all(&servers, &handle, &timer).and_then(move |delays| {
-        servers.update_delay(delays.iter(), 0);
+        servers.update_delay(delays, 0);
         Ok(servers)
     });
     let interval = Duration::from_secs(probe);
@@ -78,7 +80,7 @@ pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64, handle: Handle)
                 test_all(&servers, &handle, &timer)
                     .map(|ts| (ts, servers, (handle, timer)))
             }).and_then(|(ts, servers, args)| {
-                servers.update_delay(ts.iter(), 2000);
+                servers.update_delay(ts, 2000);
                 Ok((servers, args))
             }).and_then(|args| Ok(future::Loop::Continue(args)))
         })
@@ -86,23 +88,23 @@ pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64, handle: Handle)
     Box::new(update)
 }
 
-fn info_stats(infos: &[ServerInfo]) -> String {
+fn info_stats(servers: &[ProxyServer], infos: &[ServerInfo]) -> String {
     let mut stats = String::new();
     for info in infos.iter().take(5) {
         stats += &match info.score {
-            None => format!(" {}: --,", info.server.tag),
-            Some(t) => format!(" {}: {},", info.server.tag, t),
+            None => format!(" {}: --,", servers[info.idx].tag),
+            Some(t) => format!(" {}: {},", servers[info.idx].tag, t),
         };
     }
     stats.pop();
     stats
 }
 
-fn test_all(servers: &ServerList, handle: &Handle, timer: &Timer)
+fn test_all(list: &ServerList, handle: &Handle, timer: &Timer)
         -> Box<Future<Item=Vec<Option<Duration>>, Error=io::Error>> {
     debug!("testing all servers...");
-    let tests: Vec<_> = servers.get().clone().into_iter().map(move |info| {
-        alive_test(&*info.server, handle, timer).then(|t| Ok(t.ok()))
+    let tests: Vec<_> = list.servers.clone().into_iter().map(move |server| {
+        alive_test(&server, handle, timer).then(|t| Ok(t.ok()))
     }).collect();
     Box::new(future::join_all(tests))
 }

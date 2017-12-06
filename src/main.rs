@@ -88,7 +88,7 @@ fn main() {
     handle.spawn(mon);
     let server = listener.incoming().for_each(move |(client, addr)| {
         debug!("incoming {}", addr);
-        let conn = connect_server(client, &servers, handle.clone());
+        let conn = connect_server(client, servers.clone(), handle.clone());
         let serv = conn.and_then(|(client, proxy, (dest, server))| {
             let timeout = Some(Duration::from_secs(180));
             if let Err(e) = client.set_keepalive(timeout)
@@ -159,18 +159,18 @@ fn parse_server(addr: &str) -> SocketAddr {
     }.expect("not a valid server address")
 }
 
-fn connect_server(client: TcpStream, servers: &ServerList, handle: Handle)
+fn connect_server(client: TcpStream, list: Arc<ServerList>, handle: Handle)
         -> Box<Future<Item=(TcpStream, TcpStream,
-                           (SocketAddr, Arc<ProxyServer>)), Error=()>> {
+                           (SocketAddr, ProxyServer)), Error=()>> {
     let src_dst = future::result(client.peer_addr())
         .join(future::result(get_original_dest(client.as_raw_fd())))
         .map_err(|err| warn!("fail to get original destination: {}", err));
     // TODO: reuse timer?
     let timer = Timer::default();
-    let infos = servers.get().clone();
+    let infos = list.get_infos().clone();
     let try_connect_all = src_dst.and_then(move |(src, dest)| {
         stream::iter_ok(infos).for_each(move |info| {
-            let server = info.server;
+            let server = list.servers[info.idx].clone();
             let conn = server.connect(dest, &handle);
             let wait = if let Some(delay) = info.delay {
                 cmp::max(Duration::from_secs(3), delay * 2)

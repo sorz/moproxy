@@ -65,6 +65,7 @@ protocol=socks5
 [server-2]
 address=127.0.0.1:2002
 protocol=http
+test dns=127.0.0.53:53 ;use other dns server to caculate delay
 [backup]
 address=127.0.0.1:2002
 protocol=socks5
@@ -77,7 +78,7 @@ Pass the file path to `moproxy` via `--list` argument.
 
 ### Latency probing
 
-Just send a hard-coded DNS request to Google Public DNS (8.8.8.8) over SOCKS,
+Just send a hard-coded DNS request (with TCP) over proxy,
 and take the delay of receiving a response.
 
 ### Priority of servers

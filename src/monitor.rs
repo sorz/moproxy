@@ -147,7 +147,7 @@ fn alive_test(server: &ProxyServer, handle: &Handle, timer: &Timer)
     let req_tid = tid(&request);
 
     let now = Instant::now();
-    let addr = "8.8.8.8:53".parse().unwrap();
+    let addr = (server.test_ip, 53).into();
     let tag = server.tag.clone();
     let conn = server.connect(addr, handle);
     let try_conn = timer.timeout(conn, Duration::from_secs(5));

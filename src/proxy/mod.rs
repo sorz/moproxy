@@ -4,7 +4,7 @@ use std::fmt;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::io::{self, Read, Write};
-use std::net::{Shutdown, SocketAddr};
+use std::net::{Shutdown, SocketAddr, IpAddr};
 use ::futures::{Future, Poll};
 use ::tokio_core::net::TcpStream;
 use ::tokio_core::reactor::Handle;
@@ -26,12 +26,13 @@ pub struct ProxyServer {
     pub addr: SocketAddr,
     pub proto: ProxyProto,
     pub tag: String,
+    pub test_ip: IpAddr,
     pub score_base: i32,
 }
 
 impl ProxyServer {
-    pub fn new(addr: SocketAddr, proto: ProxyProto, tag: Option<&str>,
-               score_base: Option<i32>) -> ProxyServer {
+    pub fn new(addr: SocketAddr, proto: ProxyProto, test_ip: IpAddr,
+               tag: Option<&str>, score_base: Option<i32>) -> ProxyServer {
         ProxyServer {
             addr: addr,
             proto: proto,
@@ -39,6 +40,7 @@ impl ProxyServer {
                 None => format!("{}", addr.port()),
                 Some(s) => String::from(s),
             },
+            test_ip: test_ip,
             score_base: score_base.unwrap_or(0),
         }
     }

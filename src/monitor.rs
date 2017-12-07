@@ -54,7 +54,16 @@ impl ServerList {
             let server = &self.servers[info.idx];
             info.delay = delays[info.idx];
             info.score = info.delay.map(|t| to_ms(t) + server.score_base)
-                .map(|s| (info.score.unwrap_or(s + penalty) * 9 + s) / 10);
+                .map(|new| {
+                    let old = info.score.unwrap_or(new + penalty);
+                    // give more weight to delays exceed the mean, to
+                    // punish for network jitter.
+                    if new < old {
+                        (old * 9 + new * 1) / 10
+                    } else {
+                        (old * 8 + new * 2) / 10
+                    }
+                });
         });
         let mut rng = rand::thread_rng();
         infos.sort_by_key(move |info| {

@@ -14,8 +14,8 @@
     tr.offline { background: lightpink; }
     #servers { font-family: "Courier New", Courier, monospace; }
     #servers tr:hover { background-color: #eee; }
-    #servers td:nth-child(n+4) { text-align: right; }
-    thead th:nth-child(n+4) { text-align: right; }
+    #servers td:nth-child(n+2) { text-align: right; }
+    thead th:nth-child(n+2) { text-align: right; }
   </style>
 </head>
 <body>
@@ -28,7 +28,7 @@
   <h2>Proxy servers</h2>
   <table>
     <thead>
-      <tr><th>Tag<th>Protocol<th>Address<th>Score<th>Delay</th>
+      <tr><th>Server<th>Score<th>Delay</th>
         <th>CUR / TTL<th>Up / Down</tr>
     </thead>
     <tbody id="servers"></tbody>
@@ -57,16 +57,22 @@
     }
 
     function newServerRow(server, info) {
-      let $row = $(
-         `<tr><td>${server.tag}</td>
-         <td>${server.proto}</td>
-         <td>${server.addr}</td>
-         <td>${info.score || '-'}</td>
-         <td>${durationToMills(info.delay) || '-'}</td>
-         <td>${numberWithCommas(info.conn_alive)} /
-             ${numberWithCommas(info.conn_total)}</td>
-         <td>${humanFileSize(info.tx_bytes)} /
-             ${humanFileSize(info.rx_bytes)}</tr>`);
+      let $row = $(`<tr>
+         <td><span title="${server.proto}://${server.addr}"
+             >${server.tag}</span></td>
+         <td><span title="based on average delay"
+             >${info.score || '-'}</span></td>
+         <td><span title="TCP handshake included"
+             >${durationToMills(info.delay) || '-'}</span></td>
+         <td><span title="# current connections"
+             >${numberWithCommas(info.conn_alive)}</span> /
+             <span title="# total connections"
+             >${numberWithCommas(info.conn_total)}</span></td>
+         <td><span title="total sent"
+             >${humanFileSize(info.tx_bytes)}</span> /
+             <span title="total received"
+             >${humanFileSize(info.rx_bytes)}</span></td>
+         </tr>`);
       if (info.delay == null)
         $row.addClass('offline');
       return $row;

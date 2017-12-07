@@ -58,7 +58,7 @@ impl ServerList {
         });
         let mut rng = rand::thread_rng();
         infos.sort_by_key(move |info| {
-            info.score.unwrap_or(std::i32::MAX - 50) +
+            info.score.unwrap_or(std::i32::MAX) -
             (rng.next_u32() % 30) as i32
         });
         info!("scores:{}", info_stats(&self.servers, &*infos));

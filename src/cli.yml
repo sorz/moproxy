@@ -43,13 +43,13 @@ args:
         value_name: SECONDS
         help: period of time to make one probe.
         default_value: "30"
-    - test-ip:
-        long: test-ip
-        value_name: SERVER-IP
+    - test-dns:
+        long: test-dns
+        value_name: IP-ADDR:PORT
         help: >
-          address of a DNS server with TCP support. Used to do delay probing.
-          Default to Google Public DNS.
-        default_value: "8.8.8.8"
+          address of a DNS server with TCP support to do delay probing.
+          Default to Google Public DNS (8.8.8.8:53).
+        default_value: "8.8.8.8:53"
     - web-bind:
         long: stats-bind
         takes_value: true

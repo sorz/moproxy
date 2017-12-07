@@ -147,9 +147,8 @@ fn alive_test(server: &ProxyServer, handle: &Handle, timer: &Timer)
     let req_tid = tid(&request);
 
     let now = Instant::now();
-    let addr = (server.test_ip, 53).into();
     let tag = server.tag.clone();
-    let conn = server.connect(addr, handle);
+    let conn = server.connect(server.test_dns, handle);
     let try_conn = timer.timeout(conn, Duration::from_secs(5));
     let query = try_conn.and_then(move |stream| {
         write_all(stream, request)

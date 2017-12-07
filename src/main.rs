@@ -119,20 +119,20 @@ fn main() {
 }
 
 fn parse_servers(args: &clap::ArgMatches) -> Vec<ProxyServer> {
-    let default_test_ip = args.value_of("test-ip")
-        .expect("missing test-ip").parse()
-        .expect("not a valid ip address");
+    let default_test_dns = args.value_of("test-dns")
+        .expect("missing test-dns").parse()
+        .expect("not a valid socket address");
     let mut servers: Vec<ProxyServer> = vec![];
     if let Some(s) = args.values_of("socks5-servers") {
         for s in s.map(parse_server) {
             servers.push(ProxyServer::new(
-                    s, Socks5, default_test_ip, None, None));
+                    s, Socks5, default_test_dns, None, None));
         }
     }
     if let Some(s) = args.values_of("http-servers") {
         for s in s.map(parse_server) {
             servers.push(ProxyServer::new(
-                    s, Http, default_test_ip, None, None));
+                    s, Http, default_test_dns, None, None));
         }
     }
     if let Some(path) = args.value_of("server-list") {
@@ -154,10 +154,10 @@ fn parse_servers(args: &clap::ArgMatches) -> Vec<ProxyServer> {
                 .expect("unknown proxy protocol");
             let base = props.get("score base").map(|i| i.parse()
                 .expect("score base not a integer"));
-            let test_ip = props.get("test ip").map(|i| i.parse()
-                .expect("not a valid ip address"))
-                .unwrap_or(default_test_ip);
-            servers.push(ProxyServer::new(addr, proto, test_ip, tag, base));
+            let test_dns = props.get("test dns").map(|i| i.parse()
+                .expect("not a valid socket address"))
+                .unwrap_or(default_test_dns);
+            servers.push(ProxyServer::new(addr, proto, test_dns, tag, base));
         }
     }
     servers

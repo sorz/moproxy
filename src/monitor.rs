@@ -70,7 +70,7 @@ impl ServerList {
             info.score.unwrap_or(std::i32::MAX) -
             (rng.next_u32() % 30) as i32
         });
-        info!("scores:{}", info_stats(&self.servers, &*infos));
+        debug!("scores:{}", info_stats(&self.servers, &*infos));
     }
 
     pub fn update_stats_conn_open(&self, idx: usize) {

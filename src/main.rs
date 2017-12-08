@@ -192,7 +192,7 @@ fn connect_server(client: TcpStream, list: Arc<ServerList>, handle: Handle)
             // Standard proxy server need more time (e.g. DNS resolving)
             timer.timeout(conn, wait).then(move |result| match result {
                 Ok(conn) => {
-                    info!("{} => {} via {}", src, dest, server.tag);
+                    debug!("{} => {} via {}", src, dest, server.tag);
                     Err((conn, (dest, info.idx)))
                 },
                 Err(err) => {

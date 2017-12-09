@@ -126,6 +126,13 @@ fn parse_server_name(value: &[u8]) -> Result<&str, &'static str> {
         Ok(s) => s,
         Err(_) => return Err("server name not utf-8 string"),
     };
+    if name.as_bytes().len() > 255 {
+        return Err("server name too long");
+    }
+    if !name.chars().all(|c| c.is_digit(36) || c == '.' || c == '-'
+                         || c == '_') {
+        return Err("illegal char in server name");
+    }
     Ok(name)
 }
 

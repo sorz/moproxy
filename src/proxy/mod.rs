@@ -4,7 +4,7 @@ use std::fmt;
 use std::rc::Rc;
 use std::str::FromStr;
 use std::io::{self, Read, Write};
-use std::net::{Shutdown, SocketAddr};
+use std::net::{Shutdown, SocketAddr, IpAddr};
 use ::futures::{Future, Poll};
 use ::tokio_core::net::TcpStream;
 use ::tokio_core::reactor::Handle;
@@ -30,6 +30,34 @@ pub struct ProxyServer {
     pub score_base: i32,
 }
 
+pub enum Address {
+    Ip(IpAddr),
+    Domain(String),
+}
+
+pub struct Destination {
+    host: Address,
+    port: u16,
+}
+
+impl From<SocketAddr> for Destination {
+    fn from(addr: SocketAddr) -> Self {
+        Destination {
+            host: Address::Ip(addr.ip()),
+            port: addr.port(),
+        }
+    }
+}
+
+impl<'a> From<(&'a str, u16)> for Destination {
+    fn from(addr: (&'a str, u16)) -> Self {
+        Destination {
+            host: Address::Domain(String::from(addr.0)),
+            port: addr.1,
+        }
+    }
+}
+
 impl ProxyServer {
     pub fn new(addr: SocketAddr, proto: ProxyProto, test_dns: SocketAddr,
                tag: Option<&str>, score_base: Option<i32>) -> ProxyServer {
@@ -45,7 +73,8 @@ impl ProxyServer {
         }
     }
 
-    pub fn connect(&self, addr: SocketAddr, handle: &Handle) -> Box<Connect> {
+    pub fn connect(&self, addr: Destination, handle: &Handle)
+            -> Box<Connect> {
         let proto = self.proto;
         let conn = TcpStream::connect(&self.addr, handle);
         let handshake = conn.and_then(move |stream| {

@@ -1,13 +1,13 @@
 use std::str;
-use std::net::SocketAddr;
+use std::net::IpAddr;
 use std::io::{self, Read, BufReader, ErrorKind};
 use ::futures::{future, Future};
 use ::tokio_core::net::TcpStream;
 use ::tokio_io::io::{write_all, read_until};
-use ::proxy::Connect;
+use ::proxy::{Connect, Destination, Address};
 
 
-pub fn handshake(stream: TcpStream, addr: SocketAddr) -> Box<Connect> {
+pub fn handshake(stream: TcpStream, addr: Destination) -> Box<Connect> {
     let request = build_request(&addr);
     let response = write_all(stream, request).and_then(|(stream, _)| {
         let reader = BufReader::new(stream).take(512);
@@ -54,10 +54,14 @@ pub fn handshake(stream: TcpStream, addr: SocketAddr) -> Box<Connect> {
     Box::new(skip.map(|reader| reader.into_inner()))
 }
 
-fn build_request(addr: &SocketAddr) -> String {
-        let host = match *addr {
-            SocketAddr::V4(s) => format!("{}:{}", s.ip(), s.port()),
-            SocketAddr::V6(s) => format!("[{}]:{}", s.ip(), s.port()),
+fn build_request(addr: &Destination) -> String {
+        let port = addr.port;
+        let host = match addr.host {
+            Address::Ip(ip) => match ip {
+                IpAddr::V4(ip) => format!("{}:{}", ip, port),
+                IpAddr::V6(ip) => format!("[{}]:{}", ip, port),
+            },
+            Address::Domain(ref s) => format!("{}:{}", s, port),
         };
         let request = format!(
             "CONNECT {host} HTTP/1.1\r\n\

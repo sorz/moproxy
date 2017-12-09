@@ -183,7 +183,7 @@ fn connect_server(client: TcpStream, list: Arc<ServerList>, handle: Handle)
     let try_connect_all = src_dst.and_then(move |(src, dest)| {
         stream::iter_ok(infos).for_each(move |info| {
             let server = list.servers[info.idx].clone();
-            let conn = server.connect(dest, &handle);
+            let conn = server.connect(dest.into(), &handle);
             let wait = if let Some(delay) = info.delay {
                 cmp::max(Duration::from_secs(3), delay * 2)
             } else {

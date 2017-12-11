@@ -51,11 +51,13 @@ impl Client {
     pub fn retrive_dest(self) -> Box<Future<Item=Self, Error=()>> {
         let Client { left, src, mut dest, list, handle, .. } = self; 
         // FIXME: may accidentally lost other field
+        let timer = Timer::default();
+        let wait = Duration::from_millis(200);
         let data = read(left, vec![0u8; 768])
             .map_err(|err| warn!("fail to read hello from client: {}", err));
-        let result = data.map(move |(left, data, len)| {
+        let result = timer.timeout(data, wait).map(move |(left, data, len)| {
             match tls::parse_client_hello(&data[..len]) {
-                Err(err) => warn!("fail to parse hello: {}", err),
+                Err(err) => info!("fail to parse hello: {}", err),
                 Ok(TlsClientHello { server_name: None, .. } ) =>
                     debug!("not SNI found in client hello"),
                 Ok(TlsClientHello { server_name: Some(name), .. } ) => {
@@ -66,7 +68,7 @@ impl Client {
             let mut client = Client::new(left, src, dest, list, handle);
             client.pending_data = Some(data[..len].to_vec());
             client
-        });
+        }).map_err(|_| info!("no tls request received before timeout"));
         Box::new(result)
     }
 
@@ -96,7 +98,7 @@ impl Client {
             Err((conn, info, tag)) => {
                 self.right = Some(conn);
                 self.proxy = Some(info);
-                debug!("{} => {} via {}", self.src, self.dest, tag);
+                info!("{} => {} via {}", self.src, self.dest, tag);
                 Ok(self)
             },
             Ok(_) => {

@@ -58,7 +58,16 @@ args:
         long: remote-dns
         help: >
           try to obtain domain name from TLS SNI, and sent it to remote
-          proxy server.
+          proxy server. Only apply for port number 443.
+    - n-parallel:
+        long: n-parallel
+        value_name: N
+        takes_value: true
+        help: >
+          connect and send application data to N proxies in parallel, use
+          the first proxy that return valid data. Currently only support
+          TLS as application layer. Must turn on --remote-dns otherwise it
+          will be ignored.
     - log-level:
         long: log-level
         takes_value: true

@@ -29,7 +29,8 @@ pub struct NewClientWithData {
     left: TcpStream,
     src: SocketAddr,
     dest: Destination,
-    pending_data: Vec<u8>,
+    pending_data: Box<[u8]>,
+    is_tls: bool,
     list: Arc<ServerList>,
     handle: Handle,
 }
@@ -46,7 +47,8 @@ pub struct ConnectedClient {
 }
 
 pub trait Connectable {
-    fn connect_server(self) -> Box<Future<Item=ConnectedClient, Error=()>>;
+    fn connect_server(self, n_parallel: usize)
+        -> Box<Future<Item=ConnectedClient, Error=()>>;
 }
 
 impl NewClient {
@@ -72,18 +74,24 @@ impl NewClient {
         let data = read(left, vec![0u8; 768])
             .map_err(|err| warn!("fail to read hello from client: {}", err));
         let result = timer.timeout(data, wait).map(move |(left, data, len)| {
-            match tls::parse_client_hello(&data[..len]) {
-                Err(err) => info!("fail to parse hello: {}", err),
-                Ok(TlsClientHello { server_name: None, .. } ) =>
-                    debug!("not SNI found in client hello"),
+            let is_tls = match tls::parse_client_hello(&data[..len]) {
+                Err(err) => {
+                    info!("fail to parse hello: {}", err);
+                    false
+                },
+                Ok(TlsClientHello { server_name: None, .. } ) => {
+                    debug!("not SNI found in client hello");
+                    true
+                },
                 Ok(TlsClientHello { server_name: Some(name), .. } ) => {
                     debug!("SNI found: {}", name);
                     dest = (name, dest.port).into();
+                    true
                 },
             };
             NewClientWithData {
-                left, src, dest, list, handle,
-                pending_data: data[..len].to_vec(),
+                left, src, dest, list, handle, is_tls,
+                pending_data: data[..len].to_vec().into_boxed_slice(),
             }
         }).map_err(|_| info!("no tls request received before timeout"));
         Box::new(result)
@@ -91,7 +99,7 @@ impl NewClient {
 }
 
 impl Connectable for NewClient {
-    fn connect_server(self)
+    fn connect_server(self, _n_parallel: usize)
             -> Box<Future<Item=ConnectedClient, Error=()>> {
         let NewClient { left, src, dest, list, handle } = self;
         let infos = list.get_infos().clone();
@@ -107,27 +115,50 @@ impl Connectable for NewClient {
 }
 
 impl Connectable for NewClientWithData {
-    fn connect_server(self)
+    fn connect_server(self, n_parallel: usize)
             -> Box<Future<Item=ConnectedClient, Error=()>> {
         let NewClientWithData {
-            left, src, dest, list, handle, pending_data } = self;
+            left, src, dest, list, handle, pending_data, is_tls } = self;
         let infos = list.get_infos().clone();
-        let seq = try_connect_seq(dest.clone(), infos, handle.clone())
-            .and_then(move |(right, info)| {
-                write_all(right, pending_data)
-                    .map(move |(right, _)| (right, info))
-                    .map_err(|err| warn!("fail to write: {}", err))
-            }).map(move |(right, info)| {
-                info!("{} => {} via {}", src, dest, info.server.tag);
-                ConnectedClient {
-                    left, right, src, dest, proxy: info, list, handle
-                }
-            }).map_err(|_| warn!("all proxy server down"));
-        Box::new(seq)
+        let n_parallel = if is_tls {
+            cmp::min(infos.len(), n_parallel)
+        } else {
+            0
+        };
+        let (infos_par, infos_seq) = infos.split_at(
+            cmp::min(infos.len(), n_parallel));
+        let conn_par = try_connect_par(dest.clone(), infos_par.to_vec(),
+                                       pending_data.clone(), handle.clone());
+        let conn_seq = try_connect_seq(dest.clone(), infos_seq.to_vec(),
+                                       handle.clone());
+        let conn = conn_par.then(move |result| match result {
+            Ok((right, info, data)) => {
+                let write = write_all(left, data)
+                    .map(move |(left, _)| (left, right, info))
+                    .map_err(|err| warn!("fail to write client: {}", err));
+                Box::new(write) as Box<Future<Item=_, Error=()>>
+            },
+            Err(_) => {
+                let seq = conn_seq.and_then(move |(right, info)| {
+                    write_all(right, pending_data)
+                        .map(move |(right, _)| (left, right, info))
+                        .map_err(|err| warn!("fail to write: {}", err))
+                });
+                Box::new(seq)
+            },
+        });
+        let client = conn.map(move |(left, right, info)| {
+            info!("{} => {} via {}", src, dest, info.server.tag);
+            ConnectedClient {
+                left, right, src, dest, proxy: info, list, handle
+            }
+        }).map_err(|_| warn!("all proxy server down"));
+        Box::new(client)
     }
 }
 
-fn try_connect_seq(dest: Destination, servers: Vec<ServerInfo>, handle: Handle)
+fn try_connect_seq(dest: Destination, servers: Vec<ServerInfo>,
+                   handle: Handle)
         -> Box<Future<Item=(TcpStream, ServerInfo), Error=()>> {
     let timer = Timer::default();
     let try_all = stream::iter_ok(servers).for_each(move |info| {
@@ -151,6 +182,35 @@ fn try_connect_seq(dest: Destination, servers: Vec<ServerInfo>, handle: Handle)
         Ok(_) => Err(()),
     });
     Box::new(try_all)
+}
+
+fn try_connect_par(dest: Destination, servers: Vec<ServerInfo>,
+                   pending_data: Box<[u8]>, handle: Handle)
+        -> Box<Future<Item=(TcpStream, ServerInfo, Box<[u8]>), Error=()>> {
+    let timer = Timer::default();
+    let conns: Vec<_> = servers.into_iter().map(move |info| {
+        let right = info.server.connect(dest.clone(), &handle);
+        let wait = Duration::from_secs(5);
+        let tag = info.server.tag.clone();
+        let data_copy = pending_data.clone();
+        timer.timeout(right, wait).and_then(move |right| {
+            write_all(right, data_copy)
+        }).and_then(|(right, buf)| {
+            read(right, buf)
+        }).map(|(right, buf, len)| {
+            // TODO: verify server hello
+            (right, info, buf[..len].to_vec().into_boxed_slice())
+        }).map_err(move |err| {
+           warn!("fail to connect {}: {}", tag, err);
+        })
+    }).collect();
+    if conns.is_empty() {
+        Box::new(future::err(()))
+    } else {
+        debug!("try to connect {} servers in parallel", conns.len());
+        Box::new(future::select_ok(conns)
+            .map(|(result, _)| result))
+    }
 }
 
 impl ConnectedClient {

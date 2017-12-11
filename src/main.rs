@@ -57,6 +57,9 @@ fn main() {
         .expect("missing probe secs").parse()
         .expect("not a vaild probe secs");
     let remote_dns = args.is_present("remote-dns");
+    let n_parallel = args.value_of("n-parallel")
+        .map(|v| v.parse().expect("not a valid number"))
+        .unwrap_or(0 as usize);
 
     let servers = parse_servers(&args);
     if servers.len() == 0 {
@@ -87,11 +90,11 @@ fn main() {
             sock, servers.clone(), handle.clone());
         let conn = client.and_then(move |client| 
             if remote_dns && client.dest.port == 443 {
-                Box::new(client.retrive_dest().and_then(|client| {
-                    client.connect_server()
+                Box::new(client.retrive_dest().and_then(move |client| {
+                    client.connect_server(n_parallel)
                 }))
             } else {
-                client.connect_server()
+                client.connect_server(0)
             });
         let serv = conn.and_then(|client| client.serve());
         handle.spawn(serv);

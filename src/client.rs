@@ -95,10 +95,9 @@ impl Connectable for NewClient {
             -> Box<Future<Item=ConnectedClient, Error=()>> {
         let NewClient { left, src, dest, list, handle } = self;
         let infos = list.get_infos().clone();
-        let seq = try_connect_seq(dest.clone(), infos, 
-                                  list.clone(), handle.clone())
-            .map(move |(right, info, tag)| {
-                info!("{} => {} via {}", src, dest, tag);
+        let seq = try_connect_seq(dest.clone(), infos, handle.clone())
+            .map(move |(right, info)| {
+                info!("{} => {} via {}", src, dest, info.server.tag);
                 ConnectedClient {
                     left, right, src, dest, proxy: info, list, handle
                 }
@@ -113,14 +112,13 @@ impl Connectable for NewClientWithData {
         let NewClientWithData {
             left, src, dest, list, handle, pending_data } = self;
         let infos = list.get_infos().clone();
-        let seq = try_connect_seq(dest.clone(), infos,
-                                  list.clone(), handle.clone())
-            .and_then(move |(right, info, tag)| {
+        let seq = try_connect_seq(dest.clone(), infos, handle.clone())
+            .and_then(move |(right, info)| {
                 write_all(right, pending_data)
-                    .map(move |(right, _)| (right, info, tag))
+                    .map(move |(right, _)| (right, info))
                     .map_err(|err| warn!("fail to write: {}", err))
-            }).map(move |(right, info, tag)| {
-                info!("{} => {} via {}", src, dest, tag);
+            }).map(move |(right, info)| {
+                info!("{} => {} via {}", src, dest, info.server.tag);
                 ConnectedClient {
                     left, right, src, dest, proxy: info, list, handle
                 }
@@ -129,12 +127,11 @@ impl Connectable for NewClientWithData {
     }
 }
 
-fn try_connect_seq(dest: Destination, servers: Vec<ServerInfo>,
-                   list: Arc<ServerList>, handle: Handle)
-        -> Box<Future<Item=(TcpStream, ServerInfo, Box<str>), Error=()>> {
+fn try_connect_seq(dest: Destination, servers: Vec<ServerInfo>, handle: Handle)
+        -> Box<Future<Item=(TcpStream, ServerInfo), Error=()>> {
     let timer = Timer::default();
     let try_all = stream::iter_ok(servers).for_each(move |info| {
-        let server = list.servers[info.idx].clone();
+        let server = info.server.clone();
         let right = server.connect(dest.clone(), &handle);
         let wait = if let Some(delay) = info.delay {
             cmp::max(Duration::from_secs(3), delay * 2)
@@ -143,7 +140,7 @@ fn try_connect_seq(dest: Destination, servers: Vec<ServerInfo>,
         };
         // Standard proxy server need more time (e.g. DNS resolving)
         timer.timeout(right, wait).then(move |result| match result {
-            Ok(right) => Err((right, info, server.tag)),
+            Ok(right) => Err((right, info)),
             Err(err) => {
                 warn!("fail to connect {}: {}", server.tag, err);
                 Ok(())
@@ -173,13 +170,13 @@ impl ConnectedClient {
                 Ok((tx, rx)) => {
                     list.update_stats_conn_close(&info, tx, rx);
                     debug!("tx {}, rx {} bytes ({} => {})",
-                        tx, rx, list.servers[info.idx].tag, dest);
+                        tx, rx, info.server.tag, dest);
                     Ok(())
                 },
                 Err(e) => {
                     list.update_stats_conn_close(&info, 0, 0);
                     warn!("{} (=> {}) piping error: {}",
-                        list.servers[info.idx].tag, dest, e);
+                        info.server.tag, dest, e);
                     Err(())
                 }
             }

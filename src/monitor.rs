@@ -11,9 +11,10 @@ use ::futures::{future, Future};
 use ::proxy::ProxyServer;
 
 
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct ServerInfo {
     pub idx: usize,
+    pub server: Arc<ProxyServer>,
     pub delay: Option<Duration>,
     pub score: Option<i32>,
     pub tx_bytes: u64,
@@ -24,16 +25,28 @@ pub struct ServerInfo {
 
 #[derive(Debug)]
 pub struct ServerList {
-    pub servers: Vec<ProxyServer>,
+    pub servers: Vec<Arc<ProxyServer>>,
     infos: Mutex<Vec<ServerInfo>>,
+}
+
+impl ServerInfo {
+    fn new(idx: usize, server: &Arc<ProxyServer>) -> ServerInfo {
+        ServerInfo {
+            idx, server: server.clone(),
+            delay: None, score: None, tx_bytes: 0, rx_bytes: 0,
+            conn_alive: 0, conn_total: 0,
+        }
+    }
 }
 
 impl ServerList {
     pub fn new(servers: Vec<ProxyServer>) -> ServerList {
-        let infos = (0..servers.len()).map(|idx|
-            ServerInfo {
-                idx: idx,
-                ..Default::default()
+        let servers: Vec<_> = servers.into_iter()
+            .map(|server| Arc::new(server))
+            .collect();
+        let infos = (0..servers.len())
+            .zip(servers.iter()).map(|(idx, server)| {
+                ServerInfo::new(idx, server)
             }).collect();
         ServerList {
             servers: servers,
@@ -71,7 +84,7 @@ impl ServerList {
             info.score.unwrap_or(std::i32::MAX) -
             (rng.next_u32() % 30) as i32
         });
-        debug!("scores:{}", info_stats(&self.servers, &*infos));
+        debug!("scores:{}", info_stats(&*infos));
     }
 
     pub fn update_stats_conn_open(&self, info: &ServerInfo) {
@@ -119,12 +132,12 @@ pub fn monitoring_servers(servers: Arc<ServerList>, probe: u64,
     Box::new(update)
 }
 
-fn info_stats(servers: &[ProxyServer], infos: &[ServerInfo]) -> String {
+fn info_stats(infos: &[ServerInfo]) -> String {
     let mut stats = String::new();
     for info in infos.iter().take(5) {
         stats += &match info.score {
-            None => format!(" {}: --,", servers[info.idx].tag),
-            Some(t) => format!(" {}: {},", servers[info.idx].tag, t),
+            None => format!(" {}: --,", info.server.tag),
+            Some(t) => format!(" {}: {},", info.server.tag, t),
         };
     }
     stats.pop();

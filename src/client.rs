@@ -72,39 +72,45 @@ impl Client {
         Box::new(result)
     }
 
-    pub fn connect_server(mut self) -> Box<Future<Item=Self, Error=()>> {
-        let timer = Timer::default();
+    pub fn connect_server(self) -> Box<Future<Item=Self, Error=()>> {
         let infos = self.list.get_infos().clone();
         let dest = self.dest.clone();
+        let try_all = self.try_connect_seq(dest, infos)
+            .map(move |(client, tag)| {
+                info!("{} => {} via {}", client.src, client.dest, tag);
+                client
+            }).map_err(|_| warn!("all proxy server down"));
+        Box::new(try_all)
+    }
+
+    fn try_connect_seq(mut self, dest: Destination, infos: Vec<ServerInfo>)
+            -> Box<Future<Item=(Self, String), Error=Self>> {
+        let timer = Timer::default();
         let list = self.list.clone();
         let handle = self.handle.clone();
         let try_all = stream::iter_ok(infos).for_each(move |info| {
             let server = list.servers[info.idx].clone();
-            let conn = server.connect(dest.clone(), &handle);
+            let right = server.connect(dest.clone(), &handle);
             let wait = if let Some(delay) = info.delay {
                 cmp::max(Duration::from_secs(3), delay * 2)
             } else {
                 Duration::from_secs(3)
             };
             // Standard proxy server need more time (e.g. DNS resolving)
-            timer.timeout(conn, wait).then(move |result| match result {
-                Ok(conn) => Err((conn, info, server.tag)),
+            timer.timeout(right, wait).then(move |result| match result {
+                Ok(right) => Err((right, info, server.tag)),
                 Err(err) => {
                     warn!("fail to connect {}: {}", server.tag, err);
                     Ok(())
                 },
             })
         }).then(move |result| match result {
-            Err((conn, info, tag)) => {
-                self.right = Some(conn);
+            Err((right, info, tag)) => {
+                self.right = Some(right);
                 self.proxy = Some(info);
-                info!("{} => {} via {}", self.src, self.dest, tag);
-                Ok(self)
+                Ok((self, tag))
             },
-            Ok(_) => {
-                warn!("all proxy server down");
-                Err(())
-            },
+            Ok(_) => Err(self),
         });
         Box::new(try_all)
     }
@@ -149,6 +155,8 @@ impl Client {
         Box::new(serve)
     }
 }
+
+
 
 fn get_original_dest(fd: RawFd) -> io::Result<SocketAddr> {
     let addr = sys::socket::getsockopt(fd, sys::socket::sockopt::OriginalDst)

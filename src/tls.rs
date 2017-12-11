@@ -1,4 +1,5 @@
 use std::str::from_utf8;
+use std::ops::Range;
 
 pub struct TlsClientHello<'a> {
     pub server_name: Option<&'a str>,
@@ -12,23 +13,34 @@ struct TlsRecord<'a> {
     fragment: &'a [u8],
 }
 
+fn truncate(data: &[u8], len_pos: Range<usize>)
+        -> Result<&[u8], &'static str> {
+    let len_bits = data.get(len_pos.clone())
+        .ok_or("lack data to decode length")?;
+    let mut len = 0usize;
+    for bit in len_bits {
+        len = len << 8 | (*bit as usize);
+    }
+    return data.get(len_pos.end..len_pos.end + len)
+        .ok_or("not enough data");
+}
+
+fn drop_before(data: &[u8], len_pos: Range<usize>)
+        -> Result<&[u8], &'static str> {
+    let len = truncate(data, len_pos.clone())?.len();
+    return Ok(&data[len_pos.end + len..]);
+}
+
 fn parse_tls_record<'a>(data: &'a [u8])
         -> Result<TlsRecord<'a>, &'static str> {
-    if data.len() < 5 {
-        return Err("not enough data");
-    }
-    let length = data[3] as usize | data[4] as usize;
-    if data.len() < length + 5 {
-        return Err("truncated data")
-    }
+    let fragment = truncate(data, 3..5)?;
     Ok(TlsRecord {
         content_type: &data[0],
         version_major: &data[1],
         version_minor: &data[2],
-        fragment: &data[5..5 + length],
+        fragment,
     })
 }
-
 
 pub fn parse_client_hello<'a>(data: &'a [u8])
         -> Result<TlsClientHello<'a>, &'static str> {
@@ -45,71 +57,37 @@ pub fn parse_client_hello<'a>(data: &'a [u8])
         return Err("not handshake");
     }
 
-    // parse handshake protocol
     // 0: handshake type
-    if fragment[0] != 1 {
+    if fragment.get(0) != Some(&1) {
         return Err("not client hello");
     }
-    // 1..4: 3-bytes length
-    let length = (fragment[1] as usize) << 16 |
-        (fragment[2] as usize) << 8 | (fragment[3] as usize);
-    if fragment.len() < length + 4 {
-        return Err("fragmented record");
-    }
-    let hello = &fragment[4..4 + length];
-
-    // parse client hello
+    let hello = truncate(fragment, 1..4)?;
     // 0..2: client version
-    if hello[0] != 3 {
+    if hello.get(0) != Some(&3) {
         return Err("unsupported client version");
     }
-    // 2..34: 32-bytes random, ignored
-    // 34: 1-byte length of session id
-    let length = hello[34] as usize;
-    if hello.len() < 34 + length {
-        return Err("session id too long");
-    }
-    let mut remaining = &hello[35 + length..];
-    // 2-bytes length of cipher suite
-    let length = (remaining[0] as usize) << 8 | remaining[1] as usize;
-    if remaining.len() < 2 + length {
-        return Err("cipher suite too long");
-    }
-    remaining = &remaining[2 + length..];
-    // 1-byte length of compression methods
-    let length = remaining[0] as usize;
-    if remaining.len() < 1 + length {
-        return Err("compression methods too long");
-    }
-    remaining = &remaining[1 + length..];
+    // 2..34: 32-bytes random, dropped
+    // 34+: session id, dropped
+    let remaining = drop_before(hello, 34..35)?;
+    // cipher suite, dropped
+    let remaining = drop_before(remaining, 0..2)?;
+    // compression methods, dropped
+    let remaining = drop_before(remaining, 0..1)?;
     // 2-byte length of extensions
-    let length = (remaining[0] as usize) << 8 | remaining[1] as usize;
-    if remaining.len() < 2 + length {
-        return Err("extensions too long");
-    }
-    let mut exts = &remaining[2..2 + length];
+    let mut exts = truncate(remaining, 0..2)?;
     let mut server_name = None;
     while exts.len() >= 4 {
         // 0..2: extension type
         let ext_type = &exts[0..2];
         // 2..4: extension length
-        let length = (exts[2] as usize) << 8 | exts[3] as usize;
-        if exts.len() < 4 + length {
-            return Err("extension data too long");
-        }
-        let ext_data = &exts[4..4 + length];
-        exts = &exts[4 + length..];
+        let ext_data = truncate(exts, 2..4)?;
+        exts = drop_before(exts, 2..4)?;
         if ext_type == &[0, 0] { // server name indication
-            if ext_data.len() < 2 {
-                return Err("server list too short");
-            }
-            // 0..2: length of list, ignored
-            let mut data = &ext_data[2..];
+            let mut data = truncate(ext_data, 0..2)?;
             while data.len() > 3 {
+                let value = truncate(data, 1..3)?;
                 let name_type = data[0];
-                let length = (data[1] as usize) << 8 | data[2] as usize;
-                let value = &data[3..3 + length];
-                data = &data[3 + length..];
+                data = drop_before(data, 1..3)?;
                 if name_type == 0 { // hostname
                     server_name = Some(parse_server_name(value)?);
                 }

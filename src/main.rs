@@ -15,7 +15,7 @@ use std::thread;
 use std::sync::Arc;
 use std::net::SocketAddr;
 use ini::Ini;
-use futures::{Future, Stream, IntoFuture};
+use futures::{Future, Stream};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
 use log::LogLevelFilter;
@@ -23,7 +23,7 @@ use env_logger::{LogBuilder, LogTarget};
 use moproxy::monitor::{self, ServerList};
 use moproxy::proxy::ProxyServer;
 use moproxy::proxy::ProxyProto::{Socks5, Http};
-use moproxy::client::Client;
+use moproxy::client::{NewClient, Connectable};
 use moproxy::web;
 
 
@@ -83,15 +83,16 @@ fn main() {
     handle.spawn(mon);
     let server = listener.incoming().for_each(move |(sock, addr)| {
         debug!("incoming {}", addr);
-        let client = Client::from_socket(
+        let client = NewClient::from_socket(
             sock, servers.clone(), handle.clone());
-        let client = client.and_then(move |client| 
+        let conn = client.and_then(move |client| 
             if remote_dns && client.dest.port == 443 {
-                client.retrive_dest()
+                Box::new(client.retrive_dest().and_then(|client| {
+                    client.connect_server()
+                }))
             } else {
-                Box::new(Ok(client).into_future())
+                client.connect_server()
             });
-        let conn = client.and_then(|client| client.connect_server());
         let serv = conn.and_then(|client| client.serve());
         handle.spawn(serv);
         Ok(())

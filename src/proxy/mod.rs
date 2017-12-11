@@ -25,7 +25,7 @@ pub enum ProxyProto {
 pub struct ProxyServer {
     pub addr: SocketAddr,
     pub proto: ProxyProto,
-    pub tag: String,
+    pub tag: Box<str>,
     pub test_dns: SocketAddr,
     pub score_base: i32,
 }
@@ -33,7 +33,7 @@ pub struct ProxyServer {
 #[derive(Clone, Debug)]
 pub enum Address {
     Ip(IpAddr),
-    Domain(String),
+    Domain(Box<str>),
 }
 
 #[derive(Clone, Debug)]
@@ -53,8 +53,9 @@ impl From<SocketAddr> for Destination {
 
 impl<'a> From<(&'a str, u16)> for Destination {
     fn from(addr: (&'a str, u16)) -> Self {
+        let host = String::from(addr.0).into_boxed_str();
         Destination {
-            host: Address::Domain(String::from(addr.0)),
+            host: Address::Domain(host),
             port: addr.1,
         }
     }
@@ -69,7 +70,7 @@ impl ProxyServer {
             tag: match tag {
                 None => format!("{}", addr.port()),
                 Some(s) => String::from(s),
-            },
+            }.into_boxed_str(),
             test_dns: test_dns,
             score_base: score_base.unwrap_or(0),
         }

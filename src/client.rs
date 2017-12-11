@@ -131,7 +131,7 @@ impl Connectable for NewClientWithData {
 
 fn try_connect_seq(dest: Destination, servers: Vec<ServerInfo>,
                    list: Arc<ServerList>, handle: Handle)
-        -> Box<Future<Item=(TcpStream, ServerInfo, String), Error=()>> {
+        -> Box<Future<Item=(TcpStream, ServerInfo, Box<str>), Error=()>> {
     let timer = Timer::default();
     let try_all = stream::iter_ok(servers).for_each(move |info| {
         let server = list.servers[info.idx].clone();

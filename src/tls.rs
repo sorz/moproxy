@@ -1,12 +1,13 @@
 use std::str::from_utf8;
 
 pub struct TlsClientHello<'a> {
-    server_name: Option<&'a str>,
+    pub server_name: Option<&'a str>,
 }
 
 struct TlsRecord<'a> {
     content_type: &'a u8,
     version_major: &'a u8,
+    #[allow(dead_code)]
     version_minor: &'a u8,
     fragment: &'a [u8],
 }

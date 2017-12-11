@@ -8,18 +8,21 @@ use ::nix::{self, sys};
 use ::tokio_core::net::TcpStream;
 use ::tokio_core::reactor::Handle;
 use ::tokio_timer::Timer;
-use ::futures::{future, stream, Future, Stream};
+use ::tokio_io::io::{read, write_all};
+use ::futures::{future, stream, Future, Stream, IntoFuture};
 use ::monitor::{ServerList, ServerInfo};
 use ::proxy::{self, Destination};
+use ::tls::{self, TlsClientHello};
 
 
 #[derive(Debug)]
 pub struct Client {
     left: TcpStream,
     src: SocketAddr,
-    dest: Destination,
+    pub dest: Destination,
     right: Option<TcpStream>,
     proxy: Option<ServerInfo>,
+    pending_data: Option<Vec<u8>>,
     list: Arc<ServerList>,
     handle: Handle,
 }
@@ -29,7 +32,9 @@ impl Client {
     fn new(left: TcpStream, src: SocketAddr, dest: Destination,
            list: Arc<ServerList>, handle: Handle) -> Self {
         Client {
-            left, src, dest, right: None, proxy: None, list, handle,
+            left, src, dest,
+            right: None, proxy: None, pending_data: None,
+            list, handle,
         }
     }
 
@@ -41,6 +46,28 @@ impl Client {
         Box::new(src_dest.map(move |(src, dest)| {
             Client::new(left, src, dest.into(), list, handle)
         }))
+    }
+
+    pub fn retrive_dest(self) -> Box<Future<Item=Self, Error=()>> {
+        let Client { left, src, mut dest, list, handle, .. } = self; 
+        // FIXME: may accidentally lost other field
+        let data = read(left, vec![0u8; 768])
+            .map_err(|err| warn!("fail to read hello from client: {}", err));
+        let result = data.map(move |(left, data, len)| {
+            match tls::parse_client_hello(&data[..len]) {
+                Err(err) => warn!("fail to parse hello: {}", err),
+                Ok(TlsClientHello { server_name: None, .. } ) =>
+                    debug!("not SNI found in client hello"),
+                Ok(TlsClientHello { server_name: Some(name), .. } ) => {
+                    debug!("SNI found: {}", name);
+                    dest = (name, dest.port).into();
+                },
+            };
+            let mut client = Client::new(left, src, dest, list, handle);
+            client.pending_data = Some(data[..len].to_vec());
+            client
+        });
+        Box::new(result)
     }
 
     pub fn connect_server(mut self) -> Box<Future<Item=Self, Error=()>> {
@@ -81,7 +108,8 @@ impl Client {
     }
 
     pub fn serve(self) -> Box<Future<Item=(), Error=()>> {
-        let Client { left, right, dest, proxy: info, list, .. } = self;
+        let Client { left, right, dest, proxy: info, list,
+                     pending_data, .. } = self;
         let right = right.expect("client not connected");
         let info = info.expect("client not connected");
 
@@ -93,21 +121,29 @@ impl Client {
         }
 
         list.update_stats_conn_open(&info);
-        let serve = proxy::piping(left, right)
-            .then(move |result| match result {
-                Ok((tx, rx)) => {
-                    list.update_stats_conn_close(&info, tx, rx);
-                    debug!("tx {}, rx {} bytes ({} => {})",
-                        tx, rx, list.servers[info.idx].tag, dest);
-                    Ok(())
-                },
-                Err(e) => {
-                    list.update_stats_conn_close(&info, 0, 0);
-                    warn!("{} (=> {}) piping error: {}",
-                        list.servers[info.idx].tag, dest, e);
-                    Err(())
-                },
-            });
+        let sent = if let Some(data) = pending_data {
+            Box::new(write_all(right, data).map(|(right, _)| right))
+                as Box<Future<Item=TcpStream, Error=io::Error>>
+        } else {
+            Box::new(Ok(right).into_future())
+        };
+
+        let serve = sent.and_then(move |right| {
+            proxy::piping(left, right)
+        }).then(move |result| match result {
+            Ok((tx, rx)) => {
+                list.update_stats_conn_close(&info, tx, rx);
+                debug!("tx {}, rx {} bytes ({} => {})",
+                    tx, rx, list.servers[info.idx].tag, dest);
+                Ok(())
+            },
+            Err(e) => {
+                list.update_stats_conn_close(&info, 0, 0);
+                warn!("{} (=> {}) piping error: {}",
+                    list.servers[info.idx].tag, dest, e);
+                Err(())
+            }
+        });
         Box::new(serve)
     }
 }

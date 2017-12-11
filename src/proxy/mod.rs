@@ -38,8 +38,8 @@ pub enum Address {
 
 #[derive(Clone, Debug)]
 pub struct Destination {
-    host: Address,
-    port: u16,
+    pub host: Address,
+    pub port: u16,
 }
 
 impl From<SocketAddr> for Destination {

@@ -15,7 +15,7 @@ use std::thread;
 use std::sync::Arc;
 use std::net::SocketAddr;
 use ini::Ini;
-use futures::{Future, Stream};
+use futures::{Future, Stream, IntoFuture};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
 use log::LogLevelFilter;
@@ -56,6 +56,7 @@ fn main() {
     let probe = args.value_of("probe-secs")
         .expect("missing probe secs").parse()
         .expect("not a vaild probe secs");
+    let remote_dns = args.is_present("remote-dns");
 
     let servers = parse_servers(&args);
     if servers.len() == 0 {
@@ -84,6 +85,12 @@ fn main() {
         debug!("incoming {}", addr);
         let client = Client::from_socket(
             sock, servers.clone(), handle.clone());
+        let client = client.and_then(move |client| 
+            if remote_dns && client.dest.port == 443 {
+                client.retrive_dest()
+            } else {
+                Box::new(Ok(client).into_future())
+            });
         let conn = client.and_then(|client| client.connect_server());
         let serv = conn.and_then(|client| client.serve());
         handle.spawn(serv);

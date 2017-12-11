@@ -54,6 +54,11 @@ args:
         long: stats-bind
         takes_value: true
         help: where the web server that shows statistics bind to.
+    - remote-dns:
+        long: remote-dns
+        help: >
+          try to obtain domain name from TLS SNI, and sent it to remote
+          proxy server.
     - log-level:
         long: log-level
         takes_value: true

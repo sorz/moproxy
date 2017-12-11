@@ -1,4 +1,3 @@
-extern crate nix;
 extern crate net2;
 extern crate futures;
 extern crate tokio_core;
@@ -11,25 +10,20 @@ extern crate clap;
 #[macro_use]
 extern crate log;
 extern crate moproxy;
-use std::cmp;
 use std::env;
 use std::thread;
 use std::sync::Arc;
-use std::time::Duration;
-use std::net::{SocketAddr, SocketAddrV4};
-use std::io::{self, ErrorKind};
-use std::os::unix::io::{RawFd, AsRawFd};
+use std::net::SocketAddr;
 use ini::Ini;
-use futures::{future, stream, Future, Stream};
-use tokio_core::net::{TcpListener, TcpStream};
-use tokio_core::reactor::{Core, Handle};
-use tokio_timer::Timer;
-use nix::sys::socket;
+use futures::{Future, Stream};
+use tokio_core::net::TcpListener;
+use tokio_core::reactor::Core;
 use log::LogLevelFilter;
 use env_logger::{LogBuilder, LogTarget};
 use moproxy::monitor::{self, ServerList};
-use moproxy::proxy::{self, ProxyServer};
+use moproxy::proxy::ProxyServer;
 use moproxy::proxy::ProxyProto::{Socks5, Http};
+use moproxy::client::Client;
 use moproxy::web;
 
 
@@ -86,32 +80,12 @@ fn main() {
     let mon = monitor::monitoring_servers(
         servers.clone(), probe, lp.handle());
     handle.spawn(mon);
-    let server = listener.incoming().for_each(move |(client, addr)| {
+    let server = listener.incoming().for_each(move |(sock, addr)| {
         debug!("incoming {}", addr);
-        let list = servers.clone();
-        let conn = connect_server(client, list.clone(), handle.clone());
-        let serv = conn.and_then(|(client, proxy, (dest, idx))| {
-            let timeout = Some(Duration::from_secs(180));
-            if let Err(e) = client.set_keepalive(timeout)
-                    .and(proxy.set_keepalive(timeout)) {
-                warn!("fail to set keepalive: {}", e);
-            }
-            list.update_stats_conn_open(idx);
-            proxy::piping(client, proxy).then(move |result| match result {
-                Ok((tx, rx)) => {
-                    list.update_stats_conn_close(idx, tx, rx);
-                    debug!("tx {}, rx {} bytes ({} => {})",
-                        tx, rx, list.servers[idx].tag, dest);
-                    Ok(())
-                },
-                Err(e) => {
-                    list.update_stats_conn_close(idx, 0, 0);
-                    warn!("{} (=> {}) piping error: {}",
-                        list.servers[idx].tag, dest, e);
-                    Err(())
-                },
-            })
-        });
+        let client = Client::from_socket(
+            sock, servers.clone(), handle.clone());
+        let conn = client.and_then(|client| client.connect_server());
+        let serv = conn.and_then(|client| client.serve());
         handle.spawn(serv);
         Ok(())
     });
@@ -169,57 +143,5 @@ fn parse_server(addr: &str) -> SocketAddr {
     } else {
         format!("127.0.0.1:{}", addr).parse()
     }.expect("not a valid server address")
-}
-
-fn connect_server(client: TcpStream, list: Arc<ServerList>, handle: Handle)
-        -> Box<Future<Item=(TcpStream, TcpStream,
-                           (SocketAddr, usize)), Error=()>> {
-    let src_dst = future::result(client.peer_addr())
-        .join(future::result(get_original_dest(client.as_raw_fd())))
-        .map_err(|err| warn!("fail to get original destination: {}", err));
-    // TODO: reuse timer?
-    let timer = Timer::default();
-    let infos = list.get_infos().clone();
-    let try_connect_all = src_dst.and_then(move |(src, dest)| {
-        stream::iter_ok(infos).for_each(move |info| {
-            let server = list.servers[info.idx].clone();
-            let conn = server.connect(dest.into(), &handle);
-            let wait = if let Some(delay) = info.delay {
-                cmp::max(Duration::from_secs(3), delay * 2)
-            } else {
-                Duration::from_secs(3)
-            };
-            // Standard proxy server need more time (e.g. DNS resolving)
-            timer.timeout(conn, wait).then(move |result| match result {
-                Ok(conn) => {
-                    debug!("{} => {} via {}", src, dest, server.tag);
-                    Err((conn, (dest, info.idx)))
-                },
-                Err(err) => {
-                    warn!("fail to connect {}: {}", server.tag, err);
-                    Ok(())
-                }
-            })
-        }).then(|result| match result {
-            Err(args) => Ok(args),
-            Ok(_) => {
-                warn!("all proxy server down");
-                Err(())
-            },
-        })
-    }).map(|(conn, meta)| (client, conn, meta));
-    Box::new(try_connect_all)
-}
-
-fn get_original_dest(fd: RawFd) -> io::Result<SocketAddr> {
-    let addr = socket::getsockopt(fd, socket::sockopt::OriginalDst)
-        .map_err(|e| match e {
-            nix::Error::Sys(err) => io::Error::from(err),
-            _ => io::Error::new(ErrorKind::Other, e),
-        })?;
-    let addr = SocketAddrV4::new(addr.sin_addr.s_addr.to_be().into(),
-                                 addr.sin_port.to_be());
-    // TODO: support IPv6
-    Ok(SocketAddr::V4(addr))
 }
 

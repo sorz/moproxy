@@ -30,11 +30,13 @@ pub struct ProxyServer {
     pub score_base: i32,
 }
 
+#[derive(Clone, Debug)]
 pub enum Address {
     Ip(IpAddr),
     Domain(String),
 }
 
+#[derive(Clone, Debug)]
 pub struct Destination {
     host: Address,
     port: u16,
@@ -83,8 +85,8 @@ impl ProxyServer {
                 warn!("fail to set nodelay: {}", e);
             };
             match proto {
-                ProxyProto::Socks5 => socks5::handshake(stream, addr),
-                ProxyProto::Http => http::handshake(stream, addr),
+                ProxyProto::Socks5 => socks5::handshake(stream, &addr),
+                ProxyProto::Http => http::handshake(stream, &addr),
             }
         });
         Box::new(handshake)
@@ -103,6 +105,21 @@ impl fmt::Display for ProxyProto {
             ProxyProto::Socks5 => write!(f, "SOCKSv5"),
             ProxyProto::Http => write!(f, "HTTP"),
         }
+    }
+}
+
+impl fmt::Display for Address {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Address::Ip(ref ip) => write!(f, "{}", ip),
+            Address::Domain(ref s) => write!(f, "{}", s),
+        }
+    }
+}
+
+impl fmt::Display for Destination {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}:{}", self.host, self.port)
     }
 }
 

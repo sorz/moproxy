@@ -10,6 +10,8 @@ extern crate tokio_core;
 extern crate tokio_io;
 extern crate tokio_timer;
 extern crate futures;
+extern crate nix;
+pub mod client;
 pub mod monitor;
 pub mod proxy;
 pub mod web;

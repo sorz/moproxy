@@ -22,6 +22,7 @@ pub struct ServerInfo {
     pub conn_total: u32,
 }
 
+#[derive(Debug)]
 pub struct ServerList {
     pub servers: Vec<ProxyServer>,
     infos: Mutex<Vec<ServerInfo>>,
@@ -73,16 +74,17 @@ impl ServerList {
         debug!("scores:{}", info_stats(&self.servers, &*infos));
     }
 
-    pub fn update_stats_conn_open(&self, idx: usize) {
-        self.get_infos().iter_mut().find(|ref i| i.idx == idx)
+    pub fn update_stats_conn_open(&self, info: &ServerInfo) {
+        self.get_infos().iter_mut().find(|ref i| i.idx == info.idx)
             .map(|ref mut info| {
                 info.conn_alive += 1;
                 info.conn_total += 1;
         });
     }
 
-    pub fn update_stats_conn_close(&self, idx: usize, tx: u64, rx: u64) {
-        self.get_infos().iter_mut().find(|ref i| i.idx == idx)
+    pub fn update_stats_conn_close(&self, info: &ServerInfo,
+                                   tx: u64, rx: u64) {
+        self.get_infos().iter_mut().find(|ref i| i.idx == info.idx)
             .map(|ref mut info| {
                 info.conn_alive -= 1;
                 info.tx_bytes += tx;

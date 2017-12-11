@@ -7,8 +7,8 @@ use ::tokio_io::io::{write_all, read_until};
 use ::proxy::{Connect, Destination, Address};
 
 
-pub fn handshake(stream: TcpStream, addr: Destination) -> Box<Connect> {
-    let request = build_request(&addr);
+pub fn handshake(stream: TcpStream, addr: &Destination) -> Box<Connect> {
+    let request = build_request(addr);
     let response = write_all(stream, request).and_then(|(stream, _)| {
         let reader = BufReader::new(stream).take(512);
         read_until(reader, 0x0a, Vec::with_capacity(32))

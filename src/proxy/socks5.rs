@@ -6,8 +6,8 @@ use ::tokio_io::io::{read_exact, write_all};
 use ::proxy::{Connect, Destination, Address};
 
 
-pub fn handshake(stream: TcpStream, addr: Destination) -> Box<Connect> {
-    let request = build_request(&addr);
+pub fn handshake(stream: TcpStream, addr: &Destination) -> Box<Connect> {
+    let request = build_request(addr);
     let handshake = write_all(stream, request).and_then(|(stream, _)| {
         read_exact(stream, vec![0; 12])
     }).map(|(stream, _)| stream);

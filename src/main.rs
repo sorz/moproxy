@@ -11,7 +11,6 @@ extern crate clap;
 extern crate log;
 extern crate moproxy;
 use std::env;
-use std::thread;
 use std::sync::Arc;
 use std::net::SocketAddr;
 use ini::Ini;
@@ -40,6 +39,7 @@ fn main() {
         .expect("unknown log level");
     logger.filter(None, log_level)
         .filter(Some("tokio_core"), LogLevelFilter::Warn)
+        .filter(Some("hyper"), LogLevelFilter::Warn)
         .filter(Some("ini"), LogLevelFilter::Warn)
         .target(LogTarget::Stdout)
         .format(|r| format!("[{}] {}", r.level(), r.args()))
@@ -68,15 +68,16 @@ fn main() {
     info!("total {} server(s) added", servers.len());
     let servers = Arc::new(ServerList::new(servers));
 
-    if let Some(addr) = args.value_of("web-bind") {
-        let servers = servers.clone();
-        let addr = addr.parse()
-            .expect("not a valid address");
-        thread::spawn(move || web::run_server(addr, servers));
-    }
-
     let mut lp = Core::new().expect("fail to create event loop");
     let handle = lp.handle();
+
+    if let Some(addr) = args.value_of("web-bind") {
+        let addr = addr.parse()
+            .expect("not a valid address");
+        let serv = web::run_server(&addr, servers.clone(), &handle);
+        handle.spawn(serv);
+        info!("http run on {}", addr);
+    }
 
     let listener = TcpListener::bind(&addr, &handle)
         .expect("cannot bind to port");

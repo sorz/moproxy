@@ -15,7 +15,7 @@ pub type ServerList = Vec<Rc<ProxyServer>>;
 
 #[derive(Clone, Debug)]
 pub struct Monitor {
-    servers: RefCell<ServerList>,
+    servers: Rc<RefCell<ServerList>>,
 }
 
 impl Monitor {
@@ -24,7 +24,7 @@ impl Monitor {
             .map(|server| Rc::new(server))
             .collect();
         Monitor {
-            servers: RefCell::new(servers),
+            servers: Rc::new(RefCell::new(servers)),
         }
     }
 

@@ -1,26 +1,25 @@
 use std::net::SocketAddr;
-use std::sync::Arc;
 use ::futures::{future, Future, Stream};
 use ::tokio_core::reactor::Handle;
 use ::hyper::{self, Method, StatusCode};
 use ::hyper::header::ContentType;
 use ::hyper::server::{Http, Request, Response, Service};
 use ::serde_json;
-use ::monitor::ServerList;
+use ::monitor::Monitor;
 
 
 struct StatsPages {
-    servers: Arc<ServerList>,
+    monitor: Monitor,
 }
 
 impl StatsPages {
-    fn new(servers: Arc<ServerList>) -> StatsPages {
-        StatsPages { servers }
+    fn new(monitor: Monitor) -> StatsPages {
+        StatsPages { monitor }
     }
 
     fn servers_json(&self) -> serde_json::Result<String> {
-        let infos = self.servers.get_infos();
-        serde_json::to_string(&*infos)
+        let servers = self.monitor.servers();
+        serde_json::to_string(&*servers)
     }
 }
 
@@ -60,10 +59,9 @@ impl Service for StatsPages {
     }
 }
 
-pub fn run_server(bind: &SocketAddr, servers: Arc<ServerList>,
-                  handle: &Handle)
+pub fn run_server(bind: &SocketAddr, monitor: Monitor, handle: &Handle)
         -> Box<Future<Item=(), Error=()>> {
-    let new_service = move || Ok(StatsPages::new(servers.clone()));
+    let new_service = move || Ok(StatsPages::new(monitor.clone()));
     let serve = Http::new()
         .serve_addr_handle(bind, handle, new_service)
         .expect("fail to start web server");

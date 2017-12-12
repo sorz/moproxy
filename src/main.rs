@@ -11,7 +11,6 @@ extern crate clap;
 extern crate log;
 extern crate moproxy;
 use std::env;
-use std::sync::Arc;
 use std::net::SocketAddr;
 use ini::Ini;
 use futures::{Future, Stream};
@@ -19,7 +18,7 @@ use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
 use log::LogLevelFilter;
 use env_logger::{LogBuilder, LogTarget};
-use moproxy::monitor::{self, ServerList};
+use moproxy::monitor::Monitor;
 use moproxy::proxy::ProxyServer;
 use moproxy::proxy::ProxyProto::{Socks5, Http};
 use moproxy::client::{NewClient, Connectable};
@@ -66,7 +65,7 @@ fn main() {
         panic!("missing server list");
     }
     info!("total {} server(s) added", servers.len());
-    let servers = Arc::new(ServerList::new(servers));
+    let monitor = Monitor::new(servers);
 
     let mut lp = Core::new().expect("fail to create event loop");
     let handle = lp.handle();
@@ -74,7 +73,7 @@ fn main() {
     if let Some(addr) = args.value_of("web-bind") {
         let addr = addr.parse()
             .expect("not a valid address");
-        let serv = web::run_server(&addr, servers.clone(), &handle);
+        let serv = web::run_server(&addr, monitor.clone(), &handle);
         handle.spawn(serv);
         info!("http run on {}", addr);
     }
@@ -82,13 +81,11 @@ fn main() {
     let listener = TcpListener::bind(&addr, &handle)
         .expect("cannot bind to port");
     info!("listen on {}", addr);
-    let mon = monitor::monitoring_servers(
-        servers.clone(), probe, lp.handle());
-    handle.spawn(mon);
+    handle.spawn(monitor.clone().run(probe, lp.handle()));
     let server = listener.incoming().for_each(move |(sock, addr)| {
         debug!("incoming {}", addr);
         let client = NewClient::from_socket(
-            sock, servers.clone(), handle.clone());
+            sock, monitor.servers(), handle.clone());
         let conn = client.and_then(move |client| 
             if remote_dns && client.dest.port == 443 {
                 Box::new(client.retrive_dest().and_then(move |client| {

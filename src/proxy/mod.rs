@@ -2,7 +2,9 @@ pub mod socks5;
 pub mod http;
 use std::fmt;
 use std::rc::Rc;
+use std::cell::Cell;
 use std::str::FromStr;
+use std::time::Duration;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, IpAddr};
 use ::futures::{Future, Poll};
@@ -27,7 +29,13 @@ pub struct ProxyServer {
     pub proto: ProxyProto,
     pub tag: Box<str>,
     pub test_dns: SocketAddr,
-    pub score_base: i32,
+    score_base: i32,
+    delay: Cell<Option<Duration>>,
+    score: Cell<Option<i32>>,
+    tx_bytes: Cell<u64>,
+    rx_bytes: Cell<u64>,
+    conn_alive: Cell<u32>,
+    conn_total: Cell<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -65,14 +73,18 @@ impl ProxyServer {
     pub fn new(addr: SocketAddr, proto: ProxyProto, test_dns: SocketAddr,
                tag: Option<&str>, score_base: Option<i32>) -> ProxyServer {
         ProxyServer {
-            addr: addr,
-            proto: proto,
+            addr, proto, test_dns,
             tag: match tag {
                 None => format!("{}", addr.port()),
                 Some(s) => String::from(s),
             }.into_boxed_str(),
-            test_dns: test_dns,
             score_base: score_base.unwrap_or(0),
+            delay: Cell::new(None),
+            score: Cell::new(None),
+            tx_bytes: Cell::new(0),
+            rx_bytes: Cell::new(0),
+            conn_alive: Cell::new(0),
+            conn_total: Cell::new(0),
         }
     }
 
@@ -92,6 +104,47 @@ impl ProxyServer {
         });
         Box::new(handshake)
     }
+
+    pub fn delay(&self) -> Option<Duration> {
+        self.delay.get()
+    }
+
+    pub fn score(&self) -> Option<i32> {
+        self.score.get()
+    }
+
+    pub fn update_delay(&self, delay: Option<Duration>, penalty: i32) {
+        self.delay.set(delay);
+        let score = delay
+            .map(|t| to_ms(t) + self.score_base)
+            .map(|new| {
+                let old = self.score.get().unwrap_or(new + penalty);
+                // give more weight to delays exceed the mean, to
+                // punish for network jitter.
+                if new < old {
+                    (old * 9 + new * 1) / 10
+                } else {
+                    (old * 8 + new * 2) / 10
+                }
+            });
+        self.score.set(score);
+    }
+
+    fn update_traffics(&self, tx: u64, rx: u64) {
+        self.tx_bytes.set(self.tx_bytes.get() + tx);
+        self.rx_bytes.set(self.rx_bytes.get() + rx);
+    }
+
+    pub fn update_stats_conn_open(&self) {
+        self.conn_alive.set(self.conn_alive.get() + 1);
+        self.conn_total.set(self.conn_total.get() + 1);
+    }
+
+    pub fn update_stats_conn_close(&self, tx: u64, rx: u64) {
+        self.conn_alive.set(self.conn_alive.get() - 1);
+        self.update_traffics(tx, rx);
+    }
+
 }
 
 impl fmt::Display for ProxyServer {
@@ -192,3 +245,7 @@ impl AsyncWrite for HalfTcpStream {
     }
 }
 
+// TODO: remove duplicate code
+fn to_ms(t: Duration) -> i32 {
+    (t.as_secs() as u32 * 1000 + t.subsec_nanos() / 1_000_000) as i32
+}

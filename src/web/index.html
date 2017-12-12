@@ -48,32 +48,32 @@
     });
 
     function update() {
-      let $table = $('#servers').empty();
+      let $table = $('#servers');
       let $button = $('#refresh').attr('disabled', true);
-      $.getJSON(API_SERVERS).done(function (infos) {
-        for (let info of infos)
-          $table.append(newServerRow(info.server, info));
+      $.getJSON(API_SERVERS).done(function (servers) {
+        $table.empty();
+        servers.forEach(server => $table.append(newServerRow(server)));
       }).always(() => $button.attr('disabled', false));
     }
 
-    function newServerRow(server, info) {
+    function newServerRow(server) {
       let $row = $(`<tr>
          <td><span title="${server.proto}://${server.addr}"
              >${server.tag}</span></td>
          <td><span title="based on average delay"
-             >${info.score || '-'}</span></td>
+             >${server.score || '-'}</span></td>
          <td><span title="TCP handshake included"
-             >${durationToMills(info.delay) || '-'}</span></td>
+             >${durationToMills(server.delay) || '-'}</span></td>
          <td><span title="# current connections"
-             >${numberWithCommas(info.conn_alive)}</span> /
+             >${numberWithCommas(server.conn_alive)}</span> /
              <span title="# total connections"
-             >${numberWithCommas(info.conn_total)}</span></td>
+             >${numberWithCommas(server.conn_total)}</span></td>
          <td><span title="total sent"
-             >${humanFileSize(info.tx_bytes)}</span> /
+             >${humanFileSize(server.tx_bytes)}</span> /
              <span title="total received"
-             >${humanFileSize(info.rx_bytes)}</span></td>
+             >${humanFileSize(server.rx_bytes)}</span></td>
          </tr>`);
-      if (info.delay == null)
+      if (server.delay == null)
         $row.addClass('offline');
       return $row;
     }

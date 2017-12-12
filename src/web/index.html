@@ -34,30 +34,35 @@
     <tbody id="servers"></tbody>
   </table>
 
-  <script
-    src="https://code.jquery.com/jquery-3.2.1.min.js"
-    integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4="
-    crossorigin="anonymous"></script>
   <script>
     const API_SERVERS = "servers";
     const API_VERSION = "version";
     const REFRESH_MILLS = 10 * 1000;
-    $(document).ready(function () {
-      update();
-      $.get(API_VERSION).done((v) => $('#version').text(`(v${v})`));
-    });
+    let $ = s => document.querySelector(s);
 
-    function update() {
-      let $table = $('#servers');
-      let $button = $('#refresh').attr('disabled', true);
-      $.getJSON(API_SERVERS).done(function (servers) {
-        $table.empty();
-        servers.forEach(server => $table.append(newServerRow(server)));
-      }).always(() => $button.attr('disabled', false));
+    async function update() {
+      let table = $('#servers');
+      let button = $('#refresh');
+      button.disabled = true;
+      try {
+        let resp = await fetch(API_SERVERS);
+        if (!resp.ok)
+          throw new Error(`server return ${resp.status}`);
+        let servers = await resp.json();
+        table.innerHTML = '';
+        servers.forEach(server => {
+          table.appendChild(newServerRow(server));
+        });
+      } catch (ex) {
+        alert(`Fail to refresh: ${ex.message}`);
+      } finally {
+        button.disabled = false;
+      }
     }
 
-    function newServerRow(server) {
-      let $row = $(`<tr>
+    function newServerRow(server, range) {
+      let row = document.createElement('tr');
+      row.innerHTML = `<tr>
          <td><span title="${server.proto}://${server.addr}"
              >${server.tag}</span></td>
          <td><span title="based on average delay"
@@ -72,10 +77,10 @@
              >${humanFileSize(server.tx_bytes)}</span> /
              <span title="total received"
              >${humanFileSize(server.rx_bytes)}</span></td>
-         </tr>`);
+         </tr>`;
       if (server.delay == null)
-        $row.addClass('offline');
-      return $row;
+        row.className = 'offline';
+      return row;
     }
 
     function durationToMills(t) {
@@ -99,15 +104,24 @@
         + ['B', 'KiB', 'MiB', 'GiB', 'TiB'][i];
     };
 
-    $('#refresh').click(update);
+    $('#refresh').addEventListener('click', update);
 
     let refreshId = 0;
-    $('#auto-refresh').change(function () {
+    $('#auto-refresh').addEventListener('change', function () {
       if (this.checked)
         refreshId = window.setInterval(update, REFRESH_MILLS);
       else
         clearInterval(refreshId);
     });
+
+    (async function () {
+      let resp = await fetch(API_VERSION);
+      if (resp.ok) {
+        let ver = await resp.text();
+        $('#version').textContent = `(v${ver})`;
+      }
+      await update();
+    })();
   </script>
 </body>
 </html>

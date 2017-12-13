@@ -10,7 +10,8 @@ use tokio_core::reactor::Handle;
 use tokio_timer::Timer;
 use tokio_io::io::{read, write_all};
 use futures::{future, stream, Future, Stream};
-use proxy::{self, ProxyServer, Destination};
+use proxy::{ProxyServer, Destination};
+use proxy::copy::pipe;
 use monitor::ServerList;
 use tls::{self, TlsClientHello};
 
@@ -213,16 +214,16 @@ impl ConnectedClient {
         }
 
         server.update_stats_conn_open();
-        let serve = proxy::piping(left, right).then(move |result| {
+        let serve = pipe(left, right, server.clone()).then(move |result| {
             match result {
                 Ok((tx, rx)) => {
-                    server.update_stats_conn_close(tx, rx);
+                    server.update_stats_conn_close();
                     debug!("tx {}, rx {} bytes ({} => {})",
                         tx, rx, server.tag, dest);
                     Ok(())
                 },
                 Err(e) => {
-                    server.update_stats_conn_close(0, 0);
+                    server.update_stats_conn_close();
                     warn!("{} (=> {}) piping error: {}",
                         server.tag, dest, e);
                     Err(())

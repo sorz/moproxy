@@ -5,13 +5,15 @@ use std::io;
 use std::rc::Rc;
 use std::cell::RefCell;
 use self::rand::Rng;
-use ::tokio_timer::Timer;
-use ::tokio_core::reactor::Handle;
-use ::tokio_io::io::{write_all, read_exact};
-use ::futures::{future, Future};
-use ::proxy::ProxyServer;
+use tokio_timer::Timer;
+use tokio_core::reactor::Handle;
+use tokio_io::io::{write_all, read_exact};
+use futures::{future, Future};
+use proxy::ProxyServer;
+use ToMillis;
 
 pub type ServerList = Vec<Rc<ProxyServer>>;
+
 
 #[derive(Clone, Debug)]
 pub struct Monitor {
@@ -46,7 +48,7 @@ impl Monitor {
     pub fn run(self, probe: u64, handle: Handle)
             -> Box<Future<Item=(), Error=()>> {
         let timer = Timer::default();
-        let init = test_all(self, 0, &handle, &timer);
+        let init = test_all(self, true, &handle, &timer);
         let interval = Duration::from_secs(probe);
         let update = init.and_then(move |monitor| {
             future::loop_fn((monitor, handle, timer),
@@ -54,7 +56,7 @@ impl Monitor {
                 timer.sleep(interval).map_err(|err| {
                     error!("error on timer: {}", err);
                 }).and_then(move |_| {
-                    test_all(monitor, 4000, &handle, &timer)
+                    test_all(monitor, false, &handle, &timer)
                         .map(|monitor| (monitor, handle, timer))
                 }).and_then(|args| Ok(future::Loop::Continue(args)))
             })
@@ -75,12 +77,16 @@ fn info_stats(infos: &ServerList) -> String {
     stats
 }
 
-fn test_all(monitor: Monitor, penalty: i32, handle: &Handle, timer: &Timer)
+fn test_all(monitor: Monitor, init: bool, handle: &Handle, timer: &Timer)
         -> Box<Future<Item=Monitor, Error=()>> {
     debug!("testing all servers...");
     let tests: Vec<_> = monitor.servers().into_iter().map(move |server| {
         let test = alive_test(&server, handle, timer).then(move |result| {
-            server.update_delay(result.ok(), penalty);
+            if init {
+                server.set_delay(result.ok());
+            } else {
+                server.update_delay(result.ok());
+            }
             Ok(())
         });
         Box::new(test) as Box<Future<Item=(), Error=()>>
@@ -112,7 +118,7 @@ fn alive_test(server: &ProxyServer, handle: &Handle, timer: &Timer)
     let now = Instant::now();
     let tag = server.tag.clone();
     let conn = server.connect(server.test_dns.into(), handle);
-    let try_conn = timer.timeout(conn, Duration::from_secs(4));
+    let try_conn = timer.timeout(conn, server.max_wait);
     let query = try_conn.and_then(move |stream| {
         write_all(stream, request)
     }).and_then(|(stream, _)| {
@@ -120,16 +126,12 @@ fn alive_test(server: &ProxyServer, handle: &Handle, timer: &Timer)
     }).and_then(move |(_, buf)| {
         if req_tid == tid(&buf) {
             let delay = now.elapsed();
-            debug!("[{}] delay {}ms", tag, to_ms(delay));
+            debug!("[{}] delay {}ms", tag, delay.millis());
             Ok(delay)
         } else {
             Err(io::Error::new(io::ErrorKind::Other, "unknown response"))
         }
     });
     Box::new(query)
-}
-
-fn to_ms(t: Duration) -> i32 {
-    (t.as_secs() as u32 * 1000 + t.subsec_nanos() / 1_000_000) as i32
 }
 

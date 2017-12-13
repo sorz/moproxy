@@ -4,15 +4,15 @@ use std::io::{self, ErrorKind};
 use std::time::Duration;
 use std::net::{SocketAddr, SocketAddrV4};
 use std::os::unix::io::{RawFd, AsRawFd};
-use ::nix::{self, sys};
-use ::tokio_core::net::TcpStream;
-use ::tokio_core::reactor::Handle;
-use ::tokio_timer::Timer;
-use ::tokio_io::io::{read, write_all};
-use ::futures::{future, stream, Future, Stream};
-use ::proxy::{self, ProxyServer, Destination};
-use ::monitor::ServerList;
-use ::tls::{self, TlsClientHello};
+use nix::{self, sys};
+use tokio_core::net::TcpStream;
+use tokio_core::reactor::Handle;
+use tokio_timer::Timer;
+use tokio_io::io::{read, write_all};
+use futures::{future, stream, Future, Stream};
+use proxy::{self, ProxyServer, Destination};
+use monitor::ServerList;
+use tls::{self, TlsClientHello};
 
 
 #[derive(Debug)]
@@ -159,13 +159,7 @@ fn try_connect_seq(dest: Destination, servers: ServerList, handle: Handle)
     let timer = Timer::default();
     let try_all = stream::iter_ok(servers).for_each(move |server| {
         let right = server.connect(dest.clone(), &handle);
-        let wait = if let Some(delay) = server.delay() {
-            cmp::max(Duration::from_secs(3), delay * 2)
-        } else {
-            Duration::from_secs(3)
-        };
-        // Standard proxy server need more time (e.g. DNS resolving)
-        timer.timeout(right, wait).then(move |result| match result {
+        timer.timeout(right, server.max_wait).then(move |rst| match rst {
             Ok(right) => Err((right, server)),
             Err(err) => {
                 warn!("fail to connect {}: {}", server.tag, err);
@@ -186,10 +180,9 @@ fn try_connect_par(dest: Destination, servers: ServerList,
     let timer = Timer::default();
     let conns: Vec<_> = servers.into_iter().map(move |server| {
         let right = server.connect(dest.clone(), &handle);
-        let wait = Duration::from_secs(5);
         let tag = server.tag.clone();
         let data_copy = pending_data.clone();
-        timer.timeout(right, wait).and_then(move |right| {
+        timer.timeout(right, server.max_wait).and_then(move |right| {
             write_all(right, data_copy)
         }).and_then(|(right, buf)| {
             read(right, buf)

@@ -1,11 +1,11 @@
 use std::net::SocketAddr;
-use ::futures::{future, Future, Stream};
-use ::tokio_core::reactor::Handle;
-use ::hyper::{self, Method, StatusCode};
-use ::hyper::header::ContentType;
-use ::hyper::server::{Http, Request, Response, Service};
-use ::serde_json;
-use ::monitor::Monitor;
+use futures::{future, Future, Stream};
+use tokio_core::reactor::Handle;
+use hyper::{self, Method, StatusCode};
+use hyper::header::ContentType;
+use hyper::server::{Http, Request, Response, Service};
+use serde_json;
+use monitor::Monitor;
 
 
 struct StatsPages {

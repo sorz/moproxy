@@ -15,3 +15,13 @@ pub mod monitor;
 pub mod proxy;
 pub mod web;
 mod tls;
+
+pub trait ToMillis {
+    fn millis(&self) -> u32;
+}
+
+impl ToMillis for std::time::Duration {
+    fn millis(&self) -> u32 {
+        self.as_secs() as u32 * 1000 + self.subsec_nanos() / 1_000_000
+    }
+}

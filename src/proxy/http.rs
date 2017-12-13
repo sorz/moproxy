@@ -1,10 +1,10 @@
 use std::str;
 use std::net::IpAddr;
 use std::io::{self, Read, BufReader, ErrorKind};
-use ::futures::{future, Future};
-use ::tokio_core::net::TcpStream;
-use ::tokio_io::io::{write_all, read_until};
-use ::proxy::{Connect, Destination, Address};
+use futures::{future, Future};
+use tokio_core::net::TcpStream;
+use tokio_io::io::{write_all, read_until};
+use proxy::{Connect, Destination, Address};
 
 
 pub fn handshake(stream: TcpStream, addr: &Destination) -> Box<Connect> {

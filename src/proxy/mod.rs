@@ -7,11 +7,14 @@ use std::str::FromStr;
 use std::time::Duration;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, SocketAddr, IpAddr};
-use ::futures::{Future, Poll};
-use ::tokio_core::net::TcpStream;
-use ::tokio_core::reactor::Handle;
-use ::tokio_io::io as tio;
-use ::tokio_io::{AsyncRead, AsyncWrite};
+use futures::{Future, Poll};
+use tokio_core::net::TcpStream;
+use tokio_core::reactor::Handle;
+use tokio_io::io as tio;
+use tokio_io::{AsyncRead, AsyncWrite};
+use ToMillis;
+
+const DEFAULT_MAX_WAIT_MILLILS: u64 = 4_000;
 
 pub type Connect = Future<Item=TcpStream, Error=io::Error>;
 
@@ -29,6 +32,7 @@ pub struct ProxyServer {
     pub proto: ProxyProto,
     pub tag: Box<str>,
     pub test_dns: SocketAddr,
+    pub max_wait: Duration,
     score_base: i32,
     delay: Cell<Option<Duration>>,
     score: Cell<Option<i32>>,
@@ -78,6 +82,7 @@ impl ProxyServer {
                 None => format!("{}", addr.port()),
                 Some(s) => String::from(s),
             }.into_boxed_str(),
+            max_wait: Duration::from_millis(DEFAULT_MAX_WAIT_MILLILS),
             score_base: score_base.unwrap_or(0),
             delay: Cell::new(None),
             score: Cell::new(None),
@@ -113,12 +118,19 @@ impl ProxyServer {
         self.score.get()
     }
 
-    pub fn update_delay(&self, delay: Option<Duration>, penalty: i32) {
+
+    pub fn set_delay(&self, delay: Option<Duration>) {
+        self.delay.set(delay);
+        self.score.set(delay.map(|t| t.millis() as i32 + self.score_base));
+    }
+
+    pub fn update_delay(&self, delay: Option<Duration>) {
         self.delay.set(delay);
         let score = delay
-            .map(|t| to_ms(t) + self.score_base)
+            .map(|t| t.millis() as i32 + self.score_base)
             .map(|new| {
-                let old = self.score.get().unwrap_or(new + penalty);
+                let old = self.score.get()
+                    .unwrap_or_else(|| self.max_wait.millis() as i32);
                 // give more weight to delays exceed the mean, to
                 // punish for network jitter.
                 if new < old {
@@ -245,7 +257,3 @@ impl AsyncWrite for HalfTcpStream {
     }
 }
 
-// TODO: remove duplicate code
-fn to_ms(t: Duration) -> i32 {
-    (t.as_secs() as u32 * 1000 + t.subsec_nanos() / 1_000_000) as i32
-}

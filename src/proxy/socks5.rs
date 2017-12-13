@@ -1,9 +1,9 @@
 use std::net::IpAddr;
 use std::io::Write;
-use ::futures::Future;
-use ::tokio_core::net::TcpStream;
-use ::tokio_io::io::{read_exact, write_all};
-use ::proxy::{Connect, Destination, Address};
+use futures::Future;
+use tokio_core::net::TcpStream;
+use tokio_io::io::{read_exact, write_all};
+use proxy::{Connect, Destination, Address};
 
 
 pub fn handshake(stream: TcpStream, addr: &Destination) -> Box<Connect> {

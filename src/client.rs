@@ -9,7 +9,7 @@ use tokio_core::net::TcpStream;
 use tokio_core::reactor::Handle;
 use tokio_timer::Timer;
 use tokio_io::io::{read, write_all};
-use futures::{future, stream, Future, Stream};
+use futures::{future, stream, Future, Stream, Poll};
 use proxy::{ProxyServer, Destination};
 use proxy::copy::pipe;
 use monitor::ServerList;
@@ -131,11 +131,9 @@ impl Connectable for NewClientWithData {
         let conn_seq = try_connect_seq(dest.clone(), list_seq.to_vec(),
                                        handle.clone());
         let conn = conn_par.then(move |result| match result {
-            Ok((right, server, data)) => {
-                let write = write_all(left, data)
-                    .map(move |(left, _)| (left, right, server))
-                    .map_err(|err| warn!("fail to write client: {}", err));
-                Box::new(write) as Box<Future<Item=_, Error=()>>
+            Ok((right, server)) => {
+                Box::new(future::ok((left, right, server)))
+                    as Box<Future<Item=_, Error=()>>
             },
             Err(_) => {
                 let seq = conn_seq.and_then(move |(right, server)| {
@@ -177,8 +175,7 @@ fn try_connect_seq(dest: Destination, servers: ServerList, handle: Handle)
 
 fn try_connect_par(dest: Destination, servers: ServerList,
                    pending_data: RcBox<[u8]>, handle: Handle)
-        -> Box<Future<Item=(TcpStream, Rc<ProxyServer>, Box<[u8]>),
-                      Error=()>> {
+        -> Box<Future<Item=(TcpStream, Rc<ProxyServer>), Error=()>> {
     let timer = Timer::default();
     let conns: Vec<_> = servers.into_iter().map(move |server| {
         let right = server.connect(dest.clone(), &handle);
@@ -187,10 +184,9 @@ fn try_connect_par(dest: Destination, servers: ServerList,
         timer.timeout(right, server.max_wait).and_then(move |right| {
             write_all(right, data)
         }).and_then(|(right, _)| {
-            read(right, vec![0u8; 1024])
-        }).map(|(right, buf, len)| {
-            // TODO: verify server hello
-            (right, server, buf[..len].to_vec().into_boxed_slice())
+            ready_to_read(right)
+        }).map(|right| {
+            (right, server)
         }).map_err(move |err| {
            warn!("fail to connect {}: {}", tag, err);
         })
@@ -234,6 +230,25 @@ impl ConnectedClient {
         Box::new(serve)
     }
 }
+
+struct ReadyToRead {
+    conn: Option<TcpStream>,
+}
+
+fn ready_to_read(conn: TcpStream) -> ReadyToRead {
+    ReadyToRead { conn: Some(conn) }
+}
+
+impl Future for ReadyToRead {
+    type Item = TcpStream;
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<TcpStream, Self::Error> {
+        Ok(self.conn.as_ref().unwrap()
+           .poll_read().map(|_| self.conn.take().unwrap()))
+    }
+}
+
 
 #[derive(Debug)]
 struct RcBox<T: ?Sized> {

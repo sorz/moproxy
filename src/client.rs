@@ -123,6 +123,7 @@ impl Connectable for NewClientWithData {
         } else {
             0
         };
+        let pending_data = RcBox::new(pending_data);
         let (list_par, list_seq) = list.split_at(
             cmp::min(list.len(), n_parallel));
         let conn_par = try_connect_par(dest.clone(), list_par.to_vec(),
@@ -175,18 +176,18 @@ fn try_connect_seq(dest: Destination, servers: ServerList, handle: Handle)
 }
 
 fn try_connect_par(dest: Destination, servers: ServerList,
-                   pending_data: Box<[u8]>, handle: Handle)
+                   pending_data: RcBox<[u8]>, handle: Handle)
         -> Box<Future<Item=(TcpStream, Rc<ProxyServer>, Box<[u8]>),
                       Error=()>> {
     let timer = Timer::default();
     let conns: Vec<_> = servers.into_iter().map(move |server| {
         let right = server.connect(dest.clone(), &handle);
         let tag = server.tag.clone();
-        let data_copy = pending_data.clone();
+        let data = pending_data.clone();
         timer.timeout(right, server.max_wait).and_then(move |right| {
-            write_all(right, data_copy)
-        }).and_then(|(right, buf)| {
-            read(right, buf)
+            write_all(right, data)
+        }).and_then(|(right, _)| {
+            read(right, vec![0u8; 1024])
         }).map(|(right, buf, len)| {
             // TODO: verify server hello
             (right, server, buf[..len].to_vec().into_boxed_slice())
@@ -231,6 +232,26 @@ impl ConnectedClient {
             }
         });
         Box::new(serve)
+    }
+}
+
+#[derive(Debug)]
+struct RcBox<T: ?Sized> {
+    item: Rc<Box<T>>,
+}
+impl<T: ?Sized> RcBox<T> {
+    fn new(item: Box<T>) -> Self {
+        RcBox { item: Rc::new(item) }
+    }
+}
+impl<T: ?Sized> AsRef<T> for RcBox<T> {
+    fn as_ref(&self) -> &T {
+        &self.item
+    }
+}
+impl<T: ?Sized> Clone for RcBox<T> {
+    fn clone(&self) -> Self {
+        RcBox { item: self.item.clone() }
     }
 }
 

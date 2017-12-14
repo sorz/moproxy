@@ -37,12 +37,14 @@
   <script>
     const API_SERVERS = "servers";
     const API_VERSION = "version";
-    const REFRESH_MILLS = 10 * 1000;
+    const REFRESH_MILLS = 3 * 1000;
     let $ = s => document.querySelector(s);
 
     async function update() {
       let table = $('#servers');
       let button = $('#refresh');
+      let refresh = $('#auto-refresh');
+      if (button.disabled) return;
       button.disabled = true;
       try {
         let resp = await fetch(API_SERVERS);
@@ -55,8 +57,12 @@
         });
       } catch (ex) {
         alert(`Fail to refresh: ${ex.message}`);
+        refresh.checked = false;
       } finally {
         button.disabled = false;
+      }
+      if (refresh.checked && !document.hidden) {
+        window.setTimeout(update, REFRESH_MILLS);
       }
     }
 
@@ -105,13 +111,11 @@
     };
 
     $('#refresh').addEventListener('click', update);
-
-    let refreshId = 0;
     $('#auto-refresh').addEventListener('change', function () {
-      if (this.checked)
-        refreshId = window.setInterval(update, REFRESH_MILLS);
-      else
-        clearInterval(refreshId);
+      if (this.checked) update();
+    });
+    document.addEventListener('visibilitychange', function () {
+      if ($('#auto-refresh').checked && !document.hidden) update();
     });
 
     (async function () {

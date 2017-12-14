@@ -37,9 +37,10 @@
   <script>
     const API_SERVERS = "servers";
     const API_VERSION = "version";
-    const REFRESH_MILLS = 3 * 1000;
+    const REFRESH_MILLS = 2 * 1000;
     let $ = s => document.querySelector(s);
 
+    let timeoutId = 0;
     async function update() {
       let table = $('#servers');
       let button = $('#refresh');
@@ -62,7 +63,8 @@
         button.disabled = false;
       }
       if (refresh.checked && !document.hidden) {
-        window.setTimeout(update, REFRESH_MILLS);
+        window.clearTimeout(timeutId);
+        timeoutId = window.setTimeout(update, REFRESH_MILLS);
       }
     }
 

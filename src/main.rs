@@ -20,6 +20,7 @@ use log::LogLevelFilter;
 use env_logger::{LogBuilder, LogTarget};
 use moproxy::monitor::Monitor;
 use moproxy::proxy::ProxyServer;
+use moproxy::proxy::copy::SharedBuf;
 use moproxy::proxy::ProxyProto::{Socks5, Http};
 use moproxy::client::{NewClient, Connectable};
 use moproxy::web;
@@ -82,6 +83,7 @@ fn main() {
         .expect("cannot bind to port");
     info!("listen on {}", addr);
     handle.spawn(monitor.clone().run(probe, lp.handle()));
+    let shared_buf = SharedBuf::new(8192);
     let server = listener.incoming().for_each(move |(sock, addr)| {
         debug!("incoming {}", addr);
         let client = NewClient::from_socket(
@@ -94,7 +96,8 @@ fn main() {
             } else {
                 client.connect_server(0)
             });
-        let serv = conn.and_then(|client| client.serve());
+        let buf = shared_buf.clone();
+        let serv = conn.and_then(|client| client.serve(buf));
         handle.spawn(serv);
         Ok(())
     });

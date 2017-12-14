@@ -11,7 +11,7 @@ use tokio_timer::Timer;
 use tokio_io::io::{read, write_all};
 use futures::{future, stream, Future, Stream, Poll};
 use proxy::{ProxyServer, Destination};
-use proxy::copy::pipe;
+use proxy::copy::{pipe, SharedBuf};
 use monitor::ServerList;
 use tls::{self, TlsClientHello};
 
@@ -202,7 +202,8 @@ fn try_connect_par(dest: Destination, servers: ServerList,
 }
 
 impl ConnectedClient {
-    pub fn serve(self) -> Box<Future<Item=(), Error=()>> {
+    pub fn serve(self, shared_buf: SharedBuf)
+            -> Box<Future<Item=(), Error=()>> {
         let ConnectedClient { left, right, dest, server, .. } = self;
         // TODO: make keepalive configurable
         let timeout = Some(Duration::from_secs(300));
@@ -212,8 +213,8 @@ impl ConnectedClient {
         }
 
         server.update_stats_conn_open();
-        let serve = pipe(left, right, server.clone()).then(move |result| {
-            match result {
+        let serve = pipe(left, right, server.clone(), shared_buf)
+            .then(move |result| match result {
                 Ok((tx, rx)) => {
                     server.update_stats_conn_close();
                     debug!("tx {}, rx {} bytes ({} => {})",
@@ -226,8 +227,7 @@ impl ConnectedClient {
                         server.tag, dest, e);
                     Err(())
                 }
-            }
-        });
+            });
         Box::new(serve)
     }
 }

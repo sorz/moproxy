@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use std::cell::RefCell;
 use std::net::Shutdown;
 use std::io::{self, Read, Write};
 use futures::{Async, Poll, Future};
@@ -6,11 +7,47 @@ use tokio_core::net::TcpStream;
 use proxy::ProxyServer;
 use self::Side::{Left, Right};
 
+#[derive(Debug, Clone)]
 enum Side { Left, Right }
+
+#[derive(Clone)]
+pub struct SharedBuf {
+    size: usize,
+    buf: Rc<RefCell<Option<Box<[u8]>>>>,
+}
+
+impl SharedBuf {
+    /// Create a empty buffer.
+    pub fn new(size: usize) -> Self {
+        SharedBuf {
+            size,
+            buf: Rc::new(RefCell::new(None)),
+        }
+    }
+
+    /// Take the inner buffer or allocate a new one.
+    fn take(&self) -> Box<[u8]> {
+        self.buf.borrow_mut().take()
+            .unwrap_or_else(|| {
+                debug!("allocate new buffer");
+                vec![0; self.size].into_boxed_slice()
+            })
+    }
+
+    fn is_empty(&self) -> bool {
+        self.buf.borrow().is_none()
+    }
+
+    /// Return the taken buffer back.
+    fn set(&self, buf: Box<[u8]>) {
+        self.buf.borrow_mut().get_or_insert(buf);
+    }
+}
 
 struct StreamWithBuffer {
     pub stream: TcpStream,
-    pub buf: Box<[u8]>,
+    buf: Option<Box<[u8]>>,
+    shared_buf: SharedBuf,
     pos: usize,
     cap: usize,
     pub read_eof: bool,
@@ -18,10 +55,10 @@ struct StreamWithBuffer {
 }
 
 impl StreamWithBuffer {
-    pub fn new(stream: TcpStream) -> Self {
+    pub fn new(stream: TcpStream, shared_buf: SharedBuf) -> Self {
         StreamWithBuffer {
-            stream,
-            buf: Box::new([0; 2048]),
+            stream, shared_buf,
+            buf: None,
             pos: 0, cap: 0,
             read_eof: false,
             all_done: false,
@@ -32,28 +69,55 @@ impl StreamWithBuffer {
         self.pos == self.cap
     }
 
-    pub fn read_to_buffer(&mut self) -> io::Result<usize> {
-        let n = self.stream.read(&mut self.buf)?;
-        if n == 0 {
-            self.read_eof = true;
+    /// Take buffer from shared_buf or (private) buf.
+    fn take_buf(&mut self) -> Box<[u8]> {
+        if let Some(buf) = self.buf.take() {
+            buf
         } else {
-            self.pos = 0;
-            self.cap = n;
+            self.shared_buf.take()
         }
-        Ok(n)
+    }
+
+    /// Return buffer to shared_buf or (private) buf.
+    fn return_buf(&mut self, buf: Box<[u8]>) {
+        if self.shared_buf.is_empty() && self.is_empty() {
+            self.shared_buf.set(buf);
+        } else {
+            self.buf.get_or_insert(buf);
+        }
+    }
+
+    pub fn read_to_buffer(&mut self) -> io::Result<usize> {
+        let mut buf = self.take_buf();
+        let result = (|buf| {
+            let n = self.stream.read(buf)?;
+            if n == 0 {
+                self.read_eof = true;
+            } else {
+                self.pos = 0;
+                self.cap = n;
+            }
+            Ok(n)
+        })(&mut buf);
+        self.return_buf(buf);
+        return result;
     }
 
     pub fn write_to(&mut self, writer: &mut TcpStream) -> io::Result<usize> {
-        let n = writer.write(&self.buf[self.pos..self.cap])?;
-        if n == 0 {
-            return Err(io::Error::new(io::ErrorKind::WriteZero,
-                                      "write zero byte into writer"));
-        } else {
-            self.pos += n;
-        }
-        Ok(n)
+        let buf = self.buf.take().expect("try to write empty buffer");
+        let result = (|buf: &Box<[u8]>| {
+            let n = writer.write(&buf[self.pos..self.cap])?;
+            if n == 0 {
+                return Err(io::Error::new(io::ErrorKind::WriteZero,
+                                          "write zero byte into writer"));
+            } else {
+                self.pos += n;
+            }
+            Ok(n)
+        })(&buf);
+        self.return_buf(buf);
+        return result;
     }
-
 }
 
 
@@ -67,22 +131,23 @@ pub struct BiPipe {
     rx: usize,
 }
 
-pub fn pipe(left: TcpStream, right: TcpStream, server: Rc<ProxyServer>)
+pub fn pipe(left: TcpStream, right: TcpStream, server: Rc<ProxyServer>,
+            shared_buf: SharedBuf)
         -> BiPipe {
     BiPipe {
-        left: StreamWithBuffer::new(left),
-        right: StreamWithBuffer::new(right),
+        left: StreamWithBuffer::new(left, shared_buf.clone()),
+        right: StreamWithBuffer::new(right, shared_buf),
         server, tx: 0, rx: 0,
     }
 }
 
 impl BiPipe {
     fn poll_one_side(&mut self, side: Side) -> Poll<(), io::Error> {
+        let (reader, writer) = match side {
+            Left => (&mut self.left, &mut self.right),
+            Right => (&mut self.right, &mut self.left),
+        };
         loop {
-            let (reader, writer) = match side {
-                Left => (&mut self.left, &mut self.right),
-                Right => (&mut self.right, &mut self.left),
-            };
             // read something if buffer is empty
             if reader.is_empty() && !reader.read_eof {
                 let n = try_nb!(reader.read_to_buffer());

@@ -73,8 +73,9 @@ impl NewClient {
         let wait = Duration::from_millis(200);
         let data = read(left, vec![0u8; 768])
             .map_err(|err| warn!("fail to read hello from client: {}", err));
-        let result = timer.timeout(data, wait).map(move |(left, data, len)| {
-            let is_tls = match tls::parse_client_hello(&data[..len]) {
+        let result = timer.timeout(data, wait).map(move |(left, mut data, len)| {
+            data.truncate(len);
+            let is_tls = match tls::parse_client_hello(&data) {
                 Err(err) => {
                     info!("fail to parse hello: {}", err);
                     false
@@ -91,7 +92,7 @@ impl NewClient {
             };
             NewClientWithData {
                 left, src, dest, list, handle, is_tls,
-                pending_data: data[..len].to_vec().into_boxed_slice(),
+                pending_data: data.into_boxed_slice(),
             }
         }).map_err(|_| info!("no tls request received before timeout"));
         Box::new(result)

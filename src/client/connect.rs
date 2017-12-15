@@ -105,7 +105,7 @@ pub fn try_connect_all(dest: Destination, servers: Vec<Rc<ProxyServer>>,
                    parallel_n: usize, wait_response: bool,
                    pending_data: Option<RcBox<[u8]>>, handle: Handle)
         -> TryConnectAll {
-    let parallel_n = cmp::min(1, parallel_n);
+    let parallel_n = cmp::max(1, parallel_n);
     let servers = VecDeque::from_iter(servers.into_iter());
     TryConnectAll {
         dest, parallel_n, pending_data, wait_response, handle,

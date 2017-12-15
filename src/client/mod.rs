@@ -1,3 +1,4 @@
+mod connect;
 use std::cmp;
 use std::rc::Rc;
 use std::io::{self, ErrorKind};
@@ -8,12 +9,13 @@ use nix::{self, sys};
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Handle;
 use tokio_timer::Timer;
-use tokio_io::io::{read, write_all};
-use futures::{future, stream, Future, Stream, Poll};
+use tokio_io::io::read;
+use futures::{future, Future};
 use proxy::{ProxyServer, Destination};
 use proxy::copy::{pipe, SharedBuf};
 use monitor::ServerList;
 use tls::{self, TlsClientHello};
+use client::connect::try_connect_all;
 
 
 #[derive(Debug)]
@@ -76,7 +78,8 @@ impl NewClient {
         //   2. --n-parallel: need the whole request to be forwarded
         let data = read(left, vec![0u8; 2048])
             .map_err(|err| warn!("fail to read hello from client: {}", err));
-        let result = timer.timeout(data, wait).map(move |(left, mut data, len)| {
+        let result = timer.timeout(data, wait)
+                          .map(move |(left, mut data, len)| {
             data.truncate(len);
             let allow_parallel = match tls::parse_client_hello(&data) {
                 Err(err) => {
@@ -109,50 +112,9 @@ impl Connectable for NewClient {
     fn connect_server(self, _n_parallel: usize)
             -> Box<Future<Item=ConnectedClient, Error=()>> {
         let NewClient { left, src, dest, list, handle } = self;
-        let seq = try_connect_seq(dest.clone(), list, handle.clone())
-            .map(move |(right, server)| {
-                info!("{} => {} via {}", src, dest, server.tag);
-                ConnectedClient {
-                    left, right, src, dest, server, handle
-                }
-            }).map_err(|_| warn!("all proxy server down"));
-        Box::new(seq)
-    }
-}
-
-impl Connectable for NewClientWithData {
-    fn connect_server(self, n_parallel: usize)
-            -> Box<Future<Item=ConnectedClient, Error=()>> {
-        let NewClientWithData {
-            left, src, dest, list, handle,
-            pending_data, allow_parallel } = self;
-        let n_parallel = if allow_parallel {
-            cmp::min(list.len(), n_parallel)
-        } else {
-            0
-        };
-        let pending_data = RcBox::new(pending_data);
-        let (list_par, list_seq) = list.split_at(
-            cmp::min(list.len(), n_parallel));
-        let conn_par = try_connect_par(dest.clone(), list_par.to_vec(),
-                                       pending_data.clone(), handle.clone());
-        let conn_seq = try_connect_seq(dest.clone(), list_seq.to_vec(),
-                                       handle.clone());
-        let conn = conn_par.then(move |result| match result {
-            Ok((right, server)) => {
-                Box::new(future::ok((left, right, server)))
-                    as Box<Future<Item=_, Error=()>>
-            },
-            Err(_) => {
-                let seq = conn_seq.and_then(move |(right, server)| {
-                    write_all(right, pending_data)
-                        .map(move |(right, _)| (left, right, server))
-                        .map_err(|err| warn!("fail to write: {}", err))
-                });
-                Box::new(seq)
-            },
-        });
-        let client = conn.map(move |(left, right, server)| {
+        let conn = try_connect_all(dest.clone(), list, 1, false, None,
+                                   handle.clone());
+        let client = conn.map(move |(server, right)| {
             info!("{} => {} via {}", src, dest, server.tag);
             ConnectedClient {
                 left, right, src, dest, server, handle
@@ -162,49 +124,27 @@ impl Connectable for NewClientWithData {
     }
 }
 
-fn try_connect_seq(dest: Destination, servers: ServerList, handle: Handle)
-        -> Box<Future<Item=(TcpStream, Rc<ProxyServer>), Error=()>> {
-    let timer = Timer::default();
-    let try_all = stream::iter_ok(servers).for_each(move |server| {
-        let right = server.connect(dest.clone(), &handle);
-        timer.timeout(right, server.max_wait).then(move |rst| match rst {
-            Ok(right) => Err((right, server)),
-            Err(err) => {
-                warn!("fail to connect {}: {}", server.tag, err);
-                Ok(())
-            },
-        })
-    }).then(move |result| match result {
-        Err(args) => Ok(args),
-        Ok(_) => Err(()),
-    });
-    Box::new(try_all)
-}
-
-fn try_connect_par(dest: Destination, servers: ServerList,
-                   pending_data: RcBox<[u8]>, handle: Handle)
-        -> Box<Future<Item=(TcpStream, Rc<ProxyServer>), Error=()>> {
-    let timer = Timer::default();
-    let conns: Vec<_> = servers.into_iter().map(move |server| {
-        let right = server.connect(dest.clone(), &handle);
-        let tag = server.tag.clone();
-        let data = pending_data.clone();
-        timer.timeout(right, server.max_wait).and_then(move |right| {
-            write_all(right, data)
-        }).and_then(|(right, _)| {
-            ready_to_read(right)
-        }).map(|right| {
-            (right, server)
-        }).map_err(move |err| {
-           warn!("fail to connect {}: {}", tag, err);
-        })
-    }).collect();
-    if conns.is_empty() {
-        Box::new(future::err(()))
-    } else {
-        debug!("try to connect {} servers in parallel", conns.len());
-        Box::new(future::select_ok(conns)
-            .map(|(result, _)| result))
+impl Connectable for NewClientWithData {
+    fn connect_server(self, n_parallel: usize)
+            -> Box<Future<Item=ConnectedClient, Error=()>> {
+        let NewClientWithData {
+            left, src, dest, list, handle,
+            pending_data, allow_parallel } = self;
+        let pending_data = Some(RcBox::new(pending_data));
+        let n_parallel = if allow_parallel {
+            cmp::min(list.len(), n_parallel)
+        } else {
+            1
+        };
+        let conn = try_connect_all(dest.clone(), list, n_parallel, true,
+                                   pending_data, handle.clone());
+        let client = conn.map(move |(server, right)| {
+            info!("{} => {} via {}", src, dest, server.tag);
+            ConnectedClient {
+                left, right, src, dest, server, handle
+            }
+        }).map_err(|_| warn!("all proxy server down"));
+        Box::new(client)
     }
 }
 
@@ -239,27 +179,8 @@ impl ConnectedClient {
     }
 }
 
-struct ReadyToRead {
-    conn: Option<TcpStream>,
-}
-
-fn ready_to_read(conn: TcpStream) -> ReadyToRead {
-    ReadyToRead { conn: Some(conn) }
-}
-
-impl Future for ReadyToRead {
-    type Item = TcpStream;
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<TcpStream, Self::Error> {
-        Ok(self.conn.as_ref().unwrap()
-           .poll_read().map(|_| self.conn.take().unwrap()))
-    }
-}
-
-
 #[derive(Debug)]
-struct RcBox<T: ?Sized> {
+pub struct RcBox<T: ?Sized> {
     item: Rc<Box<T>>,
 }
 impl<T: ?Sized> RcBox<T> {

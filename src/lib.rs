@@ -4,6 +4,7 @@ extern crate log;
 extern crate serde_derive;
 extern crate serde_json;
 extern crate serde;
+#[macro_use]
 extern crate futures;
 extern crate tokio_core;
 #[macro_use]

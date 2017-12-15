@@ -11,20 +11,20 @@ pub fn handshake(stream: TcpStream, addr: &Destination) -> Box<Connect> {
     let request = build_request(addr);
     let response = write_all(stream, request).and_then(|(stream, _)| {
         let reader = BufReader::new(stream).take(512);
-        read_until(reader, 0x0a, Vec::with_capacity(32))
-    }).and_then(|(reader, status)| {
-        let status = match str::from_utf8(&status) {
-            Ok(s) => s,
+        read_until(reader, 0x0a, Vec::with_capacity(64))
+    }).and_then(|(reader, buf)| {
+        match str::from_utf8(&buf) {
+            Ok(status) => {
+                debug!("recv response: {}", status.trim());
+                if !status.starts_with("HTTP/1.1 2") {
+                    let err = format!("proxy return error: {}", status.trim());
+                    return Err(io::Error::new(ErrorKind::Other, err));
+                }
+            },
             Err(e) => return Err(io::Error::new(ErrorKind::Other,
                     format!("fail to parse http response: {}", e))),
         };
-        debug!("recv response: {}", status.trim());
-        if status.starts_with("HTTP/1.1 2") {
-            Ok(reader.into_inner())
-        } else {
-            let err = format!("proxy return error: {}", status.trim());
-            Err(io::Error::new(ErrorKind::Other, err))
-        }
+        Ok((reader.into_inner(), buf))
     });
     let skip_headers = |(reader, mut buf): (io::Take<_>, Vec<u8>)| {
         buf.clear();
@@ -44,8 +44,7 @@ pub fn handshake(stream: TcpStream, addr: &Destination) -> Box<Connect> {
             Ok(future::Loop::Continue((reader, buf)))
         })
     };
-    let skip = response.and_then(|reader| {
-        let buf = Vec::with_capacity(64);
+    let skip = response.and_then(|(reader, buf)| {
         let reader = reader.take(8 * 1024);
         future::loop_fn((reader, buf), skip_headers)
             .map(|reader| reader.into_inner())

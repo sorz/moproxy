@@ -31,7 +31,7 @@ pub struct NewClientWithData {
     src: SocketAddr,
     dest: Destination,
     pending_data: Box<[u8]>,
-    is_tls: bool,
+    allow_parallel: bool,
     list: ServerList,
     handle: Handle,
 }
@@ -71,27 +71,33 @@ impl NewClient {
         let NewClient { left, src, mut dest, list, handle } = self; 
         let timer = Timer::default();
         let wait = Duration::from_millis(200);
-        let data = read(left, vec![0u8; 768])
+        // try to read TLS ClientHello for
+        //   1. --remote-dns: parse host name from SNI
+        //   2. --n-parallel: need the whole request to be forwarded
+        let data = read(left, vec![0u8; 2048])
             .map_err(|err| warn!("fail to read hello from client: {}", err));
         let result = timer.timeout(data, wait).map(move |(left, mut data, len)| {
             data.truncate(len);
-            let is_tls = match tls::parse_client_hello(&data) {
+            let allow_parallel = match tls::parse_client_hello(&data) {
                 Err(err) => {
                     info!("fail to parse hello: {}", err);
                     false
                 },
-                Ok(TlsClientHello { server_name: None, .. } ) => {
-                    debug!("not SNI found in client hello");
-                    true
-                },
-                Ok(TlsClientHello { server_name: Some(name), .. } ) => {
-                    debug!("SNI found: {}", name);
-                    dest = (name, dest.port).into();
+                Ok(TlsClientHello { server_name, early_data, .. }) => {
+                    if let Some(name) = server_name {
+                        dest = (name, dest.port).into();
+                        debug!("SNI found: {}", name);
+                    } else {
+                        debug!("not SNI found in client hello");
+                    }
+                    if early_data {
+                        debug!("TLS with early data");
+                    }
                     true
                 },
             };
             NewClientWithData {
-                left, src, dest, list, handle, is_tls,
+                left, src, dest, list, handle, allow_parallel,
                 pending_data: data.into_boxed_slice(),
             }
         }).map_err(|_| info!("no tls request received before timeout"));
@@ -118,8 +124,9 @@ impl Connectable for NewClientWithData {
     fn connect_server(self, n_parallel: usize)
             -> Box<Future<Item=ConnectedClient, Error=()>> {
         let NewClientWithData {
-            left, src, dest, list, handle, pending_data, is_tls } = self;
-        let n_parallel = if is_tls {
+            left, src, dest, list, handle,
+            pending_data, allow_parallel } = self;
+        let n_parallel = if allow_parallel {
             cmp::min(list.len(), n_parallel)
         } else {
             0

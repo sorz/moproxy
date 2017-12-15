@@ -1,8 +1,12 @@
 use std::str::from_utf8;
 use std::ops::Range;
 
+const EXT_SERVER_NAME: &[u8] = &[0, 0];
+const EXT_EARLY_DATA: &[u8] = &[0, 42];
+
 pub struct TlsClientHello<'a> {
     pub server_name: Option<&'a str>,
+    pub early_data: bool,
 }
 
 struct TlsRecord<'a> {
@@ -76,45 +80,49 @@ pub fn parse_client_hello<'a>(data: &'a [u8])
     // 2-byte length of extensions
     let mut exts = truncate(remaining, 0..2)?;
     let mut server_name = None;
+    let mut early_data = false;
     while exts.len() >= 4 {
         // 0..2: extension type
         let ext_type = &exts[0..2];
         // 2..4: extension length
         let ext_data = truncate(exts, 2..4)?;
         exts = drop_before(exts, 2..4)?;
-        if ext_type == &[0, 0] { // server name indication
-            let mut data = truncate(ext_data, 0..2)?;
-            while data.len() > 3 {
-                let value = truncate(data, 1..3)?;
-                let name_type = data[0];
-                data = drop_before(data, 1..3)?;
-                if name_type == 0 { // hostname
-                    server_name = Some(parse_server_name(value)?);
-                }
-            }
+        if ext_type == EXT_SERVER_NAME {
+            server_name = parse_server_name_ext(ext_data)?;
+        } else if ext_type == EXT_EARLY_DATA {
+            early_data = true;
         }
     }
 
     Ok(TlsClientHello {
-        server_name: server_name,
+        server_name, early_data,
     })
 }
 
-fn parse_server_name(value: &[u8]) -> Result<&str, &'static str> {
-    let name = match from_utf8(value) {
-        Ok(s) => s,
-        Err(_) => return Err("server name not utf-8 string"),
-    };
-    if name.as_bytes().len() > 255 {
-        return Err("server name too long");
-    }
-    if !name.chars().all(|c| c.is_digit(36) || c == '.' || c == '-'
-                         || c == '_') {
-        return Err("illegal char in server name");
-    }
-    Ok(name)
-}
 
+/// Parse SNI data, return hostname.
+fn parse_server_name_ext(ext_data: &[u8])
+        -> Result<Option<&str>, &'static str> {
+    let mut data = truncate(ext_data, 0..2)?;
+    while data.len() > 3 {
+        let value = truncate(data, 1..3)?;
+        let name_type = data[0];
+        data = drop_before(data, 1..3)?;
+        if name_type == 0 { // hostname
+            let name = from_utf8(value)
+                .map_err(|_| "server name not utf-8 string")?;
+            if name.as_bytes().len() > 255 {
+                return Err("server name too long");
+            }
+            if !name.chars().all(|c| c.is_digit(36) || c == '.' || c == '-'
+                                 || c == '-') {
+                return Err("illegal char in server name");
+            }
+            return Ok(Some(name));
+        }
+    }
+    Ok(None)
+}
 
 #[test]
 fn test_parse_without_server_name() {

@@ -63,7 +63,7 @@
         button.disabled = false;
       }
       if (refresh.checked && !document.hidden) {
-        window.clearTimeout(timeutId);
+        window.clearTimeout(timeoutId);
         timeoutId = window.setTimeout(update, REFRESH_MILLS);
       }
     }

@@ -106,16 +106,11 @@ impl Monitor {
     /// befor call this.
     pub fn throughput(&self) -> (usize, usize) {
         let history = self.traffics.borrow();
-        if history.is_empty() {
-            return (0, 0);
-        }
-        let (tx_sum, rx_sum) = history.iter().fold((0, 0),
-                |(tx, rx), &(tx1, rx1)| (tx + tx1, rx + rx1));
-        let n = history.len() as f64;
-        (
-            (tx_sum as f64 / n).round() as usize,
-            (rx_sum as f64 / n).round() as usize,
-        )
+        let &(tx0, rx0) = history.back().unwrap_or(&(0, 0));
+        let &(tx1, rx1) = history.front().unwrap_or(&(0, 0));
+        let t = (history.len() * THROUGHPUT_INTERVAL_SECS as usize) as f64;
+        let f = |x0, x1| (((x1 - x0) as f64) / t).round() as usize;
+        (f(tx0, tx1), f(rx0, rx1))
     }
 }
 

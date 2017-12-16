@@ -180,12 +180,17 @@ impl Future for BiPipe {
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<(usize, usize), io::Error> {
-        // TODO: log side of io error.
         if !self.left.all_done {
-            self.poll_one_side(Left)?;
+            if let Err(e) = self.poll_one_side(Left) {
+                warn!("error on local side: {}", e);
+                return Err(e);
+            }
         }
         if !self.right.all_done {
-            self.poll_one_side(Right)?;
+            if let Err(e) = self.poll_one_side(Right) {
+                warn!("error on remote side: {}", e);
+                return Err(e);
+            }
         }
         if self.left.all_done && self.right.all_done {
             Ok((self.tx, self.rx).into())

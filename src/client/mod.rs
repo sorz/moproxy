@@ -168,10 +168,10 @@ impl ConnectedClient {
                         tx, rx, server.tag, dest);
                     Ok(())
                 },
-                Err(e) => {
+                Err(_) => {
                     server.update_stats_conn_close();
-                    warn!("{} (=> {}) piping error: {}",
-                        server.tag, dest, e);
+                    warn!("{} (=> {}) close with error",
+                        server.tag, dest);
                     Err(())
                 }
             });

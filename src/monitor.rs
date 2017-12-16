@@ -4,20 +4,25 @@ use std::time::{Instant, Duration};
 use std::io;
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use self::rand::Rng;
 use tokio_timer::Timer;
 use tokio_core::reactor::Handle;
 use tokio_io::io::{write_all, read_exact};
 use futures::{future, Future};
+use futures::future::Loop;
 use proxy::ProxyServer;
 use ToMillis;
 
-pub type ServerList = Vec<Rc<ProxyServer>>;
+static THROUGHPUT_INTERVAL_SECS: u64 = 2;
+static THROUGHPUT_HISTORY_NUM: usize = 5;
 
+pub type ServerList = Vec<Rc<ProxyServer>>;
 
 #[derive(Clone, Debug)]
 pub struct Monitor {
     servers: Rc<RefCell<ServerList>>,
+    traffics: Rc<RefCell<VecDeque<(usize, usize)>>>,
 }
 
 impl Monitor {
@@ -25,8 +30,10 @@ impl Monitor {
         let servers: Vec<_> = servers.into_iter()
             .map(|server| Rc::new(server))
             .collect();
+        let traffics = VecDeque::with_capacity(THROUGHPUT_HISTORY_NUM);
         Monitor {
             servers: Rc::new(RefCell::new(servers)),
+            traffics: Rc::new(RefCell::new(traffics)),
         }
     }
 
@@ -44,11 +51,20 @@ impl Monitor {
         debug!("scores:{}", info_stats(&*self.servers.borrow()));
     }
 
-    /// Start monitoring.
-    pub fn run(self, probe: u64, handle: Handle)
+    /// Return total traffic amount (tx, rx).
+    fn total_traffics(&self) -> (usize, usize) {
+        self.servers.borrow().iter().fold((0, 0), |(tx, rx), server| {
+            let (tx1, rx1) = server.traffics();
+            (tx + tx1, rx + rx1)
+        })
+    }
+
+    /// Start monitoring delays.
+    /// Returned Future won't return unless error on timer.
+    pub fn monitor_delay(&self, probe: u64, handle: Handle)
             -> Box<Future<Item=(), Error=()>> {
         let timer = Timer::default();
-        let init = test_all(self, true, &handle, &timer);
+        let init = test_all(self.clone(), true, &handle, &timer);
         let interval = Duration::from_secs(probe);
         let update = init.and_then(move |monitor| {
             future::loop_fn((monitor, handle, timer),
@@ -58,10 +74,45 @@ impl Monitor {
                 }).and_then(move |_| {
                     test_all(monitor, false, &handle, &timer)
                         .map(|monitor| (monitor, handle, timer))
-                }).and_then(|args| Ok(future::Loop::Continue(args)))
+                }).and_then(|args| Ok(Loop::Continue(args)))
             })
         }).map_err(|_| ());
         Box::new(update)
+    }
+
+    /// Start monitoring throughput.
+    /// Returned Future won't return unless error on timer.
+    pub fn monitor_throughput(&self)
+            -> Box<Future<Item=(), Error=()>> {
+        let timer = Timer::default();
+        let sleep = Duration::from_secs(THROUGHPUT_INTERVAL_SECS);
+        let lp = future::loop_fn((self.clone(), timer),
+                           move |(monitor, timer)| {
+            let current = monitor.total_traffics();
+            {
+                let mut history = monitor.traffics.borrow_mut();
+                history.truncate(THROUGHPUT_HISTORY_NUM);
+                history.push_front(current);
+            }
+            timer.sleep(sleep).map_err(|err| {
+                error!("error on timer: {}", err);
+            }).and_then(move |_| Ok(Loop::Continue((monitor, timer))))
+        });
+        Box::new(lp)
+    }
+
+    /// Return average throughput in the recent monitor period (tx, rx)
+    /// in bytes per second. Should start `monitor_throughput()` task
+    /// befor call this.
+    pub fn throughput(&self) -> (usize, usize) {
+        let history = self.traffics.borrow();
+        if history.is_empty() {
+            return (0, 0);
+        }
+        let (tx_sum, rx_sum) = history.iter().fold((0, 0),
+                |(tx, rx), &(tx1, rx1)| (tx + tx1, rx + rx1));
+        let n = history.len();
+        (tx_sum / n, rx_sum / n)
     }
 }
 

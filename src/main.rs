@@ -82,7 +82,7 @@ fn main() {
     let listener = TcpListener::bind(&addr, &handle)
         .expect("cannot bind to port");
     info!("listen on {}", addr);
-    handle.spawn(monitor.clone().run(probe, lp.handle()));
+    handle.spawn(monitor.monitor_delay(probe, lp.handle()));
     let shared_buf = SharedBuf::new(8192);
     let server = listener.incoming().for_each(move |(sock, addr)| {
         debug!("incoming {}", addr);

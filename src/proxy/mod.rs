@@ -154,6 +154,10 @@ impl ProxyServer {
         self.conn_alive.set(self.conn_alive.get() - 1);
     }
 
+    /// Return (tx, rx) in bytes.
+    pub fn traffics(&self) -> (usize, usize) {
+        (self.tx_bytes.get(), self.rx_bytes.get())
+    }
 }
 
 impl fmt::Display for ProxyServer {

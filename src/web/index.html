@@ -22,7 +22,7 @@
   <h1>moproxy</h1>
   <p>moproxy <span id="version"></span> is running.</p>
   <button id="refresh">Refresh</button>
-  <input id="auto-refresh" type="checkbox">
+  <input id="auto-refresh" type="checkbox" checked>
   <label for="auto-refresh">auto</label>
 
   <h2>Proxy servers</h2>
@@ -43,7 +43,7 @@
   <script>
     const API_STATUS = "status";
     const API_VERSION = "version";
-    const REFRESH_MILLS = 2 * 1000;
+    const REFRESH_MILLS = 1000;
     let $ = s => document.querySelector(s);
 
     let timeoutId = 0;

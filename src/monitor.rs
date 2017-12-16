@@ -14,8 +14,8 @@ use futures::future::Loop;
 use proxy::ProxyServer;
 use ToMillis;
 
-static THROUGHPUT_INTERVAL_SECS: u64 = 2;
-static THROUGHPUT_HISTORY_NUM: usize = 5;
+static THROUGHPUT_INTERVAL_SECS: u64 = 1;
+static THROUGHPUT_HISTORY_NUM: usize = 3;
 
 pub type ServerList = Vec<Rc<ProxyServer>>;
 

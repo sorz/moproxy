@@ -62,10 +62,8 @@
         status.servers.forEach(server => {
           table.appendChild(newServerRow(server));
         });
-        $('#tx-speed').textContent =
-          humanFileSize(status.tx_speed) + '/s';
-        $('#rx-speed').textContent =
-          humanFileSize(status.rx_speed) + '/s';
+        $('#tx-speed').textContent = humanBandwidth(status.tx_speed);
+        $('#rx-speed').textContent = humanBandwidth(status.rx_speed);
       } catch (ex) {
         alert(`Fail to refresh: ${ex.message}`);
         refresh.checked = false;
@@ -120,6 +118,14 @@
       var i = Math.floor(Math.log(size) / Math.log(1024));
       return (size / Math.pow(1024, i)).toFixed(2) * 1 + ' '
         + ['B', 'KiB', 'MiB', 'GiB', 'TiB'][i];
+    };
+
+    function humanBandwidth(bytes) {
+      if (bytes == 0) return '0 bps';
+      let bits = bytes * 8;
+      var i = Math.floor(Math.log(bits) / Math.log(1000));
+      return (bits / Math.pow(1000, i)).toFixed(2) * 1 + ' '
+        + ['bps', 'kbps', 'Mbps', 'Gbps', 'Tbps'][i];
     };
 
     $('#refresh').addEventListener('click', update);

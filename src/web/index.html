@@ -26,6 +26,12 @@
   <label for="auto-refresh">auto</label>
 
   <h2>Proxy servers</h2>
+  <p id="throughput">Throughput:
+    <span title="upload">↑</span>
+    <span id="tx-speed">-</span>
+    <span title="download">↓</span>
+    <span id="rx-speed">-</span>
+  </p>
   <table>
     <thead>
       <tr><th>Server<th>Score<th>Delay</th>
@@ -35,7 +41,7 @@
   </table>
 
   <script>
-    const API_SERVERS = "servers";
+    const API_STATUS = "status";
     const API_VERSION = "version";
     const REFRESH_MILLS = 2 * 1000;
     let $ = s => document.querySelector(s);
@@ -48,14 +54,18 @@
       if (button.disabled) return;
       button.disabled = true;
       try {
-        let resp = await fetch(API_SERVERS);
+        let resp = await fetch(API_STATUS);
         if (!resp.ok)
           throw new Error(`server return ${resp.status}`);
-        let servers = await resp.json();
+        let status = await resp.json();
         table.innerHTML = '';
-        servers.forEach(server => {
+        status.servers.forEach(server => {
           table.appendChild(newServerRow(server));
         });
+        $('#tx-speed').textContent =
+          humanFileSize(status.tx_speed) + '/s';
+        $('#rx-speed').textContent =
+          humanFileSize(status.rx_speed) + '/s';
       } catch (ex) {
         alert(`Fail to refresh: ${ex.message}`);
         refresh.checked = false;
@@ -106,7 +116,7 @@
 
     // https://stackoverflow.com/a/20732091/1833236
     function humanFileSize(size) {
-      if (size == 0) return 0;
+      if (size == 0) return '0 B';
       var i = Math.floor(Math.log(size) / Math.log(1024));
       return (size / Math.pow(1024, i)).toFixed(2) * 1 + ' '
         + ['B', 'KiB', 'MiB', 'GiB', 'TiB'][i];

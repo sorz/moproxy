@@ -111,8 +111,11 @@ impl Monitor {
         }
         let (tx_sum, rx_sum) = history.iter().fold((0, 0),
                 |(tx, rx), &(tx1, rx1)| (tx + tx1, rx + rx1));
-        let n = history.len();
-        (tx_sum / n, rx_sum / n)
+        let n = history.len() as f64;
+        (
+            (tx_sum as f64 / n).round() as usize,
+            (rx_sum as f64 / n).round() as usize,
+        )
     }
 }
 

@@ -5,25 +5,36 @@ use hyper::{self, Method, StatusCode};
 use hyper::header::ContentType;
 use hyper::server::{Http, Request, Response, Service};
 use serde_json;
-use monitor::Monitor;
+use monitor::{Monitor, ServerList};
 
 
-struct StatsPages {
+struct StatusPages {
     monitor: Monitor,
 }
 
-impl StatsPages {
-    fn new(monitor: Monitor) -> StatsPages {
-        StatsPages { monitor }
+#[derive(Debug, Serialize)]
+struct Status {
+    servers: ServerList,
+    tx_speed: usize,
+    rx_speed: usize,
+}
+
+impl StatusPages {
+    fn new(monitor: Monitor) -> StatusPages {
+        StatusPages { monitor }
     }
 
-    fn servers_json(&self) -> serde_json::Result<String> {
+    fn status_json(&self) -> serde_json::Result<String> {
         let servers = self.monitor.servers();
-        serde_json::to_string(&*servers)
+        let (tx_speed, rx_speed) = self.monitor.throughput();
+        let status = Status {
+            servers, tx_speed, rx_speed,
+        };
+        serde_json::to_string(&status)
     }
 }
 
-impl Service for StatsPages {
+impl Service for StatusPages {
     type Request = Request;
     type Response = Response;
     type Error = hyper::Error;
@@ -40,7 +51,7 @@ impl Service for StatsPages {
                 resp.with_body(env!("CARGO_PKG_VERSION"))
                     .with_header(ContentType::plaintext())
             },
-            (&Method::Get, "/servers") => match self.servers_json() {
+            (&Method::Get, "/status") => match self.status_json() {
                 Ok(json) => resp.with_body(json)
                                 .with_header(ContentType::json()),
                 Err(e) => {
@@ -61,7 +72,8 @@ impl Service for StatsPages {
 
 pub fn run_server(bind: &SocketAddr, monitor: Monitor, handle: &Handle)
         -> Box<Future<Item=(), Error=()>> {
-    let new_service = move || Ok(StatsPages::new(monitor.clone()));
+    handle.spawn(monitor.monitor_throughput());
+    let new_service = move || Ok(StatusPages::new(monitor.clone()));
     let serve = Http::new()
         .serve_addr_handle(bind, handle, new_service)
         .expect("fail to start web server");

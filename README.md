@@ -1,6 +1,6 @@
 # moproxy
 
-A transparent TCP to SOCKSv5/HTTP proxy on Linux written in Rust.
+A transparent TCP to SOCKSv5/HTTP proxy on *Linux* written in Rust.
 
 Features:
 
@@ -8,7 +8,7 @@ Features:
  * Support multiple SOCKSv5/HTTP backend proxy servers
  * SOCKS/HTTP-layer alive & latency probe
  * Prioritize backend servers according to latency
- * Optional status web page
+ * Optional status web page(add default_value to `web-bind` in `cli.yml`)
 
 
 ## Background

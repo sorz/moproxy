@@ -1,3 +1,4 @@
+mod read;
 mod connect;
 use std::cmp;
 use std::rc::Rc;
@@ -8,14 +9,13 @@ use std::os::unix::io::{RawFd, AsRawFd};
 use nix::{self, sys};
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Handle;
-use tokio_timer::Timer;
-use tokio_io::io::read;
 use futures::{future, Future};
 use proxy::{ProxyServer, Destination};
 use proxy::copy::{pipe, SharedBuf};
 use monitor::ServerList;
 use tls::{self, TlsClientHello};
 use client::connect::try_connect_all;
+use client::read::read_with_timeout;
 
 
 #[derive(Debug)]
@@ -32,7 +32,7 @@ pub struct NewClientWithData {
     left: TcpStream,
     src: SocketAddr,
     dest: Destination,
-    pending_data: Box<[u8]>,
+    pending_data: Option<Box<[u8]>>,
     allow_parallel: bool,
     list: ServerList,
     handle: Handle,
@@ -71,39 +71,42 @@ impl NewClient {
     pub fn retrive_dest(self)
             -> Box<Future<Item=NewClientWithData, Error=()>> {
         let NewClient { left, src, mut dest, list, handle } = self; 
-        let timer = Timer::default();
-        let wait = Duration::from_millis(200);
+        let wait = Duration::from_millis(500);
         // try to read TLS ClientHello for
         //   1. --remote-dns: parse host name from SNI
         //   2. --n-parallel: need the whole request to be forwarded
-        let data = read(left, vec![0u8; 2048])
-            .map_err(|err| warn!("fail to read hello from client: {}", err));
-        let result = timer.timeout(data, wait)
-                          .map(move |(left, mut data, len)| {
-            data.truncate(len);
-            let allow_parallel = match tls::parse_client_hello(&data) {
-                Err(err) => {
-                    info!("fail to parse hello: {}", err);
-                    false
-                },
-                Ok(TlsClientHello { server_name, early_data, .. }) => {
-                    if let Some(name) = server_name {
-                        dest = (name, dest.port).into();
-                        debug!("SNI found: {}", name);
-                    } else {
-                        debug!("not SNI found in client hello");
-                    }
-                    if early_data {
-                        debug!("TLS with early data");
-                    }
-                    true
-                },
+        let read = read_with_timeout(left, vec![0u8; 2048], wait, &handle);
+        let result = read.map(move |(left, mut data, len)| {
+            let (allow_parallel, pending_data) = if len == 0 {
+                info!("no tls request received before timeout");
+                (false, None)
+            } else {
+                data.truncate(len);
+                // only TLS is safe to duplicate requests.
+                let allow_parallel = match tls::parse_client_hello(&data) {
+                    Err(err) => {
+                        info!("fail to parse hello: {}", err);
+                        false
+                    },
+                    Ok(TlsClientHello { server_name, early_data, .. }) => {
+                        if let Some(name) = server_name {
+                            dest = (name, dest.port).into();
+                            debug!("SNI found: {}", name);
+                        } else {
+                            debug!("not SNI found in client hello");
+                        }
+                        if early_data {
+                            debug!("TLS with early data");
+                        }
+                        true
+                    },
+                };
+                (allow_parallel, Some(data.into_boxed_slice()))
             };
             NewClientWithData {
-                left, src, dest, list, handle, allow_parallel,
-                pending_data: data.into_boxed_slice(),
+                left, src, dest, list, handle, allow_parallel, pending_data
             }
-        }).map_err(|_| info!("no tls request received before timeout"));
+        }).map_err(|err| warn!("fail to read hello from client: {}", err));
         Box::new(result)
     }
 }
@@ -130,7 +133,7 @@ impl Connectable for NewClientWithData {
         let NewClientWithData {
             left, src, dest, list, handle,
             pending_data, allow_parallel } = self;
-        let pending_data = Some(RcBox::new(pending_data));
+        let pending_data = pending_data.map(|v| RcBox::new(v));
         let n_parallel = if allow_parallel {
             cmp::min(list.len(), n_parallel)
         } else {

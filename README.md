@@ -1,6 +1,6 @@
 # moproxy
 
-A transparent TCP to SOCKSv5/HTTP proxy on Linux written in Rust.
+A transparent TCP to SOCKSv5/HTTP proxy on *Linux* written in Rust.
 
 Features:
 
@@ -8,29 +8,25 @@ Features:
  * Support multiple SOCKSv5/HTTP backend proxy servers
  * SOCKS/HTTP-layer alive & latency probe
  * Prioritize backend servers according to latency
- * Optional status web page
+ * Optional remote DNS resolving for TLS with SNI
+ * Optional try-in-parallel for TLS (try multiple proxies and choose the one
+   first response)
+ * Optional status web page (latency, traffic, etc.)
 
-
-## Background
-
-I need to proxy a list of websites on my home router.
-[shadowsocks-libev](https://github.com/shadowsocks/shadowsocks-libev) is used
-to setup encrypted SOCKSv5 tunnels between the router and destinations.
-For availability, I ran multiple Shadowsocks servers on different places.
-In previous solution, HAProxy ran on the router and distributed traffic came
-from `ss-redir` (SS client that provide transparent proxy) to that servers.
-
-However, issues existed: 1) HAProxy don't support TCP Fast Open on backend
-side; 2) availability probe only done on TCP layer, not SOCKS layer; 3) I
-actually don't need "load balance" but want always connect to one server
-that not behind "traffic jam".
-
-This project try to overcome above issues by catching TCP connections and
-then redirect them to a group of `ss-local`, which connect to Shadowsocks
-servers.
-
-It's also a personal practice on Rust language. (The first workable program
-I have written in Rust (
+```
++------+  TCP  +----------+       SOCKSv5   +---------+
+| Apps +------>+ iptables |    +------------> Proxy 1 |
++------+       +----+-----+    |            +---------+
+           redirect |          |
+                 to v          |      HTTP  +---------+
+               +----+----+     |   +--------> Proxy 2 |
+               |         +-----+   |        +---------+
+               | moproxy |---------+             :
+               |         +------------...        :
+               +---------+  choose one  |   +---------+
+                I'M HERE                +---> Proxy N |
+                                            +---------+
+```
 
 ## Usage
 

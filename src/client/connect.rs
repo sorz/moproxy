@@ -4,8 +4,7 @@ use std::io::{self, Write, ErrorKind};
 use std::iter::FromIterator;
 use std::collections::VecDeque;
 use tokio_core::net::TcpStream;
-use tokio_core::reactor::Handle;
-use tokio_timer::{Timer, Sleep};
+use tokio_core::reactor::{Handle, Timeout};
 use futures::{Future, Poll, Async};
 use proxy::{ProxyServer, Destination, Connect};
 use client::RcBox;
@@ -13,7 +12,7 @@ use client::RcBox;
 struct TryConnect {
     server: Rc<ProxyServer>,
     state: TryConnectState,
-    timer: Sleep,
+    timer: Timeout,
 }
 
 enum TryConnectState {
@@ -34,7 +33,8 @@ fn try_connect(dest: &Destination, server: Rc<ProxyServer>,
         connect: server.connect(dest.clone(), &handle),
         wait_response, pending_data,
     };
-    let timer = Timer::default().sleep(server.max_wait);
+    let timer = Timeout::new(server.max_wait, &handle)
+        .expect("error on get timeout from reactor");
     TryConnect { server, state, timer }
 }
 
@@ -43,7 +43,7 @@ impl Future for TryConnect {
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        if self.timer.is_expired() {
+        if self.timer.poll()?.is_ready() {
             return Err(io::Error::new(ErrorKind::TimedOut, "connect timeout"));
         }
         let new_state = match self.state {

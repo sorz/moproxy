@@ -1,5 +1,4 @@
 name: moproxy
-version: "0.1"
 author: "Shell Chen <me@sorz.org>"
 about: "Transparent TCP proxy to a group of SOCKSv5 servers"
 args:
@@ -7,14 +6,14 @@ args:
         short: h
         long: host
         value_name: IP-ADDRESS
-        help: address to bind on
+        help: Address to bind on
         takes_value: true
         default_value: 0.0.0.0
     - port:
         short: p
         long: port
         value_name: PORT
-        help: port number to bind on
+        help: Port number to bind on
         takes_value: true
         required: true
     - socks5-servers:
@@ -41,36 +40,37 @@ args:
         short: i
         long: probe
         value_name: SECONDS
-        help: period of time to make one probe.
+        help: Period of time to make one probe.
         default_value: "30"
     - test-dns:
         long: test-dns
         value_name: IP-ADDR:PORT
         help: >
-          address of a DNS server with TCP support to do delay probing.
+          Address of a DNS server with TCP support to do delay probing.
           Default to Google Public DNS (8.8.8.8:53).
         default_value: "8.8.8.8:53"
     - web-bind:
         long: stats-bind
         takes_value: true
-        help: where the web server that shows statistics bind to.
+        value_name: IP-ADDR:PORT
+        help: Where the web server that shows statistics bind.
     - remote-dns:
         long: remote-dns
         help: >
-          try to obtain domain name from TLS SNI, and sent it to remote
+          Try to obtain domain name from TLS SNI, and sent it to remote
           proxy server. Only apply for port number 443.
     - n-parallel:
         long: n-parallel
         value_name: N
         takes_value: true
         help: >
-          connect and send application data to N proxies in parallel, use
+          Connect and send application data to N proxies in parallel, use
           the first proxy that return valid data. Currently only support
           TLS as application layer. Must turn on --remote-dns otherwise it
           will be ignored.
     - log-level:
         long: log-level
         takes_value: true
-        help: level of verbosity
+        help: Level of verbosity
         possible_values: [off, error, warn, info, debug, trace]
         default_value: info

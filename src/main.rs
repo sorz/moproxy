@@ -28,7 +28,9 @@ use moproxy::web;
 
 fn main() {
     let yaml = load_yaml!("cli.yml");
-    let args = clap::App::from_yaml(yaml).get_matches();
+    let args = clap::App::from_yaml(yaml)
+        .version(env!("CARGO_PKG_VERSION"))
+        .get_matches();
 
     let mut logger = LogBuilder::new();
     if let Ok(env_log) = env::var("RUST_LOG") {

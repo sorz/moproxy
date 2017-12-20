@@ -9,15 +9,20 @@ extern crate ini;
 extern crate clap;
 #[macro_use]
 extern crate log;
+extern crate systemd;
 extern crate moproxy;
+
 use std::env;
 use std::net::SocketAddr;
+use std::collections::HashMap;
 use ini::Ini;
 use futures::{Future, Stream};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
 use log::LogLevelFilter;
 use env_logger::{LogBuilder, LogTarget};
+use systemd::daemon;
+
 use moproxy::monitor::Monitor;
 use moproxy::proxy::ProxyServer;
 use moproxy::proxy::copy::SharedBuf;
@@ -54,7 +59,7 @@ fn main() {
     let port = args.value_of("port")
         .expect("missing port number").parse()
         .expect("invalid port number");
-    let addr = SocketAddr::new(host, port);
+    let bind_addr = SocketAddr::new(host, port);
     let probe = args.value_of("probe-secs")
         .expect("missing probe secs").parse()
         .expect("not a vaild probe secs");
@@ -62,6 +67,7 @@ fn main() {
     let n_parallel = args.value_of("n-parallel")
         .map(|v| v.parse().expect("not a valid number"))
         .unwrap_or(0 as usize);
+    let systemd = args.is_present("systemd");
 
     let servers = parse_servers(&args);
     if servers.len() == 0 {
@@ -73,17 +79,17 @@ fn main() {
     let mut lp = Core::new().expect("fail to create event loop");
     let handle = lp.handle();
 
-    if let Some(addr) = args.value_of("web-bind") {
-        let addr = addr.parse()
+    if let Some(http_addr) = args.value_of("web-bind") {
+        let addr = http_addr.parse()
             .expect("not a valid address");
         let serv = web::run_server(&addr, monitor.clone(), &handle);
         handle.spawn(serv);
         info!("http run on {}", addr);
     }
 
-    let listener = TcpListener::bind(&addr, &handle)
+    let listener = TcpListener::bind(&bind_addr, &handle)
         .expect("cannot bind to port");
-    info!("listen on {}", addr);
+    info!("listen on {}", bind_addr);
     handle.spawn(monitor.monitor_delay(probe, lp.handle()));
     let shared_buf = SharedBuf::new(8192);
     let server = listener.incoming().for_each(move |(sock, addr)| {
@@ -103,6 +109,16 @@ fn main() {
         handle.spawn(serv);
         Ok(())
     });
+    
+    if systemd {
+        let status = format!("Proxy listen on {}", bind_addr);
+        let state: HashMap<&str, &str> = 
+            [(daemon::STATE_READY, "1"),
+             (daemon::STATE_STATUS, &status)
+            ].iter().cloned().collect();
+        daemon::notify(true, state)
+            .expect("fail to notify systemd");
+    }
     lp.run(server).expect("error on event loop");
 }
 

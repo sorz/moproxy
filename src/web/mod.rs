@@ -1,6 +1,8 @@
+use std::io;
 use std::net::SocketAddr;
 use futures::{future, Future, Stream};
 use tokio_core::reactor::Handle;
+use tokio_io::{AsyncRead, AsyncWrite};
 use hyper::{self, Method, StatusCode};
 use hyper::header::ContentType;
 use hyper::server::{Http, Request, Response, Service};
@@ -70,16 +72,21 @@ impl Service for StatusPages {
     }
 }
 
-pub fn run_server(bind: &SocketAddr, monitor: Monitor, handle: &Handle)
-        -> Box<Future<Item=(), Error=()>> {
+pub fn run_server<I, S>(incoming: I, monitor: Monitor, handle: &Handle)
+        -> Box<Future<Item=(), Error=()>>
+where I: Stream<Item=(S, SocketAddr), Error=io::Error> + 'static,
+      S: AsyncRead + AsyncWrite + 'static {
     handle.spawn(monitor.monitor_throughput());
     let new_service = move || Ok(StatusPages::new(monitor.clone()));
+    let incoming = incoming.map(|(stream, addr)| {
+        debug!("web server connected with {}", addr);
+        stream
+    });
     let serve = Http::new()
-        .serve_addr_handle(bind, handle, new_service)
-        .expect("fail to start web server");
-    let handle_ = handle.clone();
+        .serve_incoming(incoming, new_service);
+    let handle = handle.clone();
     let run = serve.for_each(move |conn| {
-        handle_.spawn(
+        handle.spawn(
             conn.map(|_| ())
                 .map_err(|err| info!("http: {}", err))
         );

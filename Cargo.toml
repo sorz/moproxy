@@ -11,6 +11,7 @@ futures = "0.1"
 tokio-core = "0.1"
 tokio-io = "0.1"
 tokio-timer = "0.1"
+tokio-uds = "0.1"
 net2 = "0.2"
 clap = {version = "2.29", features = ["yaml"]}
 log = "0.3"

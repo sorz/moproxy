@@ -1,5 +1,5 @@
 use std::io;
-use std::net::SocketAddr;
+use std::fmt::Debug;
 use futures::{future, Future, Stream};
 use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
@@ -72,14 +72,15 @@ impl Service for StatusPages {
     }
 }
 
-pub fn run_server<I, S>(incoming: I, monitor: Monitor, handle: &Handle)
+pub fn run_server<I, S, A>(incoming: I, monitor: Monitor, handle: &Handle)
         -> Box<Future<Item=(), Error=()>>
-where I: Stream<Item=(S, SocketAddr), Error=io::Error> + 'static,
-      S: AsyncRead + AsyncWrite + 'static {
+where I: Stream<Item=(S, A), Error=io::Error> + 'static,
+      S: AsyncRead + AsyncWrite + 'static,
+      A: Debug {
     handle.spawn(monitor.monitor_throughput());
     let new_service = move || Ok(StatusPages::new(monitor.clone()));
     let incoming = incoming.map(|(stream, addr)| {
-        debug!("web server connected with {}", addr);
+        debug!("web server connected with {:?}", addr);
         stream
     });
     let serve = Http::new()

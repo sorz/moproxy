@@ -3,6 +3,7 @@ extern crate futures;
 extern crate tokio_core;
 extern crate tokio_io;
 extern crate tokio_timer;
+extern crate tokio_uds;
 extern crate env_logger;
 extern crate ini;
 #[macro_use]
@@ -19,6 +20,7 @@ use ini::Ini;
 use futures::{Future, Stream};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
+use tokio_uds::UnixListener;
 use log::LogLevelFilter;
 use env_logger::{LogBuilder, LogTarget};
 use systemd::daemon;
@@ -80,15 +82,23 @@ fn main() {
     let handle = lp.handle();
 
     if let Some(http_addr) = args.value_of("web-bind") {
-        let addr = http_addr.parse()
-            .expect("not a valid address");
-        let incoming = TcpListener::bind(&addr, &handle)
-            .expect("fail to bind web server")
-            .incoming();
         let monitor = monitor.clone();
-        let serv = web::run_server(incoming, monitor, &handle);
+        let serv = if http_addr.starts_with("/") {
+            let incoming = UnixListener::bind(&http_addr, &handle)
+                .expect("fail to bind web server")
+                .incoming();
+            web::run_server(incoming, monitor, &handle)
+        } else {
+            // FIXME: remove duplicate code
+            let addr = http_addr.parse()
+                .expect("not a valid address of TCP socket");
+            let incoming = TcpListener::bind(&addr, &handle)
+                .expect("fail to bind web server")
+                .incoming();
+            web::run_server(incoming, monitor, &handle)
+        };
         handle.spawn(serv);
-        info!("http run on {}", addr);
+        info!("http run on {}", http_addr);
     }
 
     let listener = TcpListener::bind(&bind_addr, &handle)

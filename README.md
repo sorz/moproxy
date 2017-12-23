@@ -70,24 +70,26 @@ score base=5000 ;add 5k to pull away from preferred server.
 
 Pass the file path to `moproxy` via `--list` argument.
 
-## Details
+## Install
 
-### Latency probing
+You may download the binray executable file on
+[releases page](https://github.com/sorz/moproxy/releases).
 
-Just send a hard-coded DNS request (with TCP) over proxy,
-and take the delay of receiving a response.
+Arch Linux user can install it from
+[AUR/moproxy](https://aur.archlinux.org/packages/moproxy/).
 
-### Priority of servers
+Or complie it manually:
 
-Sort online servers by latency in
-[exponential moving average](https://en.wikipedia.org/wiki/Moving_average#Exponential_moving_average).
-If a server is down, put that in the end of list.
-When a server just restore to online, add extra "latency" to the fisrt probe
-result after down, so that servers with unstable network get penalty.
+```bash
+# Install Rust
+curl -sSf https://static.rust-lang.org/rustup.sh | sh
 
-### SOCKS
+# Clone source code
+git clone https://github.com/sorz/moproxy
+cd moproxy
 
-Although I mentioned *SOCKSv5* repeatedly, it actually speak an variant that
-Shadowsocks client use, not a real RFC 1928 protocol. It's mostly for lower
-latency and simplify implementation, and may not work with other SOCKS server.
+# Build
+cargo build --release
+target/release/moproxy --help
+```
 

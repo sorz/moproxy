@@ -1,5 +1,6 @@
 use std::io;
 use std::fmt::Debug;
+use std::time::{Instant, Duration};
 use futures::{future, Future, Stream};
 use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
@@ -11,26 +12,29 @@ use monitor::{Monitor, ServerList};
 
 
 struct StatusPages {
+    start_time: Instant,
     monitor: Monitor,
 }
 
 #[derive(Debug, Serialize)]
 struct Status {
     servers: ServerList,
+    uptime: Duration,
     tx_speed: usize,
     rx_speed: usize,
 }
 
 impl StatusPages {
-    fn new(monitor: Monitor) -> StatusPages {
-        StatusPages { monitor }
+    fn new(start_time: Instant, monitor: Monitor) -> StatusPages {
+        StatusPages { start_time,  monitor }
     }
 
     fn status_json(&self) -> serde_json::Result<String> {
         let servers = self.monitor.servers();
         let (tx_speed, rx_speed) = self.monitor.throughput();
+        let uptime = self.start_time.elapsed();
         let status = Status {
-            servers, tx_speed, rx_speed,
+            servers, tx_speed, rx_speed, uptime,
         };
         serde_json::to_string(&status)
     }
@@ -78,7 +82,9 @@ where I: Stream<Item=(S, A), Error=io::Error> + 'static,
       S: AsyncRead + AsyncWrite + 'static,
       A: Debug {
     handle.spawn(monitor.monitor_throughput());
-    let new_service = move || Ok(StatusPages::new(monitor.clone()));
+    let start_time = Instant::now();
+    let new_service = move ||
+        Ok(StatusPages::new(start_time, monitor.clone()));
     let incoming = incoming.map(|(stream, addr)| {
         debug!("web server connected with {:?}", addr);
         stream

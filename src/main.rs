@@ -2,7 +2,6 @@ extern crate net2;
 extern crate futures;
 extern crate tokio_core;
 extern crate tokio_io;
-extern crate tokio_timer;
 extern crate tokio_uds;
 extern crate env_logger;
 extern crate ini;
@@ -109,7 +108,7 @@ fn main() {
     let listener = TcpListener::bind(&bind_addr, &handle)
         .expect("cannot bind to port");
     info!("listen on {}", bind_addr);
-    handle.spawn(monitor.monitor_delay(probe, lp.handle()));
+    handle.spawn(monitor.monitor_delay(probe, &handle));
     let shared_buf = SharedBuf::new(8192);
     let server = listener.incoming().for_each(move |(sock, addr)| {
         debug!("incoming {}", addr);

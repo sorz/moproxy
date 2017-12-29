@@ -9,7 +9,6 @@ extern crate futures;
 extern crate tokio_core;
 #[macro_use]
 extern crate tokio_io;
-extern crate tokio_timer;
 extern crate hyper;
 extern crate nix;
 pub mod client;

@@ -6,8 +6,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use self::rand::Rng;
-use tokio_timer::Timer;
-use tokio_core::reactor::Handle;
+use tokio_core::reactor::{Handle, Timeout};
 use tokio_io::io::{write_all, read_exact};
 use futures::{future, Future};
 use futures::future::Loop;
@@ -61,19 +60,19 @@ impl Monitor {
 
     /// Start monitoring delays.
     /// Returned Future won't return unless error on timer.
-    pub fn monitor_delay(&self, probe: u64, handle: Handle)
+    pub fn monitor_delay(&self, probe: u64, handle: &Handle)
             -> Box<Future<Item=(), Error=()>> {
-        let timer = Timer::default();
-        let init = test_all(self.clone(), true, &handle, &timer);
+        let handle = handle.clone();
+        let init = test_all(self.clone(), true, &handle);
         let interval = Duration::from_secs(probe);
         let update = init.and_then(move |monitor| {
-            future::loop_fn((monitor, handle, timer),
-                      move |(monitor, handle, timer)| {
-                timer.sleep(interval).map_err(|err| {
-                    error!("error on timer: {}", err);
-                }).and_then(move |_| {
-                    test_all(monitor, false, &handle, &timer)
-                        .map(|monitor| (monitor, handle, timer))
+            future::loop_fn((monitor, handle), move |(monitor, handle)| {
+                let wait = Timeout::new(interval, &handle)
+                    .expect("error on get timeout from reactor")
+                    .map_err(|err| panic!("error on timer: {}", err));
+                wait.and_then(move |_| {
+                    test_all(monitor, false, &handle)
+                        .map(|monitor| (monitor, handle))
                 }).and_then(|args| Ok(Loop::Continue(args)))
             })
         }).map_err(|_| ());
@@ -82,21 +81,21 @@ impl Monitor {
 
     /// Start monitoring throughput.
     /// Returned Future won't return unless error on timer.
-    pub fn monitor_throughput(&self)
+    pub fn monitor_throughput(&self, handle: &Handle)
             -> Box<Future<Item=(), Error=()>> {
-        let timer = Timer::default();
-        let sleep = Duration::from_secs(THROUGHPUT_INTERVAL_SECS);
-        let lp = future::loop_fn((self.clone(), timer),
-                           move |(monitor, timer)| {
+        let interval = Duration::from_secs(THROUGHPUT_INTERVAL_SECS);
+        let handle = handle.clone();
+        let lp = future::loop_fn(self.clone(), move |monitor| {
             let current = monitor.total_traffics();
             {
                 let mut history = monitor.traffics.borrow_mut();
                 history.truncate(THROUGHPUT_HISTORY_NUM);
                 history.push_front(current);
             }
-            timer.sleep(sleep).map_err(|err| {
-                error!("error on timer: {}", err);
-            }).and_then(move |_| Ok(Loop::Continue((monitor, timer))))
+            Timeout::new(interval, &handle)
+                .expect("error on get timeout from reactor")
+                .map_err(|err| panic!("error on timer: {}", err))
+                .map(move |_| Loop::Continue(monitor))
         });
         Box::new(lp)
     }
@@ -126,11 +125,11 @@ fn info_stats(infos: &ServerList) -> String {
     stats
 }
 
-fn test_all(monitor: Monitor, init: bool, handle: &Handle, timer: &Timer)
+fn test_all(monitor: Monitor, init: bool, handle: &Handle)
         -> Box<Future<Item=Monitor, Error=()>> {
     debug!("testing all servers...");
     let tests: Vec<_> = monitor.servers().into_iter().map(move |server| {
-        let test = alive_test(&server, handle, timer).then(move |result| {
+        let test = alive_test(&server, handle).then(move |result| {
             if init {
                 server.set_delay(result.ok());
             } else {
@@ -147,7 +146,7 @@ fn test_all(monitor: Monitor, init: bool, handle: &Handle, timer: &Timer)
     Box::new(sort)
 }
 
-fn alive_test(server: &ProxyServer, handle: &Handle, timer: &Timer)
+fn alive_test(server: &ProxyServer, handle: &Handle)
         -> Box<Future<Item=Duration, Error=io::Error>> {
     let request = [
         0, 17,  // length
@@ -166,21 +165,26 @@ fn alive_test(server: &ProxyServer, handle: &Handle, timer: &Timer)
 
     let now = Instant::now();
     let tag = server.tag.clone();
+    let timeout = Timeout::new(server.max_wait, handle)
+        .expect("error on get timeout from reactor")
+        .map(|_| None);
     let conn = server.connect(server.test_dns.into(), handle);
-    let try_conn = timer.timeout(conn, server.max_wait);
-    let query = try_conn.and_then(move |stream| {
+    let query = conn.and_then(move |stream| {
         write_all(stream, request)
     }).and_then(|(stream, _)| {
         read_exact(stream, [0u8; 12])
     }).and_then(move |(_, buf)| {
         if req_tid == tid(&buf) {
-            let delay = now.elapsed();
-            debug!("[{}] delay {}ms", tag, delay.millis());
-            Ok(delay)
+            Ok(Some(now.elapsed()))
         } else {
             Err(io::Error::new(io::ErrorKind::Other, "unknown response"))
         }
     });
-    Box::new(query)
+    let wait = query.select(timeout).map_err(|(err, _)| err);
+    let delay = wait.and_then(|(result, _)| match result {
+        Some(stream) => Ok(stream),
+        None => Err(io::Error::new(io::ErrorKind::TimedOut, "test timeout")),
+    }).inspect(move |t| debug!("[{}] delay {}ms", tag, t.millis()));
+    Box::new(delay)
 }
 

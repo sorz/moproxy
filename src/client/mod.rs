@@ -16,6 +16,7 @@ use monitor::ServerList;
 use tls::{self, TlsClientHello};
 use client::connect::try_connect_all;
 use client::read::read_with_timeout;
+use RcBox;
 
 
 #[derive(Debug)]
@@ -179,26 +180,6 @@ impl ConnectedClient {
                 }
             });
         Box::new(serve)
-    }
-}
-
-#[derive(Debug)]
-pub struct RcBox<T: ?Sized> {
-    item: Rc<Box<T>>,
-}
-impl<T: ?Sized> RcBox<T> {
-    fn new(item: Box<T>) -> Self {
-        RcBox { item: Rc::new(item) }
-    }
-}
-impl<T: ?Sized> AsRef<T> for RcBox<T> {
-    fn as_ref(&self) -> &T {
-        &self.item
-    }
-}
-impl<T: ?Sized> Clone for RcBox<T> {
-    fn clone(&self) -> Self {
-        RcBox { item: self.item.clone() }
     }
 }
 

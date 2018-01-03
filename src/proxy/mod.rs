@@ -11,6 +11,7 @@ use futures::Future;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Handle;
 use ToMillis;
+use RcBox;
 
 const DEFAULT_MAX_WAIT_MILLILS: u64 = 4_000;
 
@@ -91,7 +92,8 @@ impl ProxyServer {
         }
     }
 
-    pub fn connect(&self, addr: Destination, handle: &Handle)
+    pub fn connect(&self, addr: Destination, data: Option<RcBox<[u8]>>,
+                   handle: &Handle)
             -> Box<Connect> {
         let proto = self.proto;
         let conn = TcpStream::connect(&self.addr, handle);
@@ -101,8 +103,10 @@ impl ProxyServer {
                 warn!("fail to set nodelay: {}", e);
             };
             match proto {
-                ProxyProto::Socks5 => socks5::handshake(stream, &addr),
-                ProxyProto::Http => http::handshake(stream, &addr),
+                ProxyProto::Socks5 =>
+                    socks5::handshake(stream, &addr, data),
+                ProxyProto::Http =>
+                    http::handshake(stream, &addr, data),
             }
         });
         Box::new(handshake)

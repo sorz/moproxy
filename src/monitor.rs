@@ -168,7 +168,7 @@ fn alive_test(server: &ProxyServer, handle: &Handle)
     let timeout = Timeout::new(server.max_wait, handle)
         .expect("error on get timeout from reactor")
         .map(|_| None);
-    let conn = server.connect(server.test_dns.into(), handle);
+    let conn = server.connect(server.test_dns.into(), None, handle);
     let query = conn.and_then(move |stream| {
         write_all(stream, request)
     }).and_then(|(stream, _)| {

@@ -1,13 +1,13 @@
 use std::cmp;
 use std::rc::Rc;
-use std::io::{self, Write, ErrorKind};
+use std::io::{self, ErrorKind};
 use std::iter::FromIterator;
 use std::collections::VecDeque;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::{Handle, Timeout};
 use futures::{Future, Poll, Async};
 use proxy::{ProxyServer, Destination, Connect};
-use client::RcBox;
+use RcBox;
 
 struct TryConnect {
     server: Rc<ProxyServer>,
@@ -18,7 +18,6 @@ struct TryConnect {
 enum TryConnectState {
     Connecting {
         connect: Box<Connect>,
-        pending_data: Option<RcBox<[u8]>>,
         wait_response: bool,
     },
     Waiting {
@@ -30,8 +29,8 @@ fn try_connect(dest: &Destination, server: Rc<ProxyServer>,
                pending_data: Option<RcBox<[u8]>>, wait_response: bool,
                handle: &Handle) -> TryConnect {
     let state = TryConnectState::Connecting {
-        connect: server.connect(dest.clone(), &handle),
-        wait_response, pending_data,
+        connect: server.connect(dest.clone(), pending_data, &handle),
+        wait_response,
     };
     let timer = Timeout::new(server.max_wait, &handle)
         .expect("error on get timeout from reactor");
@@ -48,19 +47,8 @@ impl Future for TryConnect {
         }
         let new_state = match self.state {
             // waiting for proxy server connected
-            TryConnectState::Connecting { ref mut connect, ref pending_data,
-                                          wait_response } => {
-                let mut conn = try_ready!(connect.poll());
-                if let Some(ref data) = *pending_data {
-                    // we need write out all pending data, which should
-                    // be small enough to fit into the buffer without
-                    // blocking.
-                    let n = conn.write(data.as_ref())?;
-                    if n < data.as_ref().len() {
-                        return Err(io::Error::new(ErrorKind::WouldBlock,
-                                                  "partially write"));
-                    }
-                }
+            TryConnectState::Connecting { ref mut connect, wait_response } => {
+                let conn = try_ready!(connect.poll());
                 if !wait_response || conn.poll_read().is_ready() {
                     return Ok((self.server.clone(), conn).into());
                 } else {

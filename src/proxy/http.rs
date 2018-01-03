@@ -5,10 +5,16 @@ use futures::{future, Future};
 use tokio_core::net::TcpStream;
 use tokio_io::io::{write_all, read_until};
 use proxy::{Connect, Destination, Address};
+use RcBox;
 
 
-pub fn handshake(stream: TcpStream, addr: &Destination) -> Box<Connect> {
-    let request = build_request(addr);
+pub fn handshake(stream: TcpStream, addr: &Destination,
+                 data: Option<RcBox<[u8]>>) -> Box<Connect> {
+    let mut request = build_request(addr).into_bytes();
+    if let Some(data) = data {
+        // TODO: remove copying
+        request.extend(data.as_ref());
+    }
     let response = write_all(stream, request).and_then(|(stream, _)| {
         let reader = BufReader::new(stream).take(512);
         read_until(reader, 0x0a, Vec::with_capacity(64))

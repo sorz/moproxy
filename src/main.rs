@@ -29,7 +29,7 @@ use systemd::daemon;
 use moproxy::monitor::Monitor;
 use moproxy::proxy::ProxyServer;
 use moproxy::proxy::copy::SharedBuf;
-use moproxy::proxy::ProxyProto::{Socks5, Http};
+use moproxy::proxy::ProxyProto;
 use moproxy::client::{NewClient, Connectable};
 use moproxy::web;
 
@@ -152,13 +152,13 @@ fn parse_servers(args: &clap::ArgMatches) -> Vec<ProxyServer> {
     if let Some(s) = args.values_of("socks5-servers") {
         for s in s.map(parse_server) {
             servers.push(ProxyServer::new(
-                    s, Socks5, default_test_dns, None, None));
+                    s, ProxyProto::socks5(), default_test_dns, None, None));
         }
     }
     if let Some(s) = args.values_of("http-servers") {
         for s in s.map(parse_server) {
             servers.push(ProxyServer::new(
-                    s, Http, default_test_dns, None, None));
+                    s, ProxyProto::http(false), default_test_dns, None, None));
         }
     }
     if let Some(path) = args.value_of("server-list") {
@@ -175,14 +175,24 @@ fn parse_servers(args: &clap::ArgMatches) -> Vec<ProxyServer> {
             let addr: SocketAddr = props.get("address")
                 .expect("address not specified").parse()
                 .expect("not a valid socket address");
-            let proto = props.get("protocol")
-                .expect("protocol not specified").parse()
-                .expect("unknown proxy protocol");
             let base = props.get("score base").map(|i| i.parse()
                 .expect("score base not a integer"));
             let test_dns = props.get("test dns").map(|i| i.parse()
                 .expect("not a valid socket address"))
                 .unwrap_or(default_test_dns);
+            let proto = match props.get("protocol")
+                   .expect("protocol not specified")
+                   .to_lowercase().as_str() {
+                "socks5" => ProxyProto::socks5(),
+                "socksv5" => ProxyProto::socks5(),
+                "http" => {
+                    let cwp = props.get("http allow connect payload")
+                        .map_or(false, |v| v.parse()
+                             .expect("not a boolean value"));
+                    ProxyProto::http(cwp)
+                },
+                _ => panic!("unknown proxy protocol")
+           };
             servers.push(ProxyServer::new(addr, proto, test_dns, tag, base));
         }
     }

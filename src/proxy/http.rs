@@ -8,12 +8,13 @@ use proxy::{Connect, Destination, Address};
 
 
 pub fn handshake<T>(stream: TcpStream, addr: &Destination,
-                 data: Option<T>) -> Box<Connect>
-where T: AsRef<[u8]> {
+                    mut data: Option<T>, with_playload: bool)
+    -> Box<Connect>
+where T: AsRef<[u8]> + 'static {
     let mut request = build_request(addr).into_bytes();
-    if let Some(data) = data {
+    if with_playload && data.is_some() {
         // TODO: remove copying
-        request.extend(data.as_ref());
+        request.extend(data.take().unwrap().as_ref());
     }
     let response = write_all(stream, request).and_then(|(stream, _)| {
         let reader = BufReader::new(stream).take(512);
@@ -54,9 +55,15 @@ where T: AsRef<[u8]> {
         let reader = reader.take(8 * 1024);
         future::loop_fn((reader, buf), skip_headers)
             .map(|reader| reader.into_inner())
-    });
     // FIXME: may lost data in buffer?
-    Box::new(skip.map(|reader| reader.into_inner()))
+    }).map(|reader| reader.into_inner());
+    if let Some(data) = data {
+        Box::new(skip.and_then(|stream| {
+            write_all(stream, data).map(|(stream, _)| stream)
+        }))
+    } else {
+        Box::new(skip)
+    }
 }
 
 fn build_request(addr: &Destination) -> String {

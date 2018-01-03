@@ -21,7 +21,17 @@ pub enum ProxyProto {
     #[serde(rename = "SOCKSv5")]
     Socks5,
     #[serde(rename = "HTTP")]
-    Http,
+    Http {
+        /// Allow to send app-level data as payload on CONNECT request.
+        /// This can eliminate 1 round-trip delay but may cause problem on
+        /// some servers.
+        ///
+        /// RFC 7231:
+        /// >> A payload within a CONNECT request message has no defined
+        /// >> semantics; sending a payload body on a CONNECT request might
+        /// cause some existing implementations to reject the request.
+        connect_with_payload: bool,
+    },
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -71,6 +81,16 @@ impl<'a> From<(&'a str, u16)> for Destination {
     }
 }
 
+impl ProxyProto {
+    pub fn socks5() -> Self {
+        ProxyProto::Socks5
+    }
+
+    pub fn http(connect_with_payload: bool) -> Self {
+        ProxyProto::Http { connect_with_payload }
+    }
+}
+
 impl ProxyServer {
     pub fn new(addr: SocketAddr, proto: ProxyProto, test_dns: SocketAddr,
                tag: Option<&str>, score_base: Option<i32>) -> ProxyServer {
@@ -104,8 +124,9 @@ impl ProxyServer {
             match proto {
                 ProxyProto::Socks5 =>
                     socks5::handshake(stream, &addr, data),
-                ProxyProto::Http =>
-                    http::handshake(stream, &addr, data),
+                ProxyProto::Http { connect_with_payload } =>
+                    http::handshake(stream, &addr, data,
+                                    connect_with_payload),
             }
         });
         Box::new(handshake)
@@ -173,7 +194,7 @@ impl fmt::Display for ProxyProto {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             ProxyProto::Socks5 => write!(f, "SOCKSv5"),
-            ProxyProto::Http => write!(f, "HTTP"),
+            ProxyProto::Http { .. } => write!(f, "HTTP"),
         }
     }
 }
@@ -197,9 +218,10 @@ impl FromStr for ProxyProto {
     type Err = ();
     fn from_str(s: &str) -> Result<ProxyProto, ()> {
         match s.to_lowercase().as_str() {
-            "socks5" => Ok(ProxyProto::Socks5),
-            "socksv5" => Ok(ProxyProto::Socks5),
-            "http" => Ok(ProxyProto::Http),
+            "socks5" => Ok(ProxyProto::socks5()),
+            "socksv5" => Ok(ProxyProto::socks5()),
+            // default to disable connect with payload
+            "http" => Ok(ProxyProto::http(false)),
             _ => Err(()),
         }
     }

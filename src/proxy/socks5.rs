@@ -4,12 +4,11 @@ use futures::Future;
 use tokio_core::net::TcpStream;
 use tokio_io::io::{read_exact, write_all};
 use proxy::{Connect, Destination, Address};
-use RcBox;
 
 
-pub fn handshake(stream: TcpStream, addr: &Destination,
-                 data: Option<RcBox<[u8]>>)
-        -> Box<Connect> {
+pub fn handshake<T>(stream: TcpStream, addr: &Destination,
+                 data: Option<T>) -> Box<Connect>
+where T: AsRef<[u8]> {
     let mut request = build_request(addr);
     if let Some(data) = data {
         // TODO: remove copying

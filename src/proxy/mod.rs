@@ -11,7 +11,6 @@ use futures::Future;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Handle;
 use ToMillis;
-use RcBox;
 
 const DEFAULT_MAX_WAIT_MILLILS: u64 = 4_000;
 
@@ -92,9 +91,9 @@ impl ProxyServer {
         }
     }
 
-    pub fn connect(&self, addr: Destination, data: Option<RcBox<[u8]>>,
-                   handle: &Handle)
-            -> Box<Connect> {
+    pub fn connect<T>(&self, addr: Destination, data: Option<T>,
+                   handle: &Handle) -> Box<Connect>
+    where T: AsRef<[u8]> + 'static {
         let proto = self.proto;
         let conn = TcpStream::connect(&self.addr, handle);
         let handshake = conn.and_then(move |stream| {

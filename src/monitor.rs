@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use self::rand::Rng;
 use tokio_core::reactor::{Handle, Timeout};
-use tokio_io::io::{write_all, read_exact};
+use tokio_io::io::read_exact;
 use futures::{future, Future};
 use futures::future::Loop;
 use proxy::ProxyServer;
@@ -168,10 +168,8 @@ fn alive_test(server: &ProxyServer, handle: &Handle)
     let timeout = Timeout::new(server.max_wait, handle)
         .expect("error on get timeout from reactor")
         .map(|_| None);
-    let conn = server.connect(server.test_dns.into(), None, handle);
-    let query = conn.and_then(move |stream| {
-        write_all(stream, request)
-    }).and_then(|(stream, _)| {
+    let conn = server.connect(server.test_dns.into(), Some(request), handle);
+    let query = conn.and_then(|stream| {
         read_exact(stream, [0u8; 12])
     }).and_then(move |(_, buf)| {
         if req_tid == tid(&buf) {

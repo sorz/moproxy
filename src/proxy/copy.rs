@@ -156,7 +156,7 @@ impl BiPipe {
                     Right => (0, n),
                 };
                 self.tx += tx;
-                self.rx == rx;
+                self.rx += rx;
                 self.server.update_traffics(tx, rx);
             }
             // write out if buffer is not empty

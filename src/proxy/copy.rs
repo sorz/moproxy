@@ -1,7 +1,9 @@
+use std::fmt;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::net::Shutdown;
 use std::io::{self, Read, Write};
+use std::io::ErrorKind::WouldBlock;
 use futures::{Async, Poll, Future};
 use tokio_core::net::TcpStream;
 use proxy::ProxyServer;
@@ -9,6 +11,15 @@ use self::Side::{Left, Right};
 
 #[derive(Debug, Clone)]
 enum Side { Left, Right }
+
+impl fmt::Display for Side {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            Left => write!(f, "local"),
+            Right => write!(f, "remote"),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct SharedBuf {
@@ -141,6 +152,18 @@ pub fn pipe(left: TcpStream, right: TcpStream, server: Rc<ProxyServer>,
     }
 }
 
+/// try_nb! with custom log for error.
+macro_rules! try_nb_log {
+    ($e:expr, $( $p:expr ),+) => (match $e {
+        Ok(t) => t,
+        Err(ref e) if e.kind() == WouldBlock => return Ok(Async::NotReady),
+        Err(e) => {
+            info!($( $p ),+, e);
+            return Err(e.into());
+        },
+    })
+}
+
 impl BiPipe {
     fn poll_one_side(&mut self, side: Side) -> Poll<(), io::Error> {
         let (reader, writer) = match side {
@@ -150,7 +173,8 @@ impl BiPipe {
         loop {
             // read something if buffer is empty
             if reader.is_empty() && !reader.read_eof {
-                let n = try_nb!(reader.read_to_buffer());
+                let n = try_nb_log!(reader.read_to_buffer(),
+                        "error on read {}: {}", side);
                 let (tx, rx) = match side {
                     Left => (n, 0),
                     Right => (0, n),
@@ -161,12 +185,15 @@ impl BiPipe {
             }
             // write out if buffer is not empty
             while !reader.is_empty() {
-                try_nb!(reader.write_to(&mut writer.stream));
+                try_nb_log!(reader.write_to(&mut writer.stream),
+                        "error on write {}: {}", side);
             }
             // flush and does half close if seen eof
             if reader.read_eof {
-                try_nb!(writer.stream.flush());
-                try_nb!(writer.stream.shutdown(Shutdown::Write));
+                try_nb_log!(writer.stream.flush(),
+                        "error on flush {}: {}", side);
+                try_nb_log!(writer.stream.shutdown(Shutdown::Write),
+                        "error on shutdown {}: {}", side);
                 reader.all_done = true;
                 return Ok(().into())
             }
@@ -181,16 +208,10 @@ impl Future for BiPipe {
 
     fn poll(&mut self) -> Poll<(usize, usize), io::Error> {
         if !self.left.all_done {
-            if let Err(e) = self.poll_one_side(Left) {
-                warn!("error on local side: {}", e);
-                return Err(e);
-            }
+            self.poll_one_side(Left)?;
         }
         if !self.right.all_done {
-            if let Err(e) = self.poll_one_side(Right) {
-                warn!("error on remote side: {}", e);
-                return Err(e);
-            }
+            self.poll_one_side(Right)?;
         }
         if self.left.all_done && self.right.all_done {
             Ok((self.tx, self.rx).into())

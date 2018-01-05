@@ -15,7 +15,6 @@ pub mod client;
 pub mod monitor;
 pub mod proxy;
 pub mod web;
-mod tls;
 
 pub trait ToMillis {
     fn millis(&self) -> u32;

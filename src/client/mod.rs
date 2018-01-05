@@ -1,3 +1,4 @@
+mod tls;
 mod read;
 mod connect;
 use std::cmp;
@@ -13,9 +14,9 @@ use futures::{future, Future};
 use proxy::{ProxyServer, Destination};
 use proxy::copy::{pipe, SharedBuf};
 use monitor::ServerList;
-use tls::{self, TlsClientHello};
 use client::connect::try_connect_all;
 use client::read::read_with_timeout;
+use client::tls::parse_client_hello;
 use RcBox;
 
 
@@ -43,9 +44,10 @@ pub struct ConnectedClient {
     server: Rc<ProxyServer>,
 }
 
+type ConnectServer = Box<Future<Item=ConnectedClient, Error=()>>;
+
 pub trait Connectable {
-    fn connect_server(self, n_parallel: usize)
-        -> Box<Future<Item=ConnectedClient, Error=()>>;
+    fn connect_server(self, n_parallel: usize) -> ConnectServer;
 }
 
 impl NewClient {
@@ -78,19 +80,17 @@ impl NewClient {
             } else {
                 data.truncate(len);
                 // only TLS is safe to duplicate requests.
-                let allow_parallel = match tls::parse_client_hello(&data) {
+                let allow_parallel = match parse_client_hello(&data) {
                     Err(err) => {
                         info!("fail to parse hello: {}", err);
                         false
                     },
-                    Ok(TlsClientHello { server_name, early_data, .. }) => {
-                        if let Some(name) = server_name {
+                    Ok(hello) => {
+                        if let Some(name) = hello.server_name {
                             dest = (name, dest.port).into();
                             debug!("SNI found: {}", name);
-                        } else {
-                            debug!("not SNI found in client hello");
                         }
-                        if early_data {
+                        if hello.early_data {
                             debug!("TLS with early data");
                         }
                         true
@@ -107,8 +107,7 @@ impl NewClient {
     }
 
     fn connect_server(self, n_parallel: usize, wait_response: bool,
-                      pending_data: Option<Box<[u8]>>)
-            -> Box<Future<Item=ConnectedClient, Error=()>> {
+                      pending_data: Option<Box<[u8]>>) -> ConnectServer {
         let NewClient { left, src, dest, list, handle } = self;
         let pending_data = pending_data.map(|v| RcBox::new(v));
         let conn = try_connect_all(dest.clone(), list, n_parallel,
@@ -122,15 +121,13 @@ impl NewClient {
 }
 
 impl Connectable for NewClient {
-    fn connect_server(self, _n_parallel: usize)
-            -> Box<Future<Item=ConnectedClient, Error=()>> {
+    fn connect_server(self, _n_parallel: usize) -> ConnectServer {
         self.connect_server(1, false, None)
     }
 }
 
 impl Connectable for NewClientWithData {
-    fn connect_server(self, n_parallel: usize)
-            -> Box<Future<Item=ConnectedClient, Error=()>> {
+    fn connect_server(self, n_parallel: usize) -> ConnectServer {
         let NewClientWithData {
             client, pending_data, allow_parallel } = self;
         let n_parallel = if allow_parallel {

@@ -30,13 +30,9 @@ pub struct NewClient {
 
 #[derive(Debug)]
 pub struct NewClientWithData {
-    left: TcpStream,
-    src: SocketAddr,
-    dest: Destination,
+    client: NewClient,
     pending_data: Option<Box<[u8]>>,
     allow_parallel: bool,
-    list: ServerList,
-    handle: Handle,
 }
 
 #[derive(Debug)]
@@ -103,24 +99,32 @@ impl NewClient {
                 (allow_parallel, Some(data.into_boxed_slice()))
             };
             NewClientWithData {
-                left, src, dest, list, handle, allow_parallel, pending_data
+                client: NewClient { left, src, dest, list, handle },
+                allow_parallel, pending_data,
             }
         }).map_err(|err| warn!("fail to read hello from client: {}", err));
         Box::new(result)
+    }
+
+    fn connect_server(self, n_parallel: usize, wait_response: bool,
+                      pending_data: Option<Box<[u8]>>)
+            -> Box<Future<Item=ConnectedClient, Error=()>> {
+        let NewClient { left, src, dest, list, handle } = self;
+        let pending_data = pending_data.map(|v| RcBox::new(v));
+        let conn = try_connect_all(dest.clone(), list, n_parallel,
+                                   wait_response, pending_data, handle);
+        let client = conn.map(move |(server, right)| {
+            info!("{} => {} via {}", src, dest, server.tag);
+            ConnectedClient { left, right, dest, server }
+        }).map_err(|_| warn!("all proxy server down"));
+        Box::new(client)
     }
 }
 
 impl Connectable for NewClient {
     fn connect_server(self, _n_parallel: usize)
             -> Box<Future<Item=ConnectedClient, Error=()>> {
-        let NewClient { left, src, dest, list, handle } = self;
-        let conn = try_connect_all(dest.clone(), list, 1, false, None,
-                                   handle.clone());
-        let client = conn.map(move |(server, right)| {
-            info!("{} => {} via {}", src, dest, server.tag);
-            ConnectedClient { left, right, dest, server }
-        }).map_err(|_| warn!("all proxy server down"));
-        Box::new(client)
+        self.connect_server(1, false, None)
     }
 }
 
@@ -128,21 +132,13 @@ impl Connectable for NewClientWithData {
     fn connect_server(self, n_parallel: usize)
             -> Box<Future<Item=ConnectedClient, Error=()>> {
         let NewClientWithData {
-            left, src, dest, list, handle,
-            pending_data, allow_parallel } = self;
-        let pending_data = pending_data.map(|v| RcBox::new(v));
+            client, pending_data, allow_parallel } = self;
         let n_parallel = if allow_parallel {
-            cmp::min(list.len(), n_parallel)
+            cmp::min(client.list.len(), n_parallel)
         } else {
             1
         };
-        let conn = try_connect_all(dest.clone(), list, n_parallel, true,
-                                   pending_data, handle.clone());
-        let client = conn.map(move |(server, right)| {
-            info!("{} => {} via {}", src, dest, server.tag);
-            ConnectedClient { left, right, dest, server }
-        }).map_err(|_| warn!("all proxy server down"));
-        Box::new(client)
+        client.connect_server(n_parallel, true, pending_data)
     }
 }
 

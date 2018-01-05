@@ -43,10 +43,8 @@ pub struct NewClientWithData {
 pub struct ConnectedClient {
     left: TcpStream,
     right: TcpStream,
-    src: SocketAddr,
     dest: Destination,
     server: Rc<ProxyServer>,
-    handle: Handle,
 }
 
 pub trait Connectable {
@@ -120,9 +118,7 @@ impl Connectable for NewClient {
                                    handle.clone());
         let client = conn.map(move |(server, right)| {
             info!("{} => {} via {}", src, dest, server.tag);
-            ConnectedClient {
-                left, right, src, dest, server, handle
-            }
+            ConnectedClient { left, right, dest, server }
         }).map_err(|_| warn!("all proxy server down"));
         Box::new(client)
     }
@@ -144,9 +140,7 @@ impl Connectable for NewClientWithData {
                                    pending_data, handle.clone());
         let client = conn.map(move |(server, right)| {
             info!("{} => {} via {}", src, dest, server.tag);
-            ConnectedClient {
-                left, right, src, dest, server, handle
-            }
+            ConnectedClient { left, right, dest, server }
         }).map_err(|_| warn!("all proxy server down"));
         Box::new(client)
     }
@@ -155,7 +149,7 @@ impl Connectable for NewClientWithData {
 impl ConnectedClient {
     pub fn serve(self, shared_buf: SharedBuf)
             -> Box<Future<Item=(), Error=()>> {
-        let ConnectedClient { left, right, dest, server, .. } = self;
+        let ConnectedClient { left, right, dest, server } = self;
         // TODO: make keepalive configurable
         let timeout = Some(Duration::from_secs(300));
         if let Err(e) = left.set_keepalive(timeout)

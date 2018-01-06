@@ -65,8 +65,8 @@
           table.appendChild(newServerRow(server));
         });
         $('#uptime').textContent = humanDuration(status.uptime);
-        $('#tx-speed').textContent = humanBandwidth(status.tx_speed);
-        $('#rx-speed').textContent = humanBandwidth(status.rx_speed);
+        $('#tx-speed').textContent = humanBandwidth(status.throughput.tx_bps);
+        $('#rx-speed').textContent = humanBandwidth(status.throughput.rx_bps);
       } catch (ex) {
         alert(`Fail to refresh: ${ex.message}`);
         refresh.checked = false;
@@ -135,9 +135,8 @@
         + ['B', 'KiB', 'MiB', 'GiB', 'TiB'][i];
     };
 
-    function humanBandwidth(bytes) {
-      if (bytes == 0) return '0 bps';
-      let bits = bytes * 8;
+    function humanBandwidth(bits) {
+      if (bits == 0) return '0 bps';
       var i = Math.floor(Math.log(bits) / Math.log(1000));
       return (bits / Math.pow(1000, i)).toFixed(2) * 1 + ' '
         + ['bps', 'kbps', 'Mbps', 'Gbps', 'Tbps'][i];

@@ -14,14 +14,43 @@ use proxy::{ProxyServer, Traffic};
 use ToMillis;
 
 static THROUGHPUT_INTERVAL_SECS: u64 = 1;
-static THROUGHPUT_HISTORY_NUM: usize = 3;
 
 pub type ServerList = Vec<Rc<ProxyServer>>;
 
 #[derive(Clone, Debug)]
 pub struct Monitor {
     servers: Rc<RefCell<ServerList>>,
-    traffics: Rc<RefCell<VecDeque<Traffic>>>,
+    traffics: Rc<RefCell<VecDeque<TrafficSample>>>,
+}
+
+#[derive(Debug)]
+struct TrafficSample {
+    time: Instant,
+    amt: Traffic,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+pub struct Throughput {
+    pub tx_bps: usize,
+    pub rx_bps: usize,
+}
+
+impl TrafficSample {
+    fn new(amt: Traffic) -> Self {
+        TrafficSample { time: Instant::now(), amt }
+    }
+}
+
+impl Throughput {
+    fn from_samples(t0: &TrafficSample, t1: &TrafficSample) -> Self {
+        let t = t1.time - t0.time;
+        let t = t.as_secs() as f64 + t.subsec_nanos() as f64 / 1e9;
+        let f = |x0, x1| (((x1 - x0) as f64) / t * 8.0).round() as usize;
+        Throughput {
+            tx_bps: f(t0.amt.tx_bytes, t1.amt.tx_bytes),
+            rx_bps: f(t0.amt.rx_bytes, t1.amt.rx_bytes),
+        }
+    }
 }
 
 impl Monitor {
@@ -29,7 +58,7 @@ impl Monitor {
         let servers: Vec<_> = servers.into_iter()
             .map(|server| Rc::new(server))
             .collect();
-        let traffics = VecDeque::with_capacity(THROUGHPUT_HISTORY_NUM);
+        let traffics = VecDeque::with_capacity(2);
         Monitor {
             servers: Rc::new(RefCell::new(servers)),
             traffics: Rc::new(RefCell::new(traffics)),
@@ -50,10 +79,12 @@ impl Monitor {
         debug!("scores:{}", info_stats(&*self.servers.borrow()));
     }
 
-    /// Return total traffic amount.
-    fn total_traffic(&self) -> Traffic {
-        self.servers.borrow().iter().map(|s| s.traffic())
-            .fold((0, 0).into(), |a, b| a + b)
+    /// Return a sample of total traffic amount.
+    fn take_traffic_sample(&self) -> TrafficSample {
+        let amt = self.servers.borrow().iter()
+            .map(|s| s.traffic())
+            .fold((0, 0).into(), |a, b| a + b);
+        TrafficSample::new(amt)
     }
 
     /// Start monitoring delays.
@@ -84,11 +115,11 @@ impl Monitor {
         let interval = Duration::from_secs(THROUGHPUT_INTERVAL_SECS);
         let handle = handle.clone();
         let lp = future::loop_fn(self.clone(), move |monitor| {
-            let current = monitor.total_traffic();
+            let sample = monitor.take_traffic_sample();
             {
                 let mut history = monitor.traffics.borrow_mut();
-                history.truncate(THROUGHPUT_HISTORY_NUM);
-                history.push_front(current);
+                history.truncate(1);
+                history.push_front(sample);
             }
             Timeout::new(interval, &handle)
                 .expect("error on get timeout from reactor")
@@ -101,15 +132,14 @@ impl Monitor {
     /// Return average throughput in the recent monitor period (tx, rx)
     /// in bytes per second. Should start `monitor_throughput()` task
     /// befor call this.
-    pub fn throughput(&self) -> (usize, usize) {
+    pub fn throughput(&self) -> Throughput {
+        let current = self.take_traffic_sample();
         let history = self.traffics.borrow();
-        let x0 = history.back().cloned().unwrap_or_default();
-        let x1 = history.front().cloned().unwrap_or_default();
-        let (tx0, rx0) = (x0.tx_bytes, x0.rx_bytes);
-        let (tx1, rx1) = (x1.tx_bytes, x1.rx_bytes);
-        let t = (history.len() * THROUGHPUT_INTERVAL_SECS as usize) as f64;
-        let f = |x0, x1| (((x1 - x0) as f64) / t).round() as usize;
-        (f(tx0, tx1), f(rx0, rx1))
+        if let Some(oldest) = history.back() {
+            Throughput::from_samples(oldest, &current)
+        } else {
+            Default::default()
+        }
     }
 }
 

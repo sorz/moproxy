@@ -8,7 +8,7 @@ use hyper::{self, Method, StatusCode};
 use hyper::header::ContentType;
 use hyper::server::{Http, Request, Response, Service};
 use serde_json;
-use monitor::{Monitor, ServerList};
+use monitor::{Monitor, ServerList, Throughput};
 
 
 struct StatusPages {
@@ -20,8 +20,7 @@ struct StatusPages {
 struct Status {
     servers: ServerList,
     uptime: Duration,
-    tx_speed: usize,
-    rx_speed: usize,
+    throughput: Throughput,
 }
 
 impl StatusPages {
@@ -30,13 +29,11 @@ impl StatusPages {
     }
 
     fn status_json(&self) -> serde_json::Result<String> {
-        let servers = self.monitor.servers();
-        let (tx_speed, rx_speed) = self.monitor.throughput();
-        let uptime = self.start_time.elapsed();
-        let status = Status {
-            servers, tx_speed, rx_speed, uptime,
-        };
-        serde_json::to_string(&status)
+        serde_json::to_string(&Status {
+            servers: self.monitor.servers(),
+            uptime: self.start_time.elapsed(),
+            throughput: self.monitor.throughput(),
+        })
     }
 }
 

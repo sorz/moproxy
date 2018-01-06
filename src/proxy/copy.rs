@@ -1,4 +1,5 @@
 use std::fmt;
+use std::ops::Neg;
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::net::Shutdown;
@@ -17,6 +18,17 @@ impl fmt::Display for Side {
         match *self {
             Left => write!(f, "local"),
             Right => write!(f, "remote"),
+        }
+    }
+}
+
+impl Neg for Side {
+    type Output = Side;
+
+    fn neg(self) -> Side {
+        match self {
+            Left => Right,
+            Right => Left,
         }
     }
 }
@@ -174,7 +186,7 @@ impl BiPipe {
             // read something if buffer is empty
             if reader.is_empty() && !reader.read_eof {
                 let n = try_nb_log!(reader.read_to_buffer(),
-                        "error on read {}: {}", side);
+                        "error on read from {}: {}", side);
                 let (tx, rx) = match side {
                     Left => (n, 0),
                     Right => (0, n),
@@ -186,14 +198,14 @@ impl BiPipe {
             // write out if buffer is not empty
             while !reader.is_empty() {
                 try_nb_log!(reader.write_to(&mut writer.stream),
-                        "error on write {}: {}", side);
+                        "error on write to {}: {}", -side);
             }
             // flush and does half close if seen eof
             if reader.read_eof {
                 try_nb_log!(writer.stream.flush(),
-                        "error on flush {}: {}", side);
+                        "error on flush {}: {}", -side);
                 try_nb_log!(writer.stream.shutdown(Shutdown::Write),
-                        "error on shutdown {}: {}", side);
+                        "error on shutdown {}: {}", -side);
                 reader.all_done = true;
                 return Ok(().into())
             }

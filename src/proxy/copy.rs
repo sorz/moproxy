@@ -7,7 +7,7 @@ use std::io::{self, Read, Write};
 use std::io::ErrorKind::WouldBlock;
 use futures::{Async, Poll, Future};
 use tokio_core::net::TcpStream;
-use proxy::ProxyServer;
+use proxy::{ProxyServer, Traffic};
 use self::Side::{Left, Right};
 
 #[derive(Debug, Clone)]
@@ -150,8 +150,7 @@ pub struct BiPipe {
     left: StreamWithBuffer,
     right: StreamWithBuffer,
     server: Rc<ProxyServer>,
-    tx: usize,
-    rx: usize,
+    traffic: Traffic,
 }
 
 pub fn pipe(left: TcpStream, right: TcpStream, server: Rc<ProxyServer>,
@@ -160,7 +159,8 @@ pub fn pipe(left: TcpStream, right: TcpStream, server: Rc<ProxyServer>,
     BiPipe {
         left: StreamWithBuffer::new(left, shared_buf.clone()),
         right: StreamWithBuffer::new(right, shared_buf),
-        server, tx: 0, rx: 0,
+        traffic: Default::default(),
+        server,
     }
 }
 
@@ -187,13 +187,12 @@ impl BiPipe {
             if reader.is_empty() && !reader.read_eof {
                 let n = try_nb_log!(reader.read_to_buffer(),
                         "error on read from {}: {}", side);
-                let (tx, rx) = match side {
+                let amt = match side {
                     Left => (n, 0),
                     Right => (0, n),
-                };
-                self.tx += tx;
-                self.rx += rx;
-                self.server.update_traffics(tx, rx);
+                }.into();
+                self.server.add_traffic(amt);
+                self.traffic = self.traffic + amt;
             }
             // write out if buffer is not empty
             while !reader.is_empty() {
@@ -215,10 +214,10 @@ impl BiPipe {
 
 
 impl Future for BiPipe {
-    type Item = (usize, usize);
+    type Item = Traffic;
     type Error = io::Error;
 
-    fn poll(&mut self) -> Poll<(usize, usize), io::Error> {
+    fn poll(&mut self) -> Poll<Traffic, io::Error> {
         if !self.left.all_done {
             self.poll_one_side(Left)?;
         }
@@ -226,7 +225,7 @@ impl Future for BiPipe {
             self.poll_one_side(Right)?;
         }
         if self.left.all_done && self.right.all_done {
-            Ok((self.tx, self.rx).into())
+            Ok(self.traffic.into())
         } else {
             Ok(Async::NotReady)
         }

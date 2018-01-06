@@ -153,10 +153,10 @@ impl ConnectedClient {
         server.update_stats_conn_open();
         let serve = pipe(left, right, server.clone(), shared_buf)
             .then(move |result| match result {
-                Ok((tx, rx)) => {
+                Ok(amt) => {
                     server.update_stats_conn_close();
                     debug!("tx {}, rx {} bytes ({} => {})",
-                        tx, rx, server.tag, dest);
+                        amt.tx_bytes, amt.rx_bytes, server.tag, dest);
                     Ok(())
                 },
                 Err(_) => {

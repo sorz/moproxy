@@ -1,7 +1,7 @@
 extern crate rand;
 use std;
-use std::time::{Instant, Duration};
 use std::io;
+use std::time::{Instant, Duration};
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -10,7 +10,7 @@ use tokio_core::reactor::{Handle, Timeout};
 use tokio_io::io::read_exact;
 use futures::{future, Future};
 use futures::future::Loop;
-use proxy::ProxyServer;
+use proxy::{ProxyServer, Traffic};
 use ToMillis;
 
 static THROUGHPUT_INTERVAL_SECS: u64 = 1;
@@ -21,7 +21,7 @@ pub type ServerList = Vec<Rc<ProxyServer>>;
 #[derive(Clone, Debug)]
 pub struct Monitor {
     servers: Rc<RefCell<ServerList>>,
-    traffics: Rc<RefCell<VecDeque<(usize, usize)>>>,
+    traffics: Rc<RefCell<VecDeque<Traffic>>>,
 }
 
 impl Monitor {
@@ -50,12 +50,10 @@ impl Monitor {
         debug!("scores:{}", info_stats(&*self.servers.borrow()));
     }
 
-    /// Return total traffic amount (tx, rx).
-    fn total_traffics(&self) -> (usize, usize) {
-        self.servers.borrow().iter().fold((0, 0), |(tx, rx), server| {
-            let (tx1, rx1) = server.traffics();
-            (tx + tx1, rx + rx1)
-        })
+    /// Return total traffic amount.
+    fn total_traffic(&self) -> Traffic {
+        self.servers.borrow().iter().map(|s| s.traffic())
+            .fold((0, 0).into(), |a, b| a + b)
     }
 
     /// Start monitoring delays.
@@ -86,7 +84,7 @@ impl Monitor {
         let interval = Duration::from_secs(THROUGHPUT_INTERVAL_SECS);
         let handle = handle.clone();
         let lp = future::loop_fn(self.clone(), move |monitor| {
-            let current = monitor.total_traffics();
+            let current = monitor.total_traffic();
             {
                 let mut history = monitor.traffics.borrow_mut();
                 history.truncate(THROUGHPUT_HISTORY_NUM);
@@ -105,8 +103,10 @@ impl Monitor {
     /// befor call this.
     pub fn throughput(&self) -> (usize, usize) {
         let history = self.traffics.borrow();
-        let &(tx0, rx0) = history.back().unwrap_or(&(0, 0));
-        let &(tx1, rx1) = history.front().unwrap_or(&(0, 0));
+        let x0 = history.back().cloned().unwrap_or_default();
+        let x1 = history.front().cloned().unwrap_or_default();
+        let (tx0, rx0) = (x0.tx_bytes, x0.rx_bytes);
+        let (tx1, rx1) = (x1.tx_bytes, x1.rx_bytes);
         let t = (history.len() * THROUGHPUT_INTERVAL_SECS as usize) as f64;
         let f = |x0, x1| (((x1 - x0) as f64) / t).round() as usize;
         (f(tx0, tx1), f(rx0, rx1))

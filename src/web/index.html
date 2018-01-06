@@ -93,9 +93,9 @@
              <span title="# total connections"
              >${numberWithCommas(server.conn_total)}</span></td>
          <td><span title="total sent"
-             >${humanFileSize(server.tx_bytes)}</span> /
+             >${humanFileSize(server.traffic.tx_bytes)}</span> /
              <span title="total received"
-             >${humanFileSize(server.rx_bytes)}</span></td>
+             >${humanFileSize(server.traffic.rx_bytes)}</span></td>
          </tr>`;
       if (server.delay == null)
         row.className = 'offline';

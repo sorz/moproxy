@@ -1,11 +1,12 @@
 pub mod socks5;
 pub mod http;
 pub mod copy;
+use std::io;
 use std::fmt;
+use std::ops::Add;
 use std::cell::Cell;
 use std::str::FromStr;
 use std::time::Duration;
-use std::io;
 use std::net::{SocketAddr, IpAddr};
 use futures::Future;
 use tokio_core::net::TcpStream;
@@ -44,8 +45,7 @@ pub struct ProxyServer {
     score_base: i32,
     delay: Cell<Option<Duration>>,
     score: Cell<Option<i32>>,
-    tx_bytes: Cell<usize>,
-    rx_bytes: Cell<usize>,
+    traffic: Cell<Traffic>,
     conn_alive: Cell<u32>,
     conn_total: Cell<u32>,
 }
@@ -81,6 +81,29 @@ impl<'a> From<(&'a str, u16)> for Destination {
     }
 }
 
+#[derive(Copy, Clone, Debug, Default, Serialize)]
+pub struct Traffic {
+    pub tx_bytes: usize,
+    pub rx_bytes: usize,
+}
+
+impl Into<Traffic> for (usize, usize) {
+    fn into(self) -> Traffic {
+        Traffic { tx_bytes: self.0, rx_bytes: self.1 }
+    }
+}
+
+impl Add for Traffic {
+    type Output = Traffic;
+
+    fn add(self, other: Traffic) -> Traffic {
+        Traffic {
+            tx_bytes: self.tx_bytes + other.tx_bytes,
+            rx_bytes: self.rx_bytes + other.rx_bytes,
+        }
+    }
+}
+
 impl ProxyProto {
     pub fn socks5() -> Self {
         ProxyProto::Socks5
@@ -104,8 +127,7 @@ impl ProxyServer {
             score_base: score_base.unwrap_or(0),
             delay: Cell::new(None),
             score: Cell::new(None),
-            tx_bytes: Cell::new(0),
-            rx_bytes: Cell::new(0),
+            traffic: Cell::default(),
             conn_alive: Cell::new(0),
             conn_total: Cell::new(0),
         }
@@ -164,9 +186,8 @@ impl ProxyServer {
         self.score.set(score);
     }
 
-    pub fn update_traffics(&self, tx: usize, rx: usize) {
-        self.tx_bytes.set(self.tx_bytes.get() + tx);
-        self.rx_bytes.set(self.rx_bytes.get() + rx);
+    pub fn add_traffic(&self, traffic: Traffic) {
+        self.traffic.set(self.traffic.get() + traffic);
     }
 
     pub fn update_stats_conn_open(&self) {
@@ -178,9 +199,8 @@ impl ProxyServer {
         self.conn_alive.set(self.conn_alive.get() - 1);
     }
 
-    /// Return (tx, rx) in bytes.
-    pub fn traffics(&self) -> (usize, usize) {
-        (self.tx_bytes.get(), self.rx_bytes.get())
+    pub fn traffic(&self) -> Traffic {
+        self.traffic.get()
     }
 }
 

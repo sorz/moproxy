@@ -89,9 +89,9 @@
          <td><span title="TCP handshake included"
              >${durationToMills(server.delay) || '-'}</span></td>
          <td><span title="# current connections"
-             >${numberWithCommas(server.conn_alive)}</span> /
+             >${humanQuantity(server.conn_alive)}</span> /
              <span title="# total connections"
-             >${numberWithCommas(server.conn_total)}</span></td>
+             >${humanQuantity(server.conn_total)}</span></td>
          <td><span title="total sent"
              >${humanFileSize(server.traffic.tx_bytes)}</span> /
              <span title="total received"
@@ -141,6 +141,13 @@
       return (bits / Math.pow(1000, i)).toFixed(2) * 1 + ' '
         + ['bps', 'kbps', 'Mbps', 'Gbps', 'Tbps'][i];
     };
+
+    function humanQuantity(n) {
+      if (n == 0) return '0';
+      if (n > 1e4) return numberWithCommas((n / 1000).toFixed(0)) + 'k';
+      if (n > 1e3) return (n / 1000).toFixed(1) + 'k';
+      return n.toString();
+    }
 
     $('#refresh').addEventListener('click', update);
     $('#auto-refresh').addEventListener('change', function () {

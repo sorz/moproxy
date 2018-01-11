@@ -13,6 +13,7 @@ extern crate moproxy;
 
 use std::fs;
 use std::env;
+use std::io::Write;
 use std::path::Path;
 use std::net::SocketAddr;
 use ini::Ini;
@@ -20,8 +21,7 @@ use futures::{Future, Stream};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
 use tokio_uds::UnixListener;
-use log::LogLevelFilter;
-use env_logger::{LogBuilder, LogTarget};
+use log::LevelFilter;
 
 use moproxy::monitor::Monitor;
 use moproxy::proxy::ProxyServer;
@@ -37,7 +37,7 @@ fn main() {
         .version(env!("CARGO_PKG_VERSION"))
         .get_matches();
 
-    let mut logger = LogBuilder::new();
+    let mut logger = env_logger::Builder::new();
     if let Ok(env_log) = env::var("RUST_LOG") {
         logger.parse(&env_log);
     }
@@ -45,13 +45,12 @@ fn main() {
         .unwrap_or("info").parse()
         .expect("unknown log level");
     logger.filter(None, log_level)
-        .filter(Some("tokio_core"), LogLevelFilter::Warn)
-        .filter(Some("hyper"), LogLevelFilter::Warn)
-        .filter(Some("ini"), LogLevelFilter::Warn)
-        .target(LogTarget::Stdout)
-        .format(|r| format!("[{}] {}", r.level(), r.args()))
-        .init()
-        .expect("cannot set logger");
+        .filter(Some("tokio_core"), LevelFilter::Warn)
+        .filter(Some("hyper"), LevelFilter::Warn)
+        .filter(Some("ini"), LevelFilter::Warn)
+        .target(env_logger::Target::Stdout)
+        .format(|buf, r| writeln!(buf, "[{}] {}", r.level(), r.args()))
+        .init();
 
     let host = args.value_of("host")
         .expect("missing host").parse()

@@ -68,9 +68,6 @@ args:
           the first proxy that return valid data. Currently only support
           TLS as application layer. Must turn on --remote-dns otherwise it
           will be ignored.
-    - systemd:
-        long: systemd
-        help: Enable systemd support. E.g. startup notify.
     - log-level:
         long: log-level
         takes_value: true

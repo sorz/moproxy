@@ -9,14 +9,12 @@ extern crate ini;
 extern crate clap;
 #[macro_use]
 extern crate log;
-extern crate systemd;
 extern crate moproxy;
 
 use std::fs;
 use std::env;
 use std::path::Path;
 use std::net::SocketAddr;
-use std::collections::HashMap;
 use ini::Ini;
 use futures::{Future, Stream};
 use tokio_core::net::TcpListener;
@@ -24,7 +22,6 @@ use tokio_core::reactor::Core;
 use tokio_uds::UnixListener;
 use log::LogLevelFilter;
 use env_logger::{LogBuilder, LogTarget};
-use systemd::daemon;
 
 use moproxy::monitor::Monitor;
 use moproxy::proxy::ProxyServer;
@@ -70,7 +67,6 @@ fn main() {
     let n_parallel = args.value_of("n-parallel")
         .map(|v| v.parse().expect("not a valid number"))
         .unwrap_or(0 as usize);
-    let systemd = args.is_present("systemd");
 
     let servers = parse_servers(&args);
     if servers.len() == 0 {
@@ -127,16 +123,6 @@ fn main() {
         handle.spawn(serv);
         Ok(())
     });
-    
-    if systemd {
-        let status = format!("Proxy listen on {}", bind_addr);
-        let state: HashMap<&str, &str> = 
-            [(daemon::STATE_READY, "1"),
-             (daemon::STATE_STATUS, &status)
-            ].iter().cloned().collect();
-        daemon::notify(true, state)
-            .expect("fail to notify systemd");
-    }
     lp.run(server).expect("error on event loop");
 
     // make sure socket file will be deleted on exit.

@@ -1,6 +1,6 @@
 [package]
 name = "moproxy"
-version = "0.1.7"
+version = "0.2.0"
 authors = ["sorz <me@sorz.org>"]
 
 [dependencies]
@@ -14,7 +14,7 @@ tokio-uds = "0.1"
 net2 = "0.2"
 clap = {version = "2.29", features = ["yaml"]}
 log = "0.4"
-env_logger = "0.5.0-rc.2"
+env_logger = "0.5"
 serde = {version = "1.0", features = ["rc"]}
 serde_json = "1.0"
 serde_derive = "1.0"

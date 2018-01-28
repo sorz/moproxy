@@ -8,6 +8,7 @@ use std::cell::Cell;
 use std::str::FromStr;
 use std::time::Duration;
 use std::net::{SocketAddr, IpAddr};
+use std::hash::{Hash, Hasher};
 use futures::Future;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Handle;
@@ -17,7 +18,7 @@ const DEFAULT_MAX_WAIT_MILLILS: u64 = 4_000;
 
 pub type Connect = Future<Item=TcpStream, Error=io::Error>;
 
-#[derive(Copy, Clone, Debug, Serialize)]
+#[derive(Hash, Copy, Clone, Debug, Serialize)]
 pub enum ProxyProto {
     #[serde(rename = "SOCKSv5")]
     Socks5,
@@ -50,7 +51,15 @@ pub struct ProxyServer {
     conn_total: Cell<u32>,
 }
 
-#[derive(Clone, Debug)]
+impl Hash for ProxyServer {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.addr.hash(state);
+        self.proto.hash(state);
+        self.tag.hash(state);
+    }
+}
+
+#[derive(Hash, Clone, Debug)]
 pub enum Address {
     Ip(IpAddr),
     Domain(Box<str>),

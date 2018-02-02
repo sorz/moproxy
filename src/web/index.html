@@ -37,7 +37,7 @@
   <table>
     <thead>
       <tr><th>Server<th>Score<th>Delay</th>
-        <th>CUR / TTL<th>Up / Down</tr>
+        <th>CUR / TTL<th>Up / Down<th>⇅</tr>
     </thead>
     <tbody id="servers"></tbody>
   </table>
@@ -79,7 +79,9 @@
       }
     }
 
-    function newServerRow(server, range) {
+    function newServerRow(status, range) {
+      let server = status.server;
+      let throughput = status.throughput.tx_bps + status.throughput.rx_bps;
       let row = document.createElement('tr');
       row.innerHTML = `<tr>
          <td><span title="${server.proto}://${server.addr}"
@@ -95,7 +97,9 @@
          <td><span title="total sent"
              >${humanFileSize(server.traffic.tx_bytes)}</span> /
              <span title="total received"
-             >${humanFileSize(server.traffic.rx_bytes)}</span></td>
+             >${humanFileSize(server.traffic.rx_bytes)}</span>
+         <td><span title="throughput"
+             >${humanBandwidth(throughput)}</span></td>
          </tr>`;
       if (server.delay == null)
         row.className = 'offline';

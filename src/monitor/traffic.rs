@@ -1,4 +1,5 @@
 use std::time::Instant;
+use std::ops::Add;
 use std::collections::VecDeque;
 use proxy::Traffic;
 
@@ -37,6 +38,17 @@ impl Throughput {
         Throughput {
             tx_bps: f(t0.amt.tx_bytes, t1.amt.tx_bytes),
             rx_bps: f(t0.amt.rx_bytes, t1.amt.rx_bytes),
+        }
+    }
+}
+
+impl Add for Throughput {
+    type Output = Throughput;
+
+    fn add(self, other: Self) -> Self {
+        Throughput {
+            tx_bps: self.tx_bps + other.tx_bps,
+            rx_bps: self.rx_bps + other.rx_bps,
         }
     }
 }

@@ -22,13 +22,14 @@ struct StatusPages {
 #[derive(Debug, Serialize)]
 struct ServerStatus {
     server: Rc<ProxyServer>,
-    throughput: Throughput,
+    throughput: Option<Throughput>,
 }
 
 #[derive(Debug, Serialize)]
 struct Status {
     servers: Vec<ServerStatus>,
     uptime: Duration,
+    throughput: Throughput,
 }
 
 impl StatusPages {
@@ -37,11 +38,13 @@ impl StatusPages {
     }
 
     fn status_json(&self) -> serde_json::Result<String> {
-        let status = self.monitor.throughputs().into_iter()
-            .map(|(server, throughput)| ServerStatus { server, throughput })
-            .collect();
+        let mut thps = self.monitor.throughputs();
+        let throughput = thps.values().fold(Default::default(), |a, b| a + *b);
+        let servers = self.monitor.servers().into_iter().map(|server| ServerStatus {
+            throughput: thps.remove(&server), server,
+        }).collect();
         serde_json::to_string(&Status {
-            servers: status,
+            servers, throughput,
             uptime: self.start_time.elapsed(),
         })
     }

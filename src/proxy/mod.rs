@@ -18,7 +18,7 @@ const DEFAULT_MAX_WAIT_MILLILS: u64 = 4_000;
 
 pub type Connect = Future<Item=TcpStream, Error=io::Error>;
 
-#[derive(Hash, Copy, Clone, Debug, Serialize)]
+#[derive(Hash, Eq, PartialEq, Copy, Clone, Debug, Serialize)]
 pub enum ProxyProto {
     #[serde(rename = "SOCKSv5")]
     Socks5,
@@ -36,7 +36,7 @@ pub enum ProxyProto {
     },
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Eq, Serialize)]
 pub struct ProxyServer {
     pub addr: SocketAddr,
     pub proto: ProxyProto,
@@ -56,6 +56,14 @@ impl Hash for ProxyServer {
         self.addr.hash(state);
         self.proto.hash(state);
         self.tag.hash(state);
+    }
+}
+
+impl PartialEq for ProxyServer {
+    fn eq(&self, other: &ProxyServer) -> bool {
+        self.addr == other.addr &&
+        self.proto == other.proto &&
+        self.tag == other.tag
     }
 }
 
@@ -90,7 +98,7 @@ impl<'a> From<(&'a str, u16)> for Destination {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Serialize)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct Traffic {
     pub tx_bytes: usize,
     pub rx_bytes: usize,

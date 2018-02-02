@@ -1,4 +1,5 @@
 use std::io;
+use std::rc::Rc;
 use std::fmt::Debug;
 use std::time::{Instant, Duration};
 use futures::{future, Future, Stream};
@@ -8,7 +9,9 @@ use hyper::{self, Method, StatusCode};
 use hyper::header::ContentType;
 use hyper::server::{Http, Request, Response, Service};
 use serde_json;
-use monitor::{Monitor, ServerList, Throughput};
+
+use monitor::{Monitor, Throughput};
+use proxy::ProxyServer;
 
 
 struct StatusPages {
@@ -17,10 +20,15 @@ struct StatusPages {
 }
 
 #[derive(Debug, Serialize)]
-struct Status {
-    servers: ServerList,
-    uptime: Duration,
+struct ServerStatus {
+    server: Rc<ProxyServer>,
     throughput: Throughput,
+}
+
+#[derive(Debug, Serialize)]
+struct Status {
+    servers: Vec<ServerStatus>,
+    uptime: Duration,
 }
 
 impl StatusPages {
@@ -29,10 +37,12 @@ impl StatusPages {
     }
 
     fn status_json(&self) -> serde_json::Result<String> {
+        let status = self.monitor.throughputs().into_iter()
+            .map(|(server, throughput)| ServerStatus { server, throughput })
+            .collect();
         serde_json::to_string(&Status {
-            servers: self.monitor.servers(),
+            servers: status,
             uptime: self.start_time.elapsed(),
-            throughput: self.monitor.throughput(),
         })
     }
 }

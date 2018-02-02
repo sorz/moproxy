@@ -4,12 +4,13 @@ use std::io;
 use std::time::{Instant, Duration};
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use rand::{self, Rng};
 use tokio_core::reactor::{Handle, Timeout};
 use tokio_io::io::read_exact;
 use futures::{future, Future};
 use futures::future::Loop;
-use proxy::{ProxyServer, Traffic};
+use proxy::ProxyServer;
 use ToMillis;
 use self::traffic::Meter;
 pub use self::traffic::Throughput;
@@ -22,7 +23,7 @@ pub type ServerList = Vec<Rc<ProxyServer>>;
 #[derive(Clone, Debug)]
 pub struct Monitor {
     servers: Rc<RefCell<ServerList>>,
-    traffics: Rc<RefCell<Meter>>,
+    meters: Rc<RefCell<HashMap<Rc<ProxyServer>, Meter>>>,
 }
 
 impl Monitor {
@@ -30,10 +31,12 @@ impl Monitor {
         let servers: Vec<_> = servers.into_iter()
             .map(|server| Rc::new(server))
             .collect();
-        let traffics = Meter::new();
+        let meters = servers.iter()
+            .map(|server| (server.clone(), Meter::new()))
+            .collect();
         Monitor {
             servers: Rc::new(RefCell::new(servers)),
-            traffics: Rc::new(RefCell::new(traffics)),
+            meters: Rc::new(RefCell::new(meters)),
         }
     }
 
@@ -49,13 +52,6 @@ impl Monitor {
                 (rng.next_u32() % 30) as i32
         });
         debug!("scores:{}", info_stats(&*self.servers.borrow()));
-    }
-
-    /// Return a sample of total traffic amount.
-    fn total_traffic(&self) -> Traffic {
-        self.servers.borrow().iter()
-            .map(|s| s.traffic())
-            .fold((0, 0).into(), |a, b| a + b)
     }
 
     /// Start monitoring delays.
@@ -86,9 +82,8 @@ impl Monitor {
         let interval = Duration::from_secs(THROUGHPUT_INTERVAL_SECS);
         let handle = handle.clone();
         let lp = future::loop_fn(self.clone(), move |monitor| {
-            {
-                let mut meter = monitor.traffics.borrow_mut();
-                meter.add_sample(monitor.total_traffic());
+            for (server, meter) in monitor.meters.borrow_mut().iter_mut() {
+                meter.add_sample(server.traffic());
             }
             Timeout::new(interval, &handle)
                 .expect("error on get timeout from reactor")
@@ -98,11 +93,12 @@ impl Monitor {
         Box::new(lp)
     }
 
-    /// Return average throughput in the recent monitor period (tx, rx)
-    /// in bytes per second. Should start `monitor_throughput()` task
-    /// befor call this.
-    pub fn throughput(&self) -> Throughput {
-        self.traffics.borrow().throughput(self.total_traffic())
+    /// Return average throughputs of all servers in the recent monitor
+    /// period. Should start `monitor_throughput()` task before call this.
+    pub fn throughputs(&self) -> HashMap<Rc<ProxyServer>, Throughput> {
+        self.meters.borrow().iter().map(|(server, meter)| {
+            (server.clone(), meter.throughput(server.traffic()))
+        }).collect()
     }
 }
 

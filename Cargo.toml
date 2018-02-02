@@ -5,7 +5,7 @@ authors = ["sorz <me@sorz.org>"]
 
 [dependencies]
 libc = "0.2"
-nix = "0.9"
+nix = "0.10"
 rand = "0.4"
 futures = "0.1"
 tokio-core = "0.1"

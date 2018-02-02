@@ -11,6 +11,7 @@ extern crate tokio_core;
 extern crate tokio_io;
 extern crate hyper;
 extern crate nix;
+extern crate rand;
 pub mod client;
 pub mod monitor;
 pub mod proxy;

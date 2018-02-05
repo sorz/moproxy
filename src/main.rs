@@ -28,6 +28,7 @@ use moproxy::proxy::ProxyServer;
 use moproxy::proxy::copy::SharedBuf;
 use moproxy::proxy::ProxyProto;
 use moproxy::client::{NewClient, Connectable};
+use moproxy::tcp::set_congestion;
 use moproxy::web;
 
 
@@ -66,6 +67,7 @@ fn main() {
     let n_parallel = args.value_of("n-parallel")
         .map(|v| v.parse().expect("not a valid number"))
         .unwrap_or(0 as usize);
+    let cong_local = args.value_of("cong-local");
 
     let servers = parse_servers(&args);
     if servers.len() == 0 {
@@ -103,6 +105,12 @@ fn main() {
     let listener = TcpListener::bind(&bind_addr, &handle)
         .expect("cannot bind to port");
     info!("listen on {}", bind_addr);
+    if let Some(alg) = cong_local {
+        info!("set {} on {}", alg, bind_addr);
+        set_congestion(&listener, alg)
+            .expect("fail to set tcp congestion algorithm. \
+                     check tcp_allowed_congestion_control?");
+    }
     handle.spawn(monitor.monitor_delay(probe, &handle));
     let shared_buf = SharedBuf::new(8192);
     let server = listener.incoming().for_each(move |(sock, addr)| {

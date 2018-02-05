@@ -12,10 +12,12 @@ extern crate tokio_io;
 extern crate hyper;
 extern crate nix;
 extern crate rand;
+extern crate libc;
 pub mod client;
 pub mod monitor;
 pub mod proxy;
 pub mod web;
+pub mod tcp;
 
 pub trait ToMillis {
     fn millis(&self) -> u32;

@@ -68,6 +68,12 @@ args:
           the first proxy that return valid data. Currently only support
           TLS as application layer. Must turn on --remote-dns otherwise it
           will be ignored.
+    - cong-local:
+        long: congestion-local
+        value_name: ALG-NAME
+        takes_value: true
+        help: >
+          Set TCP congestion control algorithm on local (client) side.
     - log-level:
         long: log-level
         takes_value: true

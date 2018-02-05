@@ -3,14 +3,13 @@ mod read;
 mod connect;
 use std::cmp;
 use std::rc::Rc;
-use std::io::{self, ErrorKind};
 use std::time::Duration;
-use std::net::{SocketAddr, SocketAddrV4};
-use std::os::unix::io::{RawFd, AsRawFd};
-use nix::{self, sys};
+use std::net::SocketAddr;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Handle;
 use futures::{future, Future};
+
+use tcp::get_original_dest;
 use proxy::{ProxyServer, Destination};
 use proxy::copy::{pipe, SharedBuf};
 use monitor::ServerList;
@@ -54,8 +53,8 @@ impl NewClient {
     pub fn from_socket(left: TcpStream, list: ServerList, handle: Handle)
             -> Box<Future<Item=Self, Error=()>> {
         let src_dest = future::result(left.peer_addr())
-            .join(future::result(get_original_dest(left.as_raw_fd())))
-            .map_err(|err| warn!("fail to get original destination: {}", err));
+            .join(future::result(get_original_dest(&left)))
+            .map_err(|err| warn!("fail to get original dest: {}", err));
         Box::new(src_dest.map(move |(src, dest)| {
             NewClient {
                 left, src, dest: dest.into(), list, handle,
@@ -168,17 +167,5 @@ impl ConnectedClient {
             });
         Box::new(serve)
     }
-}
-
-fn get_original_dest(fd: RawFd) -> io::Result<SocketAddr> {
-    let addr = sys::socket::getsockopt(fd, sys::socket::sockopt::OriginalDst)
-        .map_err(|e| match e {
-            nix::Error::Sys(err) => io::Error::from(err),
-            _ => io::Error::new(ErrorKind::Other, e),
-        })?;
-    let addr = SocketAddrV4::new(addr.sin_addr.s_addr.to_be().into(),
-                                 addr.sin_port.to_be());
-    // TODO: support IPv6
-    Ok(SocketAddr::V4(addr))
 }
 

@@ -16,6 +16,7 @@
     #servers tr:hover { background-color: #eee; }
     #servers td:nth-child(n+2) { text-align: right; }
     thead th:nth-child(n+2) { text-align: right; }
+    #servers td:last-child, thead th:last-child { text-align: left; }
   </style>
 </head>
 <body>
@@ -82,6 +83,7 @@
     function newServerRow(status, range) {
       let server = status.server;
       let throughput = status.throughput.tx_bps + status.throughput.rx_bps;
+      throughput = throughput ? humanBandwidth(throughput) : "";
       let row = document.createElement('tr');
       row.innerHTML = `<tr>
          <td><span title="${server.proto}://${server.addr}"
@@ -99,7 +101,7 @@
              <span title="total received"
              >${humanFileSize(server.traffic.rx_bytes)}</span>
          <td><span title="throughput"
-             >${humanBandwidth(throughput)}</span></td>
+             >${throughput}</span></td>
          </tr>`;
       if (server.delay == null)
         row.className = 'offline';

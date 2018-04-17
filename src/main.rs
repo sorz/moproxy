@@ -82,13 +82,14 @@ fn main() {
     let mut sock_file = None;
     if let Some(http_addr) = args.value_of("web-bind") {
         let monitor = monitor.clone();
-        let serv = if http_addr.starts_with("/") {
+        if http_addr.starts_with("/") {
             let sock = AutoRemoveFile::new(&http_addr);
             let incoming = UnixListener::bind(&sock, &handle)
                 .expect("fail to bind web server")
                 .incoming();
             sock_file = Some(sock);
-            web::run_server(incoming, monitor, &handle)
+            let serv = web::run_server(incoming, monitor, &handle);
+            handle.spawn(serv);
         } else {
             // FIXME: remove duplicate code
             let addr = http_addr.parse()
@@ -96,9 +97,9 @@ fn main() {
             let incoming = TcpListener::bind(&addr, &handle)
                 .expect("fail to bind web server")
                 .incoming();
-            web::run_server(incoming, monitor, &handle)
-        };
-        handle.spawn(serv);
+            let serv = web::run_server(incoming, monitor, &handle);
+            handle.spawn(serv);
+        }
         info!("http run on {}", http_addr);
     }
 

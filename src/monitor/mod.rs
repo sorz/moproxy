@@ -57,11 +57,11 @@ impl Monitor {
     /// Start monitoring delays.
     /// Returned Future won't return unless error on timer.
     pub fn monitor_delay(&self, probe: u64, handle: &Handle)
-            -> Box<Future<Item=(), Error=()>> {
+            -> impl Future<Item=(), Error=()> {
         let handle = handle.clone();
         let init = test_all(self.clone(), true, &handle);
         let interval = Duration::from_secs(probe);
-        let update = init.and_then(move |monitor| {
+        init.and_then(move |monitor| {
             future::loop_fn((monitor, handle), move |(monitor, handle)| {
                 let wait = Timeout::new(interval, &handle)
                     .expect("error on get timeout from reactor")
@@ -71,17 +71,16 @@ impl Monitor {
                         .map(|monitor| (monitor, handle))
                 }).and_then(|args| Ok(Loop::Continue(args)))
             })
-        }).map_err(|_| ());
-        Box::new(update)
+        }).map_err(|_| ())
     }
 
     /// Start monitoring throughput.
     /// Returned Future won't return unless error on timer.
     pub fn monitor_throughput(&self, handle: &Handle)
-            -> Box<Future<Item=(), Error=()>> {
+            -> impl Future<Item=(), Error=()> {
         let interval = Duration::from_secs(THROUGHPUT_INTERVAL_SECS);
         let handle = handle.clone();
-        let lp = future::loop_fn(self.clone(), move |monitor| {
+        future::loop_fn(self.clone(), move |monitor| {
             for (server, meter) in monitor.meters.borrow_mut().iter_mut() {
                 meter.add_sample(server.traffic());
             }
@@ -89,8 +88,7 @@ impl Monitor {
                 .expect("error on get timeout from reactor")
                 .map_err(|err| panic!("error on timer: {}", err))
                 .map(move |_| Loop::Continue(monitor))
-        });
-        Box::new(lp)
+        })
     }
 
     /// Return average throughputs of all servers in the recent monitor
@@ -115,7 +113,7 @@ fn info_stats(infos: &ServerList) -> String {
 }
 
 fn test_all(monitor: Monitor, init: bool, handle: &Handle)
-        -> Box<Future<Item=Monitor, Error=()>> {
+        -> impl Future<Item=Monitor, Error=()> {
     debug!("testing all servers...");
     let tests: Vec<_> = monitor.servers().into_iter().map(move |server| {
         let test = alive_test(&server, handle).then(move |result| {
@@ -128,15 +126,14 @@ fn test_all(monitor: Monitor, init: bool, handle: &Handle)
         });
         Box::new(test) as Box<Future<Item=(), Error=()>>
     }).collect();
-    let sort = future::join_all(tests).then(move |_| {
+    future::join_all(tests).then(move |_| {
         monitor.resort();
         Ok(monitor)
-    });
-    Box::new(sort)
+    })
 }
 
 fn alive_test(server: &ProxyServer, handle: &Handle)
-        -> Box<Future<Item=Duration, Error=io::Error>> {
+        -> impl Future<Item=Duration, Error=io::Error> {
     let request = [
         0, 17,  // length
         rand::random(), rand::random(),  // transaction ID
@@ -168,10 +165,9 @@ fn alive_test(server: &ProxyServer, handle: &Handle)
         }
     });
     let wait = query.select(timeout).map_err(|(err, _)| err);
-    let delay = wait.and_then(|(result, _)| match result {
+    wait.and_then(|(result, _)| match result {
         Some(stream) => Ok(stream),
         None => Err(io::Error::new(io::ErrorKind::TimedOut, "test timeout")),
-    }).inspect(move |t| debug!("[{}] delay {}ms", tag, t.millis()));
-    Box::new(delay)
+    }).inspect(move |t| debug!("[{}] delay {}ms", tag, t.millis()))
 }
 

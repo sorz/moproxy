@@ -82,12 +82,12 @@ impl Service for StatusPages {
                      .with_header(ContentType::plaintext()),
         };
         debug!("{} {} [{}]", req.method(), req.path(), resp.status());
-        return Box::new(future::ok(resp));
+        Box::new(future::ok(resp))
     }
 }
 
 pub fn run_server<I, S, A>(incoming: I, monitor: Monitor, handle: &Handle)
-        -> Box<Future<Item=(), Error=()>>
+        -> impl Future<Item=(), Error=()>
 where I: Stream<Item=(S, A), Error=io::Error> + 'static,
       S: AsyncRead + AsyncWrite + 'static,
       A: Debug {
@@ -102,13 +102,12 @@ where I: Stream<Item=(S, A), Error=io::Error> + 'static,
     let serve = Http::new()
         .serve_incoming(incoming, new_service);
     let handle = handle.clone();
-    let run = serve.for_each(move |conn| {
+    serve.for_each(move |conn| {
         handle.spawn(
             conn.map(|_| ())
                 .map_err(|err| info!("http: {}", err))
         );
         Ok(())
-    }).map_err(|err| error!("error on http server: {}", err));
-    Box::new(run)
+    }).map_err(|err| error!("error on http server: {}", err))
 }
 

@@ -51,28 +51,28 @@ pub trait Connectable {
 
 impl NewClient {
     pub fn from_socket(left: TcpStream, list: ServerList, handle: Handle)
-            -> Box<Future<Item=Self, Error=()>> {
+            -> impl Future<Item=Self, Error=()> {
         let src_dest = future::result(left.peer_addr())
             .join(future::result(get_original_dest(&left)))
             .map_err(|err| warn!("fail to get original dest: {}", err));
-        Box::new(src_dest.map(move |(src, dest)| {
+        src_dest.map(move |(src, dest)| {
             NewClient {
                 left, src, dest: dest.into(), list, handle,
             }
-        }))
+        })
     }
 }
 
 impl NewClient {
     pub fn retrive_dest(self)
-            -> Box<Future<Item=NewClientWithData, Error=()>> {
+            -> impl Future<Item=NewClientWithData, Error=()> {
         let NewClient { left, src, mut dest, list, handle } = self; 
         let wait = Duration::from_millis(500);
         // try to read TLS ClientHello for
         //   1. --remote-dns: parse host name from SNI
         //   2. --n-parallel: need the whole request to be forwarded
         let read = read_with_timeout(left, vec![0u8; 2048], wait, &handle);
-        let result = read.map(move |(left, mut data, len)| {
+        read.map(move |(left, mut data, len)| {
             let (allow_parallel, pending_data) = if len == 0 {
                 info!("no tls request received before timeout");
                 (false, None)
@@ -101,8 +101,7 @@ impl NewClient {
                 client: NewClient { left, src, dest, list, handle },
                 allow_parallel, pending_data,
             }
-        }).map_err(|err| warn!("fail to read hello from client: {}", err));
-        Box::new(result)
+        }).map_err(|err| warn!("fail to read hello from client: {}", err))
     }
 
     fn connect_server(self, n_parallel: usize, wait_response: bool,

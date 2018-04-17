@@ -51,7 +51,7 @@ where T: AsRef<[u8]> + 'static {
             Ok(future::Loop::Continue((reader, buf)))
         })
     };
-    let skip = response.and_then(|(reader, buf)| {
+    let skip = response.and_then(move |(reader, buf)| {
         let reader = reader.take(8 * 1024);
         future::loop_fn((reader, buf), skip_headers)
             .map(|reader| reader.into_inner())

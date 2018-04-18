@@ -9,7 +9,7 @@ use std::str::FromStr;
 use std::time::Duration;
 use std::net::{SocketAddr, IpAddr};
 use std::hash::{Hash, Hasher};
-use futures::Future;
+use futures::{Future, future::Either};
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Handle;
 use ToMillis;
@@ -162,10 +162,10 @@ impl ProxyServer {
             };
             match proto {
                 ProxyProto::Socks5 =>
-                    socks5::handshake(stream, &addr, data),
+                    Either::A(socks5::handshake(stream, &addr, data)),
                 ProxyProto::Http { connect_with_payload } =>
-                    http::handshake(stream, &addr, data,
-                                    connect_with_payload),
+                    Either::B(http::handshake(stream, &addr, data,
+                                    connect_with_payload)),
             }
         });
         Box::new(handshake)

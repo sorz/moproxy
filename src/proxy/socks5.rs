@@ -1,23 +1,22 @@
 use std::net::IpAddr;
-use std::io::Write;
+use std::io::{self, Write};
 use futures::Future;
 use tokio_core::net::TcpStream;
 use tokio_io::io::{read_exact, write_all};
-use proxy::{Connect, Destination, Address};
+use proxy::{Destination, Address};
 
 
-pub fn handshake<T>(stream: TcpStream, addr: &Destination,
-                 data: Option<T>) -> Box<Connect>
+pub fn handshake<T>(stream: TcpStream, addr: &Destination, data: Option<T>)
+    -> impl Future<Item=TcpStream, Error=io::Error>
 where T: AsRef<[u8]> {
     let mut request = build_request(addr);
     if let Some(data) = data {
         // TODO: remove copying
         request.extend(data.as_ref());
     }
-    let handshake = write_all(stream, request).and_then(|(stream, _)| {
+    write_all(stream, request).and_then(|(stream, _)| {
         read_exact(stream, vec![0; 12])
-    }).map(|(stream, _)| stream);
-    return Box::new(handshake)
+    }).map(|(stream, _)| stream)
 }
 
 fn build_request(addr: &Destination) -> Vec<u8> {

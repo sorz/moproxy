@@ -17,7 +17,7 @@ use std::io::Write;
 use std::path::Path;
 use std::net::SocketAddr;
 use ini::Ini;
-use futures::{Future, Stream};
+use futures::{Future, Stream, future::Either};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
 use tokio_uds::UnixListener;
@@ -120,11 +120,11 @@ fn main() {
             sock, monitor.servers(), handle.clone());
         let conn = client.and_then(move |client| 
             if remote_dns && client.dest.port == 443 {
-                Box::new(client.retrive_dest().and_then(move |client| {
+                Either::A(client.retrive_dest().and_then(move |client| {
                     client.connect_server(n_parallel)
                 }))
             } else {
-                client.connect_server(0)
+                Either::B(client.connect_server(0))
             });
         let buf = shared_buf.clone();
         let serv = conn.and_then(|client| client.serve(buf));

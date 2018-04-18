@@ -4,12 +4,12 @@ use std::io::{self, Read, BufReader, ErrorKind};
 use futures::{future, Future};
 use tokio_core::net::TcpStream;
 use tokio_io::io::{write_all, read_until};
-use proxy::{Connect, Destination, Address};
+use proxy::{Destination, Address};
 
 
 pub fn handshake<T>(stream: TcpStream, addr: &Destination,
                     mut data: Option<T>, with_playload: bool)
-    -> Box<Connect>
+    -> impl Future<Item=TcpStream, Error=io::Error>
 where T: AsRef<[u8]> + 'static {
     let mut request = build_request(addr).into_bytes();
     if with_playload && data.is_some() {
@@ -58,11 +58,11 @@ where T: AsRef<[u8]> + 'static {
     // FIXME: may lost data in buffer?
     }).map(|reader| reader.into_inner());
     if let Some(data) = data {
-        Box::new(skip.and_then(|stream| {
+        future::Either::A(skip.and_then(|stream| {
             write_all(stream, data).map(|(stream, _)| stream)
         }))
     } else {
-        Box::new(skip)
+        future::Either::B(skip)
     }
 }
 

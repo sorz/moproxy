@@ -139,7 +139,7 @@ impl Connectable for NewClientWithData {
 
 impl ConnectedClient {
     pub fn serve(self, shared_buf: SharedBuf)
-            -> Box<Future<Item=(), Error=()>> {
+            -> impl Future<Item=(), Error=()> {
         let ConnectedClient { left, right, dest, server } = self;
         // TODO: make keepalive configurable
         let timeout = Some(Duration::from_secs(300));
@@ -149,7 +149,7 @@ impl ConnectedClient {
         }
 
         server.update_stats_conn_open();
-        let serve = pipe(left, right, server.clone(), shared_buf)
+        pipe(left, right, server.clone(), shared_buf)
             .then(move |result| match result {
                 Ok(amt) => {
                     server.update_stats_conn_close();
@@ -163,8 +163,7 @@ impl ConnectedClient {
                         server.tag, dest);
                     Err(())
                 }
-            });
-        Box::new(serve)
+            })
     }
 }
 

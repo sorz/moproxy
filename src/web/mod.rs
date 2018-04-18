@@ -54,7 +54,7 @@ impl Service for StatusPages {
     type Request = Request;
     type Response = Response;
     type Error = hyper::Error;
-    type Future = Box<Future<Item=Self::Response, Error=Self::Error>>;
+    type Future = future::FutureResult<Self::Response, Self::Error>;
 
     fn call(&self, req: Request) -> Self::Future {
         let resp = Response::new();
@@ -82,7 +82,7 @@ impl Service for StatusPages {
                      .with_header(ContentType::plaintext()),
         };
         debug!("{} {} [{}]", req.method(), req.path(), resp.status());
-        Box::new(future::ok(resp))
+        future::ok(resp)
     }
 }
 

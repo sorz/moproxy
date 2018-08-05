@@ -9,7 +9,7 @@ use tokio_core::net::TcpStream;
 use tokio_core::reactor::Handle;
 use futures::{future, Future};
 
-use tcp::get_original_dest;
+use tcp::{get_original_dest, get_original_dest6};
 use proxy::{ProxyServer, Destination};
 use proxy::copy::{pipe, SharedBuf};
 use monitor::ServerList;
@@ -52,10 +52,16 @@ pub trait Connectable {
 impl NewClient {
     pub fn from_socket(left: TcpStream, list: ServerList, handle: Handle)
             -> impl Future<Item=Self, Error=()> {
+        let dest4 = future::result(get_original_dest(&left))
+            .map(|dest| SocketAddr::V4(dest));
+        let dest6 = future::result(get_original_dest6(&left))
+            .map(|dest| SocketAddr::V6(dest));
+        // TODO: call either v6 or v4 according to our socket
         let src_dest = future::result(left.peer_addr())
-            .join(future::result(get_original_dest(&left)))
+            .join(dest4.or_else(|_| dest6))
             .map_err(|err| warn!("fail to get original dest: {}", err));
         src_dest.map(move |(src, dest)| {
+            debug!("dest {:?}", dest);
             NewClient {
                 left, src, dest: dest.into(), list, handle,
             }

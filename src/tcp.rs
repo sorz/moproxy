@@ -1,12 +1,12 @@
 use std::mem;
 use std::ffi::OsStr;
 use std::io::{self, ErrorKind};
-use std::net::{SocketAddr, SocketAddrV4};
+use std::net::{SocketAddrV4, SocketAddrV6};
 use std::os::unix::io::AsRawFd;
 use nix::{self, sys};
-use libc::{c_void, socklen_t, setsockopt, IPPROTO_TCP, TCP_CONGESTION};
+use libc::{self, c_void, socklen_t, setsockopt, IPPROTO_TCP, TCP_CONGESTION};
 
-pub fn get_original_dest<F>(fd: &F) -> io::Result<SocketAddr>
+pub fn get_original_dest<F>(fd: &F) -> io::Result<SocketAddrV4>
 where F: AsRawFd {
     let addr = sys::socket::getsockopt(fd.as_raw_fd(),
                                        sys::socket::sockopt::OriginalDst)
@@ -16,9 +16,31 @@ where F: AsRawFd {
         })?;
     let addr = SocketAddrV4::new(addr.sin_addr.s_addr.to_be().into(),
                                  addr.sin_port.to_be());
-    // TODO: support IPv6
-    Ok(SocketAddr::V4(addr))
+    Ok(addr)
 }
+
+pub fn get_original_dest6<F>(fd: &F) -> io::Result<SocketAddrV6>
+where F: AsRawFd {
+    let mut sockaddr: libc::sockaddr_in6 = unsafe { mem::zeroed() };
+    let mut socklen = mem::size_of::<libc::sockaddr_in6>();
+    let res = unsafe {
+        libc::getsockopt(fd.as_raw_fd(),
+                         libc::SOL_IPV6, libc::SO_ORIGINAL_DST,
+                         &mut sockaddr as *mut _ as *mut c_void,
+                         &mut socklen as *mut _ as *mut socklen_t)
+    };
+    if res != 0 {
+        return Err(io::Error::new(ErrorKind::Other, "getsockopt fail"));
+    }
+    let addr = SocketAddrV6::new(
+        sockaddr.sin6_addr.s6_addr.into(),
+        sockaddr.sin6_port,
+        sockaddr.sin6_flowinfo,
+        sockaddr.sin6_scope_id,
+    );
+    Ok(addr)
+}
+
 
 pub fn set_congestion<F, S>(fd: &F, alg: S) -> io::Result<()>
 where F: AsRawFd,

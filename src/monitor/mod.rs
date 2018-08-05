@@ -49,7 +49,7 @@ impl Monitor {
         let mut rng = rand::thread_rng();
         self.servers.borrow_mut().sort_by_key(move |server| {
             server.score().unwrap_or(std::i32::MAX) -
-                (rng.next_u32() % 30) as i32
+                (rng.gen::<u8>() % 30) as i32
         });
         debug!("scores:{}", info_stats(&*self.servers.borrow()));
     }

@@ -1,23 +1,15 @@
-use std::io;
 use std::sync::Arc;
-use std::fmt::Debug;
+use std::net::SocketAddr;
 use std::time::{Instant, Duration};
-use futures::{future, Future, Stream};
+use futures::Future;
 use tokio_core::reactor::Handle;
-use tokio_io::{AsyncRead, AsyncWrite};
-use hyper::{self, Method, StatusCode};
-use hyper::header::ContentType;
-use hyper::server::{Http, Request, Response, Service};
+use hyper::{Body, Request, Response, Server, StatusCode, Method};
+use hyper::service::service_fn_ok;
 use serde_json;
 
 use monitor::{Monitor, Throughput};
 use proxy::ProxyServer;
 
-
-struct StatusPages {
-    start_time: Instant,
-    monitor: Monitor,
-}
 
 #[derive(Debug, Serialize)]
 struct ServerStatus {
@@ -32,82 +24,61 @@ struct Status {
     throughput: Throughput,
 }
 
-impl StatusPages {
-    fn new(start_time: Instant, monitor: Monitor) -> StatusPages {
-        StatusPages { start_time,  monitor }
-    }
-
-    fn status_json(&self) -> serde_json::Result<String> {
-        let mut thps = self.monitor.throughputs();
-        let throughput = thps.values().fold(Default::default(), |a, b| a + *b);
-        let servers = self.monitor.servers().into_iter().map(|server| ServerStatus {
-            throughput: thps.remove(&server), server,
-        }).collect();
-        serde_json::to_string(&Status {
-            servers, throughput,
-            uptime: self.start_time.elapsed(),
-        })
-    }
+fn status_json(start_time: &Instant, monitor: &Monitor)
+        -> serde_json::Result<String> {
+    let mut thps = monitor.throughputs();
+    let throughput = thps.values().fold(Default::default(), |a, b| a + *b);
+    let servers = monitor.servers().into_iter().map(|server| ServerStatus {
+        throughput: thps.remove(&server), server,
+    }).collect();
+    serde_json::to_string(&Status {
+        servers, throughput,
+        uptime: start_time.elapsed(),
+    })
 }
 
-impl Service for StatusPages {
-    type Request = Request;
-    type Response = Response;
-    type Error = hyper::Error;
-    type Future = future::FutureResult<Self::Response, Self::Error>;
+fn response(req: Request<Body>, start_time: &Instant, monitor: &Monitor)
+        -> Response<Body> {
+    let mut resp = Response::builder();
+    match (req.method(), req.uri().path()) {
+        (&Method::GET, "/") => resp
+            .header("Content-Type", "text/html")
+            .body(include_str!("index.html").into()),
 
-    fn call(&self, req: Request) -> Self::Future {
-        let resp = Response::new();
-        let resp = match (req.method(), req.path()) {
-            (&Method::Get, "/") => {
-                resp.with_body(include_str!("index.html"))
-                    .with_header(ContentType::html())
+        (&Method::GET, "/version") => resp
+            .header("Content-Type", "text/plain")
+            .body(env!("CARGO_PKG_VERSION").into()),
+
+        (&Method::GET, "/status") => match status_json(start_time, monitor) {
+            Ok(json) => resp
+                .header("Content-Type", "application/json")
+                .body(json.into()),
+            Err(e) => {
+                error!("fail to serialize servers to json: {}", e);
+                resp.status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .header("Content-Type", "text/plain")
+                    .body(format!("internal error: {}", e).into())
             },
-            (&Method::Get, "/version") => {
-                resp.with_body(env!("CARGO_PKG_VERSION"))
-                    .with_header(ContentType::plaintext())
-            },
-            (&Method::Get, "/status") => match self.status_json() {
-                Ok(json) => resp.with_body(json)
-                                .with_header(ContentType::json()),
-                Err(e) => {
-                    error!("fail to serialize servers to json: {}", e);
-                    resp.with_status(StatusCode::InternalServerError)
-                        .with_header(ContentType::plaintext())
-                        .with_body(format!("internal error: {}", e))
-                },
-            },
-            _ => resp.with_status(StatusCode::NotFound)
-                     .with_body("page not found")
-                     .with_header(ContentType::plaintext()),
-        };
-        debug!("{} {} [{}]", req.method(), req.path(), resp.status());
-        future::ok(resp)
-    }
+        },
+        _ => resp.status(StatusCode::NOT_FOUND)
+                .header("Content-Type", "text/plain")
+                .body("page not found".into()),
+    }.unwrap()
 }
 
-pub fn run_server<I, S, A>(incoming: I, monitor: Monitor, handle: &Handle)
-        -> impl Future<Item=(), Error=()>
-where I: Stream<Item=(S, A), Error=io::Error> + 'static,
-      S: AsyncRead + AsyncWrite + 'static,
-      A: Debug {
+pub fn run_server(addr: SocketAddr, monitor: Monitor, handle: &Handle)
+        -> impl Future<Item=(), Error=()> {
     handle.spawn(monitor.monitor_throughput(handle));
     let start_time = Instant::now();
-    let new_service = move ||
-        Ok(StatusPages::new(start_time, monitor.clone()));
-    let incoming = incoming.map(|(stream, addr)| {
-        debug!("web server connected with {:?}", addr);
-        stream
-    });
-    let serve = Http::new()
-        .serve_incoming(incoming, new_service);
-    let handle = handle.clone();
-    serve.for_each(move |conn| {
-        handle.spawn(
-            conn.map(|_| ())
-                .map_err(|err| info!("http: {}", err))
-        );
-        Ok(())
-    }).map_err(|err| error!("error on http server: {}", err))
-}
 
+    let new_service = move || {
+        let monitor = monitor.clone();
+        service_fn_ok(move |req| {
+            response(req, &start_time, &monitor)
+        })
+    };
+    let server = Server::bind(&addr)
+        .serve(new_service);
+
+    server.map_err(|err| error!("error on http server: {}", err))
+}

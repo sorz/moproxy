@@ -81,7 +81,10 @@ fn main() {
         let monitor = monitor.clone();
         let addr = http_addr.parse()
             .expect("not a valid address of TCP socket");
-        let serv = web::run_server(addr, monitor, &handle);
+        let incoming = TcpListener::bind(&addr, &handle)
+            .expect("fail to bind web server")
+            .incoming();
+        let serv = web::run_server(incoming, monitor, &handle);
         handle.spawn(serv);
         info!("http run on {}", http_addr);
     }

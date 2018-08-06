@@ -1,10 +1,14 @@
+use std::io;
+use std::fmt::Debug;
 use std::sync::Arc;
-use std::net::SocketAddr;
 use std::time::{Instant, Duration};
-use futures::Future;
+use futures::{Future, Stream};
 use tokio_core::reactor::Handle;
-use hyper::{Body, Request, Response, Server, StatusCode, Method};
+use tokio_io::{AsyncRead, AsyncWrite};
+use hyper::{Body, Request, Response, StatusCode, Method};
 use hyper::service::service_fn_ok;
+use hyper::server::conn::Http;
+use hyper;
 use serde_json;
 
 use monitor::{Monitor, Throughput};
@@ -66,8 +70,11 @@ fn response(req: Request<Body>, start_time: &Instant, monitor: &Monitor)
     }.unwrap()
 }
 
-pub fn run_server(addr: SocketAddr, monitor: Monitor, handle: &Handle)
-        -> impl Future<Item=(), Error=()> {
+pub fn run_server<I, S, A>(incoming: I, monitor: Monitor, handle: &Handle)
+        -> impl Future<Item=(), Error=()>
+where I: Stream<Item=(S, A), Error=io::Error> + 'static,
+      S: AsyncRead + AsyncWrite + Send + 'static,
+      A: Debug {
     handle.spawn(monitor.monitor_throughput(handle));
     let start_time = Instant::now();
 
@@ -77,7 +84,14 @@ pub fn run_server(addr: SocketAddr, monitor: Monitor, handle: &Handle)
             response(req, &start_time, &monitor)
         })
     };
-    let server = Server::bind(&addr)
+
+    let incoming = incoming.map(|(conn, addr)| {
+        debug!("web server connected with {:?}", addr);
+        conn
+    });
+    let mut http = Http::new();
+    http.executor(handle.remote().clone());
+    let server = hyper::server::Builder::new(incoming, http)
         .serve(new_service);
 
     server.map_err(|err| error!("error on http server: {}", err))

@@ -43,6 +43,7 @@ fn main() {
         .unwrap_or("info").parse()
         .expect("unknown log level");
     logger.filter(None, log_level)
+        .filter(Some("tokio_reactor"), LevelFilter::Warn)
         .filter(Some("tokio_core"), LevelFilter::Warn)
         .filter(Some("hyper"), LevelFilter::Warn)
         .filter(Some("ini"), LevelFilter::Warn)

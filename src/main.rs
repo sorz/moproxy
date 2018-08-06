@@ -11,16 +11,13 @@ extern crate clap;
 extern crate log;
 extern crate moproxy;
 
-use std::fs;
 use std::env;
 use std::io::Write;
-use std::path::Path;
 use std::net::SocketAddr;
 use ini::Ini;
 use futures::{Future, Stream, future::Either};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
-use tokio_uds::UnixListener;
 use log::LevelFilter;
 
 use moproxy::monitor::Monitor;
@@ -79,27 +76,15 @@ fn main() {
     let mut lp = Core::new().expect("fail to create event loop");
     let handle = lp.handle();
 
-    let mut sock_file = None;
     if let Some(http_addr) = args.value_of("web-bind") {
         let monitor = monitor.clone();
-        if http_addr.starts_with("/") {
-            let sock = AutoRemoveFile::new(&http_addr);
-            let incoming = UnixListener::bind(&sock, &handle)
-                .expect("fail to bind web server")
-                .incoming();
-            sock_file = Some(sock);
-            let serv = web::run_server(incoming, monitor, &handle);
-            handle.spawn(serv);
-        } else {
-            // FIXME: remove duplicate code
-            let addr = http_addr.parse()
-                .expect("not a valid address of TCP socket");
-            let incoming = TcpListener::bind(&addr, &handle)
-                .expect("fail to bind web server")
-                .incoming();
-            let serv = web::run_server(incoming, monitor, &handle);
-            handle.spawn(serv);
-        }
+        let addr = http_addr.parse()
+            .expect("not a valid address of TCP socket");
+        let incoming = TcpListener::bind(&addr, &handle)
+            .expect("fail to bind web server")
+            .incoming();
+        let serv = web::run_server(incoming, monitor, &handle);
+        handle.spawn(serv);
         info!("http run on {}", http_addr);
     }
 
@@ -132,10 +117,6 @@ fn main() {
         Ok(())
     });
     lp.run(server).expect("error on event loop");
-
-    // make sure socket file will be deleted on exit.
-    // unnecessary drop() but make complier happy about unused var.
-    drop(sock_file);
 }
 
 fn parse_servers(args: &clap::ArgMatches) -> Vec<ProxyServer> {
@@ -200,29 +181,3 @@ fn parse_server(addr: &str) -> SocketAddr {
         format!("127.0.0.1:{}", addr).parse()
     }.expect("not a valid server address")
 }
-
-/// File on this path will be removed on `drop()`.
-struct AutoRemoveFile<'a> {
-    path: &'a str,
-}
-
-impl<'a> AutoRemoveFile<'a> {
-    fn new(path: &'a str) -> Self {
-        AutoRemoveFile { path }
-    }
-}
-
-impl<'a> Drop for AutoRemoveFile<'a> {
-    fn drop(&mut self) {
-        if let Err(err) = fs::remove_file(&self.path) {
-            warn!("fail to remove {}: {}", self.path, err);
-        }
-    }
-}
-
-impl<'a> AsRef<Path> for &'a AutoRemoveFile<'a> {
-    fn as_ref(&self) -> &Path {
-        self.path.as_ref()
-    }
-}
-

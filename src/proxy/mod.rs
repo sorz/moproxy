@@ -3,8 +3,8 @@ pub mod http;
 pub mod copy;
 use std::io;
 use std::fmt;
-use std::ops::Add;
-use std::cell::Cell;
+use std::ops::{Add, AddAssign};
+use std::sync::{Mutex, MutexGuard};
 use std::str::FromStr;
 use std::time::Duration;
 use std::net::{SocketAddr, IpAddr};
@@ -36,7 +36,7 @@ pub enum ProxyProto {
     },
 }
 
-#[derive(Clone, Debug, Eq, Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ProxyServer {
     pub addr: SocketAddr,
     pub proto: ProxyProto,
@@ -44,11 +44,16 @@ pub struct ProxyServer {
     pub test_dns: SocketAddr,
     pub max_wait: Duration,
     score_base: i32,
-    delay: Cell<Option<Duration>>,
-    score: Cell<Option<i32>>,
-    traffic: Cell<Traffic>,
-    conn_alive: Cell<u32>,
-    conn_total: Cell<u32>,
+    status: Mutex<ProxyServerStatus>,
+}
+
+#[derive(Debug, Serialize, Clone, Copy, Default)]
+struct ProxyServerStatus {
+    delay: Option<Duration>,
+    score: Option<i32>,
+    traffic: Traffic,
+    conn_alive: u32,
+    conn_total: u32,
 }
 
 impl Hash for ProxyServer {
@@ -66,6 +71,8 @@ impl PartialEq for ProxyServer {
         self.tag == other.tag
     }
 }
+
+impl Eq for ProxyServer {}
 
 #[derive(Hash, Clone, Debug)]
 pub enum Address {
@@ -121,6 +128,12 @@ impl Add for Traffic {
     }
 }
 
+impl AddAssign for Traffic {
+    fn add_assign(&mut self, other: Traffic) {
+        *self = *self + other;
+    }
+}
+
 impl ProxyProto {
     pub fn socks5() -> Self {
         ProxyProto::Socks5
@@ -142,11 +155,7 @@ impl ProxyServer {
             }.into_boxed_str(),
             max_wait: Duration::from_millis(DEFAULT_MAX_WAIT_MILLILS),
             score_base: score_base.unwrap_or(0),
-            delay: Cell::new(None),
-            score: Cell::new(None),
-            traffic: Cell::default(),
-            conn_alive: Cell::new(0),
-            conn_total: Cell::new(0),
+            status: Default::default(),
         }
     }
 
@@ -171,26 +180,31 @@ impl ProxyServer {
         Box::new(handshake)
     }
 
+    fn status(&self) -> MutexGuard<ProxyServerStatus> {
+        self.status.lock().unwrap()
+    }
+
     pub fn delay(&self) -> Option<Duration> {
-        self.delay.get()
+        self.status().delay
     }
 
     pub fn score(&self) -> Option<i32> {
-        self.score.get()
+        self.status().score
     }
 
-
     pub fn set_delay(&self, delay: Option<Duration>) {
-        self.delay.set(delay);
-        self.score.set(delay.map(|t| t.millis() as i32 + self.score_base));
+        self.status().delay = delay;
+        self.status().score =
+            delay.map(|t| t.millis() as i32 + self.score_base);
     }
 
     pub fn update_delay(&self, delay: Option<Duration>) {
-        self.delay.set(delay);
+        let mut status = self.status();
+        status.delay = delay;
         let score = delay
             .map(|t| t.millis() as i32 + self.score_base)
             .map(|new| {
-                let old = self.score.get()
+                let old = status.score
                     .unwrap_or_else(|| self.max_wait.millis() as i32);
                 // give more weight to delays exceed the mean, to
                 // punish for network jitter.
@@ -200,24 +214,24 @@ impl ProxyServer {
                     (old * 8 + new * 2) / 10
                 }
             });
-        self.score.set(score);
+        status.score = score;
     }
 
     pub fn add_traffic(&self, traffic: Traffic) {
-        self.traffic.set(self.traffic.get() + traffic);
+        self.status().traffic += traffic;
     }
 
     pub fn update_stats_conn_open(&self) {
-        self.conn_alive.set(self.conn_alive.get() + 1);
-        self.conn_total.set(self.conn_total.get() + 1);
+        self.status().conn_alive += 1;
+        self.status().conn_total += 1;
     }
 
     pub fn update_stats_conn_close(&self) {
-        self.conn_alive.set(self.conn_alive.get() - 1);
+        self.status().conn_alive -= 1;
     }
 
     pub fn traffic(&self) -> Traffic {
-        self.traffic.get()
+        self.status().traffic
     }
 }
 

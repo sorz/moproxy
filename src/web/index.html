@@ -89,17 +89,17 @@
          <td><span title="${server.proto}://${server.addr}"
              >${server.tag}</span></td>
          <td><span title="based on average delay"
-             >${server.score || '-'}</span></td>
+             >${server.status.score || '-'}</span></td>
          <td><span title="TCP handshake included"
-             >${durationToMills(server.delay) || '-'}</span></td>
+             >${durationToMills(server.status.delay) || '-'}</span></td>
          <td><span title="# current connections"
-             >${humanQuantity(server.conn_alive)}</span> /
+             >${humanQuantity(server.status.conn_alive)}</span> /
              <span title="# total connections"
-             >${humanQuantity(server.conn_total)}</span></td>
+             >${humanQuantity(server.status.conn_total)}</span></td>
          <td><span title="total sent"
-             >${humanFileSize(server.traffic.tx_bytes)}</span> /
+             >${humanFileSize(server.status.traffic.tx_bytes)}</span> /
              <span title="total received"
-             >${humanFileSize(server.traffic.rx_bytes)}</span>
+             >${humanFileSize(server.status.traffic.rx_bytes)}</span>
          <td><span title="throughput"
              >${throughput}</span></td>
          </tr>`;

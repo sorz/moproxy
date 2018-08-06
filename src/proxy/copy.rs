@@ -1,6 +1,7 @@
 use std::fmt;
 use std::ops::Neg;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::cell::RefCell;
 use std::net::Shutdown;
 use std::io::{self, Read, Write};
@@ -149,11 +150,11 @@ impl StreamWithBuffer {
 pub struct BiPipe {
     left: StreamWithBuffer,
     right: StreamWithBuffer,
-    server: Rc<ProxyServer>,
+    server: Arc<ProxyServer>,
     traffic: Traffic,
 }
 
-pub fn pipe(left: TcpStream, right: TcpStream, server: Rc<ProxyServer>,
+pub fn pipe(left: TcpStream, right: TcpStream, server: Arc<ProxyServer>,
             shared_buf: SharedBuf)
         -> BiPipe {
     BiPipe {

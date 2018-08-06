@@ -2,7 +2,7 @@ mod tls;
 mod read;
 mod connect;
 use std::cmp;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 use std::net::SocketAddr;
 use tokio_core::net::TcpStream;
@@ -40,7 +40,7 @@ pub struct ConnectedClient {
     left: TcpStream,
     right: TcpStream,
     dest: Destination,
-    server: Rc<ProxyServer>,
+    server: Arc<ProxyServer>,
 }
 
 type ConnectServer = Box<Future<Item=ConnectedClient, Error=()>>;

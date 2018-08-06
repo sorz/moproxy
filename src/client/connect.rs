@@ -1,5 +1,5 @@
 use std::cmp;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::io::{self, ErrorKind};
 use std::iter::FromIterator;
 use std::collections::VecDeque;
@@ -10,7 +10,7 @@ use proxy::{ProxyServer, Destination, Connect};
 use RcBox;
 
 struct TryConnect {
-    server: Rc<ProxyServer>,
+    server: Arc<ProxyServer>,
     state: TryConnectState,
     timer: Timeout,
 }
@@ -25,7 +25,7 @@ enum TryConnectState {
     },
 }
 
-fn try_connect(dest: &Destination, server: Rc<ProxyServer>,
+fn try_connect(dest: &Destination, server: Arc<ProxyServer>,
                pending_data: Option<RcBox<[u8]>>, wait_response: bool,
                handle: &Handle) -> TryConnect {
     let state = TryConnectState::Connecting {
@@ -38,7 +38,7 @@ fn try_connect(dest: &Destination, server: Rc<ProxyServer>,
 }
 
 impl Future for TryConnect {
-    type Item = (Rc<ProxyServer>, TcpStream);
+    type Item = (Arc<ProxyServer>, TcpStream);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -84,12 +84,12 @@ pub struct TryConnectAll {
     pending_data: Option<RcBox<[u8]>>,
     parallel_n: usize,
     wait_response: bool,
-    standby: VecDeque<Rc<ProxyServer>>,
+    standby: VecDeque<Arc<ProxyServer>>,
     connects: VecDeque<TryConnect>,
     handle: Handle,
 }
 
-pub fn try_connect_all(dest: Destination, servers: Vec<Rc<ProxyServer>>,
+pub fn try_connect_all(dest: Destination, servers: Vec<Arc<ProxyServer>>,
                    parallel_n: usize, wait_response: bool,
                    pending_data: Option<RcBox<[u8]>>, handle: Handle)
         -> TryConnectAll {
@@ -103,7 +103,7 @@ pub fn try_connect_all(dest: Destination, servers: Vec<Rc<ProxyServer>>,
 }
 
 impl Future for TryConnectAll {
-    type Item = (Rc<ProxyServer>, TcpStream);
+    type Item = (Arc<ProxyServer>, TcpStream);
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, ()> {

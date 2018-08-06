@@ -2,8 +2,7 @@ mod traffic;
 use std;
 use std::io;
 use std::time::{Instant, Duration};
-use std::rc::Rc;
-use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use rand::{self, Rng};
 use tokio_core::reactor::{Handle, Timeout};
@@ -18,40 +17,40 @@ pub use self::traffic::Throughput;
 
 static THROUGHPUT_INTERVAL_SECS: u64 = 1;
 
-pub type ServerList = Vec<Rc<ProxyServer>>;
+pub type ServerList = Vec<Arc<ProxyServer>>;
 
 #[derive(Clone, Debug)]
 pub struct Monitor {
-    servers: Rc<RefCell<ServerList>>,
-    meters: Rc<RefCell<HashMap<Rc<ProxyServer>, Meter>>>,
+    servers: Arc<Mutex<ServerList>>,
+    meters: Arc<Mutex<HashMap<Arc<ProxyServer>, Meter>>>,
 }
 
 impl Monitor {
     pub fn new(servers: Vec<ProxyServer>) -> Monitor {
         let servers: Vec<_> = servers.into_iter()
-            .map(|server| Rc::new(server))
+            .map(|server| Arc::new(server))
             .collect();
         let meters = servers.iter()
             .map(|server| (server.clone(), Meter::new()))
             .collect();
         Monitor {
-            servers: Rc::new(RefCell::new(servers)),
-            meters: Rc::new(RefCell::new(meters)),
+            servers: Arc::new(Mutex::new(servers)),
+            meters: Arc::new(Mutex::new(meters)),
         }
     }
 
     /// Return an ordered list of servers.
     pub fn servers(&self) -> ServerList {
-        self.servers.borrow().clone()
+        self.servers.lock().unwrap().clone()
     }
 
     fn resort(&self) {
         let mut rng = rand::thread_rng();
-        self.servers.borrow_mut().sort_by_key(move |server| {
+        self.servers.lock().unwrap().sort_by_key(move |server| {
             server.score().unwrap_or(std::i32::MAX) -
                 (rng.gen::<u8>() % 30) as i32
         });
-        debug!("scores:{}", info_stats(&*self.servers.borrow()));
+        debug!("scores:{}", info_stats(&*self.servers.lock().unwrap()));
     }
 
     /// Start monitoring delays.
@@ -81,7 +80,7 @@ impl Monitor {
         let interval = Duration::from_secs(THROUGHPUT_INTERVAL_SECS);
         let handle = handle.clone();
         future::loop_fn(self.clone(), move |monitor| {
-            for (server, meter) in monitor.meters.borrow_mut().iter_mut() {
+            for (server, meter) in monitor.meters.lock().unwrap().iter_mut() {
                 meter.add_sample(server.traffic());
             }
             Timeout::new(interval, &handle)
@@ -93,8 +92,8 @@ impl Monitor {
 
     /// Return average throughputs of all servers in the recent monitor
     /// period. Should start `monitor_throughput()` task before call this.
-    pub fn throughputs(&self) -> HashMap<Rc<ProxyServer>, Throughput> {
-        self.meters.borrow().iter().map(|(server, meter)| {
+    pub fn throughputs(&self) -> HashMap<Arc<ProxyServer>, Throughput> {
+        self.meters.lock().unwrap().iter().map(|(server, meter)| {
             (server.clone(), meter.throughput(server.traffic()))
         }).collect()
     }

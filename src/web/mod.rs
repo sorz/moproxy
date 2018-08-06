@@ -1,5 +1,5 @@
 use std::io;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::fmt::Debug;
 use std::time::{Instant, Duration};
 use futures::{future, Future, Stream};
@@ -21,7 +21,7 @@ struct StatusPages {
 
 #[derive(Debug, Serialize)]
 struct ServerStatus {
-    server: Rc<ProxyServer>,
+    server: Arc<ProxyServer>,
     throughput: Option<Throughput>,
 }
 

@@ -140,10 +140,16 @@ fn test_all(monitor: Monitor, init: bool, handle: Handle)
         monitor.resort();
         let servers = monitor.servers();
         if let Some(ref addr) = monitor.graphite {
-            let records = servers.iter().map(|s| {
-                let delay = s.delay().map(|t| t.millis()).unwrap_or(0) as i32;
-                Record::new(s.graphite_path("delay"), delay, None)
-            });
+            let records = servers.iter().flat_map(|server| {
+                let delay = server.delay().map(|t| {
+                    let ms = t.millis() as i32;
+                    Record::new(server.graphite_path("delay"), ms, None)
+                });
+                let score = server.score().map(|s| {
+                    Record::new(server.graphite_path("score"), s as i32, None)
+                });
+                vec![delay, score]
+            }).filter_map(|v| v);
             let mut buf = Vec::new();
             write_records(&mut buf, records).unwrap();
 

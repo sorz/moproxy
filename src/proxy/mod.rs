@@ -15,6 +15,7 @@ use tokio_core::reactor::Handle;
 use ToMillis;
 
 const DEFAULT_MAX_WAIT_MILLILS: u64 = 4_000;
+const GRAPHITE_PATH_PREFIX: &'static str = "moproxy.proxy_servers";
 
 pub type Connect = Future<Item=TcpStream, Error=io::Error>;
 
@@ -151,7 +152,13 @@ impl ProxyServer {
             addr, proto, test_dns,
             tag: match tag {
                 None => format!("{}", addr.port()),
-                Some(s) => String::from(s),
+                Some(s) => {
+                    if !s.is_ascii() || s.contains(' ') || s.contains('\n') {
+                        panic!("Tag \"{}\" contains white spaces, line \
+                               breaks, or non-ASCII characters.");
+                    }
+                    String::from(s)
+                },
             }.into_boxed_str(),
             max_wait: Duration::from_millis(DEFAULT_MAX_WAIT_MILLILS),
             score_base: score_base.unwrap_or(0),
@@ -232,6 +239,14 @@ impl ProxyServer {
 
     pub fn traffic(&self) -> Traffic {
         self.status().traffic
+    }
+
+    pub fn graphite_path(&self, suffix: &str) -> String {
+        format!("{}.{}.{}",
+            GRAPHITE_PATH_PREFIX,
+            self.tag.replace('.', "_"),
+            suffix
+        )
     }
 }
 

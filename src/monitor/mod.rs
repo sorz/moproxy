@@ -32,7 +32,8 @@ pub struct Monitor {
 }
 
 impl Monitor {
-    pub fn new(servers: Vec<ProxyServer>) -> Monitor {
+    pub fn new(servers: Vec<ProxyServer>,
+               graphite: Option<SocketAddr>) -> Monitor {
         let servers: Vec<_> = servers.into_iter()
             .map(|server| Arc::new(server))
             .collect();
@@ -42,7 +43,7 @@ impl Monitor {
         Monitor {
             servers: Arc::new(Mutex::new(servers)),
             meters: Arc::new(Mutex::new(meters)),
-            graphite: None,
+            graphite,
         }
     }
 
@@ -141,7 +142,7 @@ fn test_all(monitor: Monitor, init: bool, handle: Handle)
         if let Some(ref addr) = monitor.graphite {
             let records = servers.iter().map(|s| {
                 let delay = s.delay().map(|t| t.millis()).unwrap_or(0) as i32;
-                Record::new(&s.tag, delay, None)
+                Record::new(s.graphite_path("delay"), delay, None)
             });
             let mut buf = Vec::new();
             write_records(&mut buf, records).unwrap();

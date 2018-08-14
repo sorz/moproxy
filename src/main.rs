@@ -69,13 +69,15 @@ fn main() {
         .map(|v| v.parse().expect("not a valid number"))
         .unwrap_or(0 as usize);
     let cong_local = args.value_of("cong-local");
+    let graphite = args.value_of("graphite")
+        .map(|addr| addr.parse().expect("not a valid address"));
 
     let servers = parse_servers(&args);
     if servers.len() == 0 {
         panic!("missing server list");
     }
     info!("total {} server(s) added", servers.len());
-    let monitor = Monitor::new(servers);
+    let monitor = Monitor::new(servers, graphite);
 
     let mut lp = Core::new().expect("fail to create event loop");
     let handle = lp.handle();

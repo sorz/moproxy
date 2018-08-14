@@ -74,6 +74,13 @@ args:
         takes_value: true
         help: >
           Set TCP congestion control algorithm on local (client) side.
+    - graphite:
+        long: graphite
+        value_name: IP-ADDR:PORT
+        takes_value: true
+        help: >
+          Send metrics to graphite (carbon) daemon in plaintext format with
+          TCP.
     - log-level:
         long: log-level
         takes_value: true

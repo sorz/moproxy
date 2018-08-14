@@ -3,14 +3,14 @@ use std::time::SystemTime;
 
 
 #[derive(Clone, Debug)]
-pub struct Record<'a> {
-    path: &'a str,
+pub struct Record {
+    path: String,
     value: i32,
     time: Option<SystemTime>,
 }
 
-impl<'a> Record<'a> {
-    pub fn new(path: &'a str, value: i32, time: Option<SystemTime>) -> Self {
+impl Record {
+    pub fn new(path: String, value: i32, time: Option<SystemTime>) -> Self {
         if !path.is_ascii() || path.contains(' ') || path.contains('\n') {
             panic!("Graphite path contains space, line break, \
                     or non-ASCII characters.");
@@ -32,9 +32,9 @@ impl<'a> Record<'a> {
     }
 }
 
-pub fn write_records<'a, B, R>(buf: &mut B, records: R) -> io::Result<()>
+pub fn write_records<B, R>(buf: &mut B, records: R) -> io::Result<()>
 where B: Write,
-      R: Iterator<Item=Record<'a>> {
+      R: Iterator<Item=Record> {
     records.map(|record| record.write_paintext(buf))
         .find(|result| result.is_err())
         .unwrap_or(Ok(()))

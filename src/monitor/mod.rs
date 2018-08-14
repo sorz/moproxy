@@ -1,21 +1,26 @@
 mod traffic;
+mod graphite;
 use std;
 use std::io;
+use std::net::SocketAddr;
 use std::time::{Instant, Duration};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use rand::{self, Rng};
 use tokio_core::reactor::{Handle, Timeout};
-use tokio_io::io::read_exact;
-use futures::{future, Future};
+use tokio_core::net::TcpStream;
+use tokio_io::io::{read_exact, write_all};
+use futures::{future, Future, IntoFuture};
 use futures::future::Loop;
 use proxy::ProxyServer;
 use ToMillis;
 use self::traffic::Meter;
+use self::graphite::{Record, write_records};
 pub use self::traffic::Throughput;
 
 
 static THROUGHPUT_INTERVAL_SECS: u64 = 1;
+static GRAPHITE_TIMEOUT_SECS: u64 = 5;
 
 pub type ServerList = Vec<Arc<ProxyServer>>;
 
@@ -23,6 +28,7 @@ pub type ServerList = Vec<Arc<ProxyServer>>;
 pub struct Monitor {
     servers: Arc<Mutex<ServerList>>,
     meters: Arc<Mutex<HashMap<Arc<ProxyServer>, Meter>>>,
+    graphite: Option<SocketAddr>,
 }
 
 impl Monitor {
@@ -36,6 +42,7 @@ impl Monitor {
         Monitor {
             servers: Arc::new(Mutex::new(servers)),
             meters: Arc::new(Mutex::new(meters)),
+            graphite: None,
         }
     }
 
@@ -58,7 +65,7 @@ impl Monitor {
     pub fn monitor_delay(&self, probe: u64, handle: &Handle)
             -> impl Future<Item=(), Error=()> {
         let handle = handle.clone();
-        let init = test_all(self.clone(), true, &handle);
+        let init = test_all(self.clone(), true, handle.clone());
         let interval = Duration::from_secs(probe);
         init.and_then(move |monitor| {
             future::loop_fn((monitor, handle), move |(monitor, handle)| {
@@ -66,7 +73,7 @@ impl Monitor {
                     .expect("error on get timeout from reactor")
                     .map_err(|err| panic!("error on timer: {}", err));
                 wait.and_then(move |_| {
-                    test_all(monitor, false, &handle)
+                    test_all(monitor, false, handle.clone())
                         .map(|monitor| (monitor, handle))
                 }).and_then(|args| Ok(Loop::Continue(args)))
             })
@@ -111,11 +118,12 @@ fn info_stats(infos: &ServerList) -> String {
     stats
 }
 
-fn test_all(monitor: Monitor, init: bool, handle: &Handle)
+fn test_all(monitor: Monitor, init: bool, handle: Handle)
         -> impl Future<Item=Monitor, Error=()> {
     debug!("testing all servers...");
+    let handle_ = handle.clone();
     let tests: Vec<_> = monitor.servers().into_iter().map(move |server| {
-        let test = alive_test(&server, handle).then(move |result| {
+        let test = alive_test(&server, &handle_).then(move |result| {
             if init {
                 server.set_delay(result.ok());
             } else {
@@ -125,9 +133,36 @@ fn test_all(monitor: Monitor, init: bool, handle: &Handle)
         });
         Box::new(test) as Box<Future<Item=(), Error=()>>
     }).collect();
-    future::join_all(tests).then(move |_| {
+
+    // send graphite metrics
+    future::join_all(tests).and_then(move |_| {
         monitor.resort();
-        Ok(monitor)
+        let servers = monitor.servers();
+        if let Some(ref addr) = monitor.graphite {
+            let records = servers.iter().map(|s| {
+                let delay = s.delay().map(|t| t.millis()).unwrap_or(0) as i32;
+                Record::new(&s.tag, delay, None)
+            });
+            let mut buf = Vec::new();
+            write_records(&mut buf, records).unwrap();
+
+            let timeout = Duration::from_secs(GRAPHITE_TIMEOUT_SECS);
+            let timeout = Timeout::new(timeout, &handle)
+                .expect("error on get timeout from reactor");
+
+            let send = TcpStream::connect(addr, &handle)
+                .and_then(move |conn| write_all(conn, buf)).map(|_| ())
+                .select(timeout).map_err(|(err, _)| err)
+                .then(|result| {
+                    if let Err(err) = result {
+                        warn!("fail to send metrics: {}", err);
+                    }
+                    Ok(())
+                });
+            Box::new(send) as Box<Future<Item=(), Error=()>>
+        } else {
+            Box::new(Ok(()).into_future()) as Box<Future<Item=(), Error=()>>
+        }.map(|()| monitor)
     })
 }
 

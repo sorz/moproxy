@@ -75,7 +75,7 @@ pub fn run_server<I, S, A>(incoming: I, monitor: Monitor, handle: &Handle)
 where I: Stream<Item=(S, A), Error=io::Error> + 'static,
       S: AsyncRead + AsyncWrite + Send + 'static,
       A: Debug {
-    handle.spawn(monitor.monitor_throughput(handle));
+    handle.spawn(monitor.monitor_throughput());
     let start_time = Instant::now();
 
     let new_service = move || {

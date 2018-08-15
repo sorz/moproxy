@@ -7,7 +7,7 @@ use std::time::{Instant, Duration};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use rand::{self, Rng};
-use tokio_core::reactor::{Handle, Timeout};
+use tokio_core::reactor::{Handle, Timeout, Remote};
 use tokio_core::net::TcpStream;
 use tokio_io::io::{read_exact, write_all};
 use futures::{future, Future, IntoFuture};
@@ -29,11 +29,13 @@ pub struct Monitor {
     servers: Arc<Mutex<ServerList>>,
     meters: Arc<Mutex<HashMap<Arc<ProxyServer>, Meter>>>,
     graphite: Option<SocketAddr>,
+    remote: Remote,
 }
 
 impl Monitor {
     pub fn new(servers: Vec<ProxyServer>,
-               graphite: Option<SocketAddr>) -> Monitor {
+               graphite: Option<SocketAddr>,
+               handle: Handle) -> Monitor {
         let servers: Vec<_> = servers.into_iter()
             .map(|server| Arc::new(server))
             .collect();
@@ -43,6 +45,7 @@ impl Monitor {
         Monitor {
             servers: Arc::new(Mutex::new(servers)),
             meters: Arc::new(Mutex::new(meters)),
+            remote: handle.remote().clone(),
             graphite,
         }
     }
@@ -61,21 +64,25 @@ impl Monitor {
         debug!("scores:{}", info_stats(&*self.servers.lock().unwrap()));
     }
 
+    fn handle(&self) -> Handle {
+        self.remote.handle()
+            .expect("Should run in the same thread.")
+    }
+
     /// Start monitoring delays.
     /// Returned Future won't return unless error on timer.
-    pub fn monitor_delay(&self, probe: u64, handle: &Handle)
+    pub fn monitor_delay(&self, probe: u64)
             -> impl Future<Item=(), Error=()> {
-        let handle = handle.clone();
-        let init = test_all(self.clone(), true, handle.clone());
+        let init = test_all(self.clone(), true);
         let interval = Duration::from_secs(probe);
+        let handle = self.handle();
         init.and_then(move |monitor| {
-            future::loop_fn((monitor, handle), move |(monitor, handle)| {
+            future::loop_fn(monitor, move |monitor| {
                 let wait = Timeout::new(interval, &handle)
                     .expect("error on get timeout from reactor")
                     .map_err(|err| panic!("error on timer: {}", err));
                 wait.and_then(move |_| {
-                    test_all(monitor, false, handle.clone())
-                        .map(|monitor| (monitor, handle))
+                    test_all(monitor, false).and_then(send_metrics)
                 }).and_then(|args| Ok(Loop::Continue(args)))
             })
         }).map_err(|_| ())
@@ -83,10 +90,10 @@ impl Monitor {
 
     /// Start monitoring throughput.
     /// Returned Future won't return unless error on timer.
-    pub fn monitor_throughput(&self, handle: &Handle)
+    pub fn monitor_throughput(&self)
             -> impl Future<Item=(), Error=()> {
         let interval = Duration::from_secs(THROUGHPUT_INTERVAL_SECS);
-        let handle = handle.clone();
+        let handle = self.handle();
         future::loop_fn(self.clone(), move |monitor| {
             for (server, meter) in monitor.meters.lock().unwrap().iter_mut() {
                 meter.add_sample(server.traffic());
@@ -119,12 +126,12 @@ fn info_stats(infos: &ServerList) -> String {
     stats
 }
 
-fn test_all(monitor: Monitor, init: bool, handle: Handle)
+fn test_all(monitor: Monitor, init: bool)
         -> impl Future<Item=Monitor, Error=()> {
     debug!("testing all servers...");
-    let handle_ = handle.clone();
+    let handle = monitor.handle();
     let tests: Vec<_> = monitor.servers().into_iter().map(move |server| {
-        let test = alive_test(&server, &handle_).then(move |result| {
+        let test = alive_test(&server, &handle).then(move |result| {
             if init {
                 server.set_delay(result.ok());
             } else {
@@ -135,42 +142,48 @@ fn test_all(monitor: Monitor, init: bool, handle: Handle)
         Box::new(test) as Box<Future<Item=(), Error=()>>
     }).collect();
 
-    // send graphite metrics
-    future::join_all(tests).and_then(move |_| {
+    future::join_all(tests).map(move |_| {
         monitor.resort();
-        let servers = monitor.servers();
-        if let Some(ref addr) = monitor.graphite {
-            let records = servers.iter().flat_map(|server| {
-                let delay = server.delay().map(|t| {
-                    let ms = t.millis() as i32;
-                    Record::new(server.graphite_path("delay"), ms, None)
-                });
-                let score = server.score().map(|s| {
-                    Record::new(server.graphite_path("score"), s as i32, None)
-                });
-                vec![delay, score]
-            }).filter_map(|v| v);
-            let mut buf = Vec::new();
-            write_records(&mut buf, records).unwrap();
-
-            let timeout = Duration::from_secs(GRAPHITE_TIMEOUT_SECS);
-            let timeout = Timeout::new(timeout, &handle)
-                .expect("error on get timeout from reactor");
-
-            let send = TcpStream::connect(addr, &handle)
-                .and_then(move |conn| write_all(conn, buf)).map(|_| ())
-                .select(timeout).map_err(|(err, _)| err)
-                .then(|result| {
-                    if let Err(err) = result {
-                        warn!("fail to send metrics: {}", err);
-                    }
-                    Ok(())
-                });
-            Box::new(send) as Box<Future<Item=(), Error=()>>
-        } else {
-            Box::new(Ok(()).into_future()) as Box<Future<Item=(), Error=()>>
-        }.map(|()| monitor)
+        monitor
     })
+}
+
+// send graphite metrics if need
+fn send_metrics(monitor: Monitor)
+        -> impl Future<Item=Monitor, Error=()> {
+    let handle = monitor.handle();
+    let servers = monitor.servers();
+    if let Some(ref addr) = monitor.graphite {
+        let records = servers.iter().flat_map(|server| {
+            let delay = server.delay().map(|t| {
+                let ms = t.millis() as i32;
+                Record::new(server.graphite_path("delay"), ms, None)
+            });
+            let score = server.score().map(|s| {
+                Record::new(server.graphite_path("score"), s as i32, None)
+            });
+            vec![delay, score]
+        }).filter_map(|v| v);
+        let mut buf = Vec::new();
+        write_records(&mut buf, records).unwrap();
+
+        let timeout = Duration::from_secs(GRAPHITE_TIMEOUT_SECS);
+        let timeout = Timeout::new(timeout, &handle)
+            .expect("error on get timeout from reactor");
+
+        let send = TcpStream::connect(addr, &handle)
+            .and_then(move |conn| write_all(conn, buf)).map(|_| ())
+            .select(timeout).map_err(|(err, _)| err)
+            .then(|result| {
+                if let Err(err) = result {
+                    warn!("fail to send metrics: {}", err);
+                }
+                Ok(())
+            });
+        Box::new(send) as Box<Future<Item=(), Error=()>>
+    } else {
+        Box::new(Ok(()).into_future()) as Box<Future<Item=(), Error=()>>
+    }.map(|()| monitor)
 }
 
 fn alive_test(server: &ProxyServer, handle: &Handle)

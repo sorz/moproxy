@@ -8,10 +8,13 @@ Features:
  * Support multiple SOCKSv5/HTTP backend proxy servers
  * SOCKS/HTTP-layer alive & latency probe
  * Prioritize backend servers according to latency
+ * Full IPv6 support
  * Optional remote DNS resolving for TLS with SNI
  * Optional try-in-parallel for TLS (try multiple proxies and choose the one
    first response)
  * Optional status web page (latency, traffic, etc.)
+ * Optional [Graphite](https://graphite.readthedocs.io/) support
+   (to build fancy dashborad with [Grafana](https://grafana.com/) for example)
 
 ```
 +------+  TCP  +----------+       SOCKSv5   +---------+

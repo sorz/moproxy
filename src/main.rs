@@ -77,10 +77,10 @@ fn main() {
         panic!("missing server list");
     }
     info!("total {} server(s) added", servers.len());
+    let monitor = Monitor::new(servers, graphite);
 
     let mut lp = Core::new().expect("fail to create event loop");
     let handle = lp.handle();
-    let monitor = Monitor::new(servers, graphite, handle.clone());
 
     let mut sock_file = None;
     if let Some(http_addr) = args.value_of("web-bind") {
@@ -115,7 +115,7 @@ fn main() {
             .expect("fail to set tcp congestion algorithm. \
                      check tcp_allowed_congestion_control?");
     }
-    handle.spawn(monitor.monitor_delay(probe));
+    handle.spawn(monitor.monitor_delay(probe, handle.clone()));
     let shared_buf = SharedBuf::new(8192);
     let server = listener.incoming().for_each(move |(sock, addr)| {
         debug!("incoming {}", addr);

@@ -3,7 +3,7 @@ mod graphite;
 use std;
 use std::io;
 use std::net::SocketAddr;
-use std::time::{Instant, Duration};
+use std::time::{Instant, Duration, SystemTime};
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use rand::{self, Rng};
@@ -151,18 +151,24 @@ fn test_all(monitor: Monitor, init: bool)
 // send graphite metrics if need
 fn send_metrics(monitor: Monitor)
         -> impl Future<Item=Monitor, Error=()> {
-    let handle = monitor.handle();
-    let servers = monitor.servers();
     if let Some(ref addr) = monitor.graphite {
+        let handle = monitor.handle();
+        let servers = monitor.servers();
+        let now = Some(SystemTime::now());
         let records = servers.iter().flat_map(|server| {
             let delay = server.delay().map(|t| {
-                let ms = t.millis() as i32;
-                Record::new(server.graphite_path("delay"), ms, None)
+                let ms = t.millis() as u64;
+                Record::new(server.graphite_path("delay"), ms, now)
             });
             let score = server.score().map(|s| {
-                Record::new(server.graphite_path("score"), s as i32, None)
+                Record::new(server.graphite_path("score"), s as u64, now)
             });
-            vec![delay, score]
+            let traffic = server.traffic();
+            let tx_bytes = Record::new(server.graphite_path("tx_bytes"),
+                                       traffic.tx_bytes as u64, now);
+            let rx_bytes = Record::new(server.graphite_path("rx_bytes"),
+                                       traffic.rx_bytes as u64, now);
+            vec![delay, score, Some(tx_bytes), Some(rx_bytes)]
         }).filter_map(|v| v);
         let mut buf = Vec::new();
         write_records(&mut buf, records).unwrap();

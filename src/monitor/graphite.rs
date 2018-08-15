@@ -5,12 +5,12 @@ use std::time::SystemTime;
 #[derive(Clone, Debug)]
 pub struct Record {
     path: String,
-    value: i32,
+    value: u64,
     time: Option<SystemTime>,
 }
 
 impl Record {
-    pub fn new(path: String, value: i32, time: Option<SystemTime>) -> Self {
+    pub fn new(path: String, value: u64, time: Option<SystemTime>) -> Self {
         if !path.is_ascii() || path.contains(' ') || path.contains('\n') {
             panic!("Graphite path contains space, line break, \
                     or non-ASCII characters.");

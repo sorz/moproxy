@@ -103,7 +103,7 @@
          <td><span title="throughput"
              >${throughput}</span></td>
          </tr>`;
-      if (server.delay == null)
+      if (server.status.delay == null)
         row.className = 'offline';
       return row;
     }

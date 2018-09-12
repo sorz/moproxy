@@ -7,7 +7,6 @@ use std::time::Duration;
 use std::net::SocketAddr;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Handle;
-use tokio_io::io::write_all;
 use futures::{future, Future};
 
 use tcp::{get_original_dest, get_original_dest6};
@@ -117,19 +116,10 @@ impl NewClient {
         let pending_data = pending_data.map(|v| RcBox::new(v));
         let conn = try_connect_all(dest.clone(), list, n_parallel,
                                    wait_response, pending_data, handle);
-        let client = conn.map_err(|_| {
-            warn!("all proxy server down")
-        }).and_then(move |(server, right, left_data)| {
+        let client = conn.map(move |(server, right)| {
             info!("{} => {} via {}", src, dest, server.tag);
-            let buf = left_data.unwrap_or_else(|| {
-                vec![].into_boxed_slice()
-            });
-            write_all(left, buf).map_err(|err| {
-                warn!("fail to write to left: {}", err)
-            }).map(|(left, _buf)| {
-                ConnectedClient { left, right, dest, server }
-            })
-        });
+            ConnectedClient { left, right, dest, server }
+        }).map_err(|_| warn!("all proxy server down"));
         Box::new(client)
     }
 }

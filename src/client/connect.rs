@@ -1,6 +1,6 @@
 use std::cmp;
 use std::sync::Arc;
-use std::io::{self, ErrorKind};
+use std::io::{self, Read, ErrorKind};
 use std::iter::FromIterator;
 use std::collections::VecDeque;
 use tokio_core::net::TcpStream;
@@ -38,7 +38,7 @@ fn try_connect(dest: &Destination, server: Arc<ProxyServer>,
 }
 
 impl Future for TryConnect {
-    type Item = (Arc<ProxyServer>, TcpStream);
+    type Item = (Arc<ProxyServer>, TcpStream, Option<Box<[u8]>>);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -50,7 +50,7 @@ impl Future for TryConnect {
             TryConnectState::Connecting { ref mut connect, wait_response } => {
                 let conn = try_ready!(connect.poll());
                 if !wait_response || conn.poll_read().is_ready() {
-                    return Ok((self.server.clone(), conn).into());
+                    return Ok((self.server.clone(), conn, None).into());
                 } else {
                     Some(TryConnectState::Waiting {
                         conn: Some(conn),
@@ -60,8 +60,16 @@ impl Future for TryConnect {
             // waiting for response data
             TryConnectState::Waiting { ref mut conn } => {
                 if conn.as_mut().unwrap().poll_read().is_ready() {
-                    let conn = conn.take().unwrap();
-                    return Ok((self.server.clone(), conn).into());
+                    let mut conn = conn.take().unwrap();
+                    let mut buf = vec![0; 4096];
+                    let len = conn.read(&mut buf)?;
+                    if len == 0 {
+                        return Err(io::Error::new(ErrorKind::UnexpectedEof,
+                                                  "no response"));
+                    }
+                    buf.truncate(len);
+                    let buf = Some(buf.into_boxed_slice());
+                    return Ok((self.server.clone(), conn, buf).into());
                 }
                 None
             },
@@ -103,7 +111,7 @@ pub fn try_connect_all(dest: Destination, servers: Vec<Arc<ProxyServer>>,
 }
 
 impl Future for TryConnectAll {
-    type Item = (Arc<ProxyServer>, TcpStream);
+    type Item = (Arc<ProxyServer>, TcpStream, Option<Box<[u8]>>);
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, ()> {

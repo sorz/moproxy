@@ -60,8 +60,15 @@ impl Future for TryConnect {
             // waiting for response data
             TryConnectState::Waiting { ref mut conn } => {
                 if conn.as_mut().unwrap().poll_read().is_ready() {
-                    let conn = conn.take().unwrap();
-                    return Ok((self.server.clone(), conn).into());
+                    let mut conn = conn.take().unwrap();
+                    let mut buf = [0; 8];
+                    let len = conn.peek(&mut buf)?;
+                    return if len == 0 {
+                        Err(io::Error::new(
+                            ErrorKind::UnexpectedEof, "not response data"))
+                    } else {
+                        Ok((self.server.clone(), conn).into())
+                    };
                 }
                 None
             },

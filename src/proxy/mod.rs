@@ -55,6 +55,7 @@ struct ProxyServerStatus {
     traffic: Traffic,
     conn_alive: u32,
     conn_total: u32,
+    conn_error: u32,
 }
 
 impl Hash for ProxyServer {
@@ -207,6 +208,10 @@ impl ProxyServer {
         self.status().conn_total
     }
 
+    pub fn conn_error(&self) -> u32 {
+        self.status().conn_error
+    }
+
     pub fn set_delay(&self, delay: Option<Duration>) {
         self.status().delay = delay;
         self.status().score =
@@ -241,8 +246,11 @@ impl ProxyServer {
         self.status().conn_total += 1;
     }
 
-    pub fn update_stats_conn_close(&self) {
+    pub fn update_stats_conn_close(&self, has_error: bool) {
         self.status().conn_alive -= 1;
+        if has_error {
+            self.status().conn_error += 1;
+        }
     }
 
     pub fn traffic(&self) -> Traffic {

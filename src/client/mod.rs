@@ -158,13 +158,13 @@ impl ConnectedClient {
         pipe(left, right, server.clone(), shared_buf)
             .then(move |result| match result {
                 Ok(amt) => {
-                    server.update_stats_conn_close();
+                    server.update_stats_conn_close(false);
                     debug!("tx {}, rx {} bytes ({} => {})",
                         amt.tx_bytes, amt.rx_bytes, server.tag, dest);
                     Ok(())
                 },
                 Err(_) => {
-                    server.update_stats_conn_close();
+                    server.update_stats_conn_close(true);
                     warn!("{} (=> {}) close with error",
                         server.tag, dest);
                     Err(())

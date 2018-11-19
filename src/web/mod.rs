@@ -89,8 +89,7 @@ where I: Stream<Item=(S, A), Error=io::Error> + 'static,
         debug!("web server connected with {:?}", addr);
         conn
     });
-    let mut http = Http::new();
-    http.executor(handle.remote().clone());
+    let http = Http::new().with_executor(handle.remote().clone());
     let server = hyper::server::Builder::new(incoming, http)
         .serve(new_service);
 

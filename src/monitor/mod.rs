@@ -146,19 +146,15 @@ fn send_metrics(monitor: Monitor, handle: Handle)
         let servers = monitor.servers();
         let now = Some(SystemTime::now());
         let records = servers.iter().flat_map(|server| {
-            let delay = server.delay().map(|t| {
-                let ms = t.millis() as u64;
-                Record::new(server.graphite_path("delay"), ms, now)
-            });
-            let score = server.score().map(|s| {
-                Record::new(server.graphite_path("score"), s as u64, now)
-            });
+            let r = |path, value|
+                Record::new(server.graphite_path(path), value , now);
             let traffic = server.traffic();
-            let tx_bytes = Record::new(server.graphite_path("tx_bytes"),
-                                       traffic.tx_bytes as u64, now);
-            let rx_bytes = Record::new(server.graphite_path("rx_bytes"),
-                                       traffic.rx_bytes as u64, now);
-            vec![delay, score, Some(tx_bytes), Some(rx_bytes)]
+            vec![
+                server.delay().map(|t| r("delay", t.millis() as u64)),
+                server.score().map(|s| r("score", s as u64)),
+                Some(r("tx_bytes", traffic.tx_bytes as u64)),
+                Some(r("rx_bytes", traffic.rx_bytes as u64)),
+            ]
         }).filter_map(|v| v);
         let mut buf = Vec::new();
         write_records(&mut buf, records).unwrap();

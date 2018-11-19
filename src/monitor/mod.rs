@@ -154,6 +154,8 @@ fn send_metrics(monitor: Monitor, handle: Handle)
                 server.score().map(|s| r("score", s as u64)),
                 Some(r("tx_bytes", traffic.tx_bytes as u64)),
                 Some(r("rx_bytes", traffic.rx_bytes as u64)),
+                Some(r("conns.total", server.conn_total() as u64)),
+                Some(r("conns.alive", server.conn_alive() as u64)),
             ]
         }).filter_map(|v| v);
         let mut buf = Vec::new();

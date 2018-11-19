@@ -199,6 +199,14 @@ impl ProxyServer {
         self.status().score
     }
 
+    pub fn conn_alive(&self) -> u32 {
+        self.status().conn_alive
+    }
+
+    pub fn conn_total(&self) -> u32 {
+        self.status().conn_total
+    }
+
     pub fn set_delay(&self, delay: Option<Duration>) {
         self.status().delay = delay;
         self.status().score =

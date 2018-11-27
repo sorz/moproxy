@@ -9,6 +9,7 @@ extern crate futures;
 extern crate tokio_core;
 #[macro_use]
 extern crate tokio_io;
+#[cfg(feature = "web_console")]
 extern crate hyper;
 extern crate nix;
 extern crate rand;
@@ -16,6 +17,7 @@ extern crate libc;
 pub mod client;
 pub mod monitor;
 pub mod proxy;
+#[cfg(feature = "web_console")]
 pub mod web;
 pub mod tcp;
 

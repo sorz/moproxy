@@ -29,6 +29,7 @@ use moproxy::proxy::copy::SharedBuf;
 use moproxy::proxy::ProxyProto;
 use moproxy::client::{NewClient, Connectable};
 use moproxy::tcp::set_congestion;
+#[cfg(feature = "web_console")]
 use moproxy::web;
 
 
@@ -83,7 +84,11 @@ fn main() {
     let handle = lp.handle();
 
     let mut sock_file = None;
+
     if let Some(http_addr) = args.value_of("web-bind") {
+        if !cfg!(feature = "web_console") {
+            panic!("web console has been disabled during compiling");
+        };
         let monitor = monitor.clone();
         if http_addr.starts_with("/") {
             let sock = AutoRemoveFile::new(&http_addr);
@@ -91,8 +96,11 @@ fn main() {
                 .expect("fail to bind web server")
                 .incoming();
             sock_file = Some(sock);
-            let serv = web::run_server(incoming, monitor, &handle);
-            handle.spawn(serv);
+            #[cfg(feature = "web_console")]
+            {
+                let serv = web::run_server(incoming, monitor, &handle);
+                handle.spawn(serv);
+            }
         } else {
             // FIXME: remove duplicate code
             let addr = http_addr.parse()
@@ -100,8 +108,11 @@ fn main() {
             let incoming = TcpListener::bind(&addr, &handle)
                 .expect("fail to bind web server")
                 .incoming();
-            let serv = web::run_server(incoming, monitor, &handle);
-            handle.spawn(serv);
+            #[cfg(feature = "web_console")]
+            {
+                let serv = web::run_server(incoming, monitor, &handle);
+                handle.spawn(serv);
+            }
         }
         info!("http run on {}", http_addr);
     }

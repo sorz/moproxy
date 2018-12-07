@@ -4,7 +4,9 @@ use std::io::{self, Read, BufReader, ErrorKind};
 use futures::{future, Future};
 use tokio_core::net::TcpStream;
 use tokio_io::io::{write_all, read_until};
-use proxy::{Destination, Address};
+use log::{debug, warn};
+
+use crate::proxy::{Destination, Address};
 
 
 pub fn handshake<T>(stream: TcpStream, addr: &Destination,

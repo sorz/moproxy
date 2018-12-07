@@ -5,9 +5,11 @@ use std::iter::FromIterator;
 use std::collections::VecDeque;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::{Handle, Timeout};
-use futures::{Future, Poll, Async};
-use proxy::{ProxyServer, Destination, Connect};
-use RcBox;
+use futures::{Future, Poll, Async, try_ready};
+use log::info;
+
+use crate::proxy::{ProxyServer, Destination, Connect};
+use crate::RcBox;
 
 struct TryConnect {
     server: Arc<ProxyServer>,
@@ -60,7 +62,7 @@ impl Future for TryConnect {
             // waiting for response data
             TryConnectState::Waiting { ref mut conn } => {
                 if conn.as_mut().unwrap().poll_read().is_ready() {
-                    let mut conn = conn.take().unwrap();
+                    let conn = conn.take().unwrap();
                     let mut buf = [0; 8];
                     let len = conn.peek(&mut buf)?;
                     return if len == 0 {

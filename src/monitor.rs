@@ -12,8 +12,12 @@ use tokio_core::net::TcpStream;
 use tokio_io::io::{read_exact, write_all};
 use futures::{future, Future, IntoFuture};
 use futures::future::Loop;
-use proxy::ProxyServer;
-use ToMillis;
+use log::{debug, warn};
+
+use crate::{
+    proxy::ProxyServer,
+    ToMillis,
+};
 use self::traffic::Meter;
 use self::graphite::{Record, write_records};
 pub use self::traffic::Throughput;

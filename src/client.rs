@@ -8,15 +8,18 @@ use std::net::SocketAddr;
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Handle;
 use futures::{future, Future};
+use log::{debug, info, warn};
 
-use tcp::{get_original_dest, get_original_dest6};
-use proxy::{ProxyServer, Destination};
-use proxy::copy::{pipe, SharedBuf};
-use monitor::ServerList;
-use client::connect::try_connect_all;
-use client::read::read_with_timeout;
-use client::tls::parse_client_hello;
-use RcBox;
+use crate::{
+    tcp::{get_original_dest, get_original_dest6},
+    proxy::{ProxyServer, Destination},
+    proxy::copy::{pipe, SharedBuf},
+    monitor::ServerList,
+    client::connect::try_connect_all,
+    client::read::read_with_timeout,
+    client::tls::parse_client_hello,
+    RcBox,
+};
 
 
 #[derive(Debug)]

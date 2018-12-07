@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use futures::Future;
 use tokio_core::net::TcpStream;
 use tokio_io::io::{read_exact, write_all};
-use proxy::{Destination, Address};
+use crate::proxy::{Destination, Address};
 
 
 pub fn handshake<T>(stream: TcpStream, addr: &Destination, data: Option<T>)

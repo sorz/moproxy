@@ -1,34 +1,25 @@
-extern crate net2;
-extern crate futures;
-extern crate tokio_core;
-extern crate tokio_io;
-extern crate tokio_uds;
-extern crate env_logger;
-extern crate ini;
-#[macro_use]
-extern crate clap;
-#[macro_use]
-extern crate log;
-extern crate moproxy;
-
-use std::fs;
-use std::env;
-use std::io::Write;
-use std::path::Path;
-use std::net::SocketAddr;
+use std::{
+    fs,
+    env,
+    io::Write,
+    path::Path,
+    net::SocketAddr,
+};
 use ini::Ini;
 use futures::{Future, Stream, future::Either};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
 use tokio_uds::UnixListener;
-use log::LevelFilter;
+use log::{LevelFilter, info, debug, warn};
+use clap::load_yaml;
 
-use moproxy::monitor::Monitor;
-use moproxy::proxy::ProxyServer;
-use moproxy::proxy::copy::SharedBuf;
-use moproxy::proxy::ProxyProto;
-use moproxy::client::{NewClient, Connectable};
-use moproxy::tcp::set_congestion;
+use moproxy::{
+    monitor::Monitor,
+    proxy::{ProxyServer, ProxyProto},
+    proxy::copy::SharedBuf,
+    client::{NewClient, Connectable},
+    tcp::set_congestion,
+};
 #[cfg(feature = "web_console")]
 use moproxy::web;
 

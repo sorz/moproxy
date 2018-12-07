@@ -1,19 +1,24 @@
-use std::io;
-use std::fmt::Debug;
-use std::sync::Arc;
-use std::time::{Instant, Duration};
+use std::{
+    io,
+    fmt::Debug,
+    sync::Arc,
+    time::{Instant, Duration},
+};
 use futures::{Future, Stream};
 use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
-use hyper::{Body, Request, Response, StatusCode, Method};
-use hyper::service::service_fn_ok;
-use hyper::server::conn::Http;
-use hyper;
-use serde_json;
+use hyper::{
+    Body, Request, Response, StatusCode, Method,
+    service::service_fn_ok,
+    server::conn::Http,
+};
+use serde_derive::Serialize;
+use log::{debug, error};
 
-use monitor::{Monitor, Throughput};
-use proxy::ProxyServer;
-
+use crate::{
+    monitor::{Monitor, Throughput},
+    proxy::ProxyServer,
+};
 
 #[derive(Debug, Serialize)]
 struct ServerStatus {
@@ -47,7 +52,7 @@ fn response(req: Request<Body>, start_time: &Instant, monitor: &Monitor)
     match (req.method(), req.uri().path()) {
         (&Method::GET, "/") => resp
             .header("Content-Type", "text/html")
-            .body(include_str!("index.html").into()),
+            .body(include_str!("web/index.html").into()),
 
         (&Method::GET, "/version") => resp
             .header("Content-Type", "text/plain")

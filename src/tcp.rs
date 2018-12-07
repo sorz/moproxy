@@ -1,8 +1,10 @@
-use std::mem;
-use std::ffi::OsStr;
-use std::io::{self, ErrorKind};
-use std::net::{SocketAddrV4, SocketAddrV6};
-use std::os::unix::io::AsRawFd;
+use std::{
+    mem,
+    ffi::OsStr,
+    io::{self, ErrorKind},
+    net::{SocketAddrV4, SocketAddrV6},
+    os::unix::io::AsRawFd,
+};
 use nix::{self, sys};
 use libc::{self, c_void, socklen_t, setsockopt, IPPROTO_TCP, TCP_CONGESTION};
 

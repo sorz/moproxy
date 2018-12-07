@@ -1,14 +1,18 @@
-use std::fmt;
-use std::ops::Neg;
-use std::rc::Rc;
-use std::sync::Arc;
-use std::cell::RefCell;
-use std::net::Shutdown;
-use std::io::{self, Read, Write};
-use std::io::ErrorKind::WouldBlock;
+use std::{
+    fmt,
+    ops::Neg,
+    rc::Rc,
+    sync::Arc,
+    cell::RefCell,
+    net::Shutdown,
+    io::{self, Read, Write},
+    io::ErrorKind::WouldBlock,
+};
 use futures::{Async, Poll, Future};
 use tokio_core::net::TcpStream;
-use proxy::{ProxyServer, Traffic};
+use log::{debug, info};
+
+use crate::proxy::{ProxyServer, Traffic};
 use self::Side::{Left, Right};
 
 #[derive(Debug, Clone)]

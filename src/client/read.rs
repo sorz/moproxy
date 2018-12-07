@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use futures::{Future, Poll};
 use tokio_core::reactor::{Handle, Timeout};
-use tokio_io::AsyncRead;
+use tokio_io::{AsyncRead, try_nb};
 
 #[derive(Debug)]
 enum State<R, T> {

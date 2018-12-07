@@ -1,18 +1,23 @@
 pub mod socks5;
 pub mod http;
 pub mod copy;
-use std::io;
-use std::fmt;
-use std::ops::{Add, AddAssign};
-use std::sync::{Mutex, MutexGuard};
-use std::str::FromStr;
-use std::time::Duration;
-use std::net::{SocketAddr, IpAddr};
-use std::hash::{Hash, Hasher};
+use std::{
+    io,
+    fmt,
+    ops::{Add, AddAssign},
+    sync::{Mutex, MutexGuard},
+    str::FromStr,
+    time::Duration,
+    net::{SocketAddr, IpAddr},
+    hash::{Hash, Hasher},
+};
 use futures::{Future, future::Either};
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Handle;
-use ToMillis;
+use serde_derive::Serialize;
+use log::{debug, warn};
+
+use crate::ToMillis;
 
 const DEFAULT_MAX_WAIT_MILLILS: u64 = 4_000;
 const GRAPHITE_PATH_PREFIX: &'static str = "moproxy.proxy_servers";

@@ -1,19 +1,3 @@
-#[macro_use]
-extern crate log;
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
-extern crate serde;
-#[macro_use]
-extern crate futures;
-extern crate tokio_core;
-#[macro_use]
-extern crate tokio_io;
-#[cfg(feature = "web_console")]
-extern crate hyper;
-extern crate nix;
-extern crate rand;
-extern crate libc;
 pub mod client;
 pub mod monitor;
 pub mod proxy;

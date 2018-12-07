@@ -1,7 +1,10 @@
-use std::time::Instant;
-use std::ops::Add;
-use std::collections::VecDeque;
-use proxy::Traffic;
+use std::{
+    time::Instant,
+    ops::Add,
+    collections::VecDeque,
+};
+use serde_derive::Serialize;
+use crate::proxy::Traffic;
 
 /// Monitor & caculate throughtput using traffic samples.
 #[derive(Debug)]

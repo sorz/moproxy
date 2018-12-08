@@ -1,28 +1,28 @@
-pub mod socks5;
-pub mod http;
 pub mod copy;
+pub mod http;
+pub mod socks5;
+use futures::{future::Either, Future};
+use log::{debug, warn};
+use serde_derive::Serialize;
 use std::{
-    io,
     fmt,
-    ops::{Add, AddAssign},
-    sync::{Mutex, MutexGuard},
-    str::FromStr,
-    time::Duration,
-    net::{SocketAddr, IpAddr},
     hash::{Hash, Hasher},
+    io,
+    net::{IpAddr, SocketAddr},
+    ops::{Add, AddAssign},
+    str::FromStr,
+    sync::{Mutex, MutexGuard},
+    time::Duration,
 };
-use futures::{Future, future::Either};
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Handle;
-use serde_derive::Serialize;
-use log::{debug, warn};
 
 use crate::ToMillis;
 
 const DEFAULT_MAX_WAIT_MILLILS: u64 = 4_000;
 const GRAPHITE_PATH_PREFIX: &'static str = "moproxy.proxy_servers";
 
-pub type Connect = Future<Item=TcpStream, Error=io::Error>;
+pub type Connect = Future<Item = TcpStream, Error = io::Error>;
 
 #[derive(Hash, Eq, PartialEq, Copy, Clone, Debug, Serialize)]
 pub enum ProxyProto {
@@ -73,9 +73,7 @@ impl Hash for ProxyServer {
 
 impl PartialEq for ProxyServer {
     fn eq(&self, other: &ProxyServer) -> bool {
-        self.addr == other.addr &&
-        self.proto == other.proto &&
-        self.tag == other.tag
+        self.addr == other.addr && self.proto == other.proto && self.tag == other.tag
     }
 }
 
@@ -120,7 +118,10 @@ pub struct Traffic {
 
 impl Into<Traffic> for (usize, usize) {
     fn into(self) -> Traffic {
-        Traffic { tx_bytes: self.0, rx_bytes: self.1 }
+        Traffic {
+            tx_bytes: self.0,
+            rx_bytes: self.1,
+        }
     }
 }
 
@@ -147,34 +148,47 @@ impl ProxyProto {
     }
 
     pub fn http(connect_with_payload: bool) -> Self {
-        ProxyProto::Http { connect_with_payload }
+        ProxyProto::Http {
+            connect_with_payload,
+        }
     }
 }
 
 impl ProxyServer {
-    pub fn new(addr: SocketAddr, proto: ProxyProto, test_dns: SocketAddr,
-               tag: Option<&str>, score_base: Option<i32>) -> ProxyServer {
+    pub fn new(
+        addr: SocketAddr,
+        proto: ProxyProto,
+        test_dns: SocketAddr,
+        tag: Option<&str>,
+        score_base: Option<i32>,
+    ) -> ProxyServer {
         ProxyServer {
-            addr, proto, test_dns,
+            addr,
+            proto,
+            test_dns,
             tag: match tag {
                 None => format!("{}", addr.port()),
                 Some(s) => {
                     if !s.is_ascii() || s.contains(' ') || s.contains('\n') {
-                        panic!("Tag \"{}\" contains white spaces, line \
-                               breaks, or non-ASCII characters.");
+                        panic!(
+                            "Tag \"{}\" contains white spaces, line \
+                             breaks, or non-ASCII characters."
+                        );
                     }
                     String::from(s)
-                },
-            }.into_boxed_str(),
+                }
+            }
+            .into_boxed_str(),
             max_wait: Duration::from_millis(DEFAULT_MAX_WAIT_MILLILS),
             score_base: score_base.unwrap_or(0),
             status: Default::default(),
         }
     }
 
-    pub fn connect<T>(&self, addr: Destination, data: Option<T>,
-                   handle: &Handle) -> Box<Connect>
-    where T: AsRef<[u8]> + 'static {
+    pub fn connect<T>(&self, addr: Destination, data: Option<T>, handle: &Handle) -> Box<Connect>
+    where
+        T: AsRef<[u8]> + 'static,
+    {
         let proto = self.proto;
         let conn = TcpStream::connect(&self.addr, handle);
         let handshake = conn.and_then(move |stream| {
@@ -183,11 +197,10 @@ impl ProxyServer {
                 warn!("fail to set nodelay: {}", e);
             };
             match proto {
-                ProxyProto::Socks5 =>
-                    Either::A(socks5::handshake(stream, &addr, data)),
-                ProxyProto::Http { connect_with_payload } =>
-                    Either::B(http::handshake(stream, &addr, data,
-                                    connect_with_payload)),
+                ProxyProto::Socks5 => Either::A(socks5::handshake(stream, &addr, data)),
+                ProxyProto::Http {
+                    connect_with_payload,
+                } => Either::B(http::handshake(stream, &addr, data, connect_with_payload)),
             }
         });
         Box::new(handshake)
@@ -219,8 +232,7 @@ impl ProxyServer {
 
     pub fn set_delay(&self, delay: Option<Duration>) {
         self.status().delay = delay;
-        self.status().score =
-            delay.map(|t| t.millis() as i32 + self.score_base);
+        self.status().score = delay.map(|t| t.millis() as i32 + self.score_base);
     }
 
     pub fn update_delay(&self, delay: Option<Duration>) {
@@ -229,7 +241,8 @@ impl ProxyServer {
         let score = delay
             .map(|t| t.millis() as i32 + self.score_base)
             .map(|new| {
-                let old = status.score
+                let old = status
+                    .score
                     .unwrap_or_else(|| self.max_wait.millis() as i32);
                 // give more weight to delays exceed the mean, to
                 // punish for network jitter.
@@ -263,7 +276,8 @@ impl ProxyServer {
     }
 
     pub fn graphite_path(&self, suffix: &str) -> String {
-        format!("{}.{}.{}",
+        format!(
+            "{}.{}.{}",
             GRAPHITE_PATH_PREFIX,
             self.tag.replace('.', "_"),
             suffix
@@ -313,4 +327,3 @@ impl FromStr for ProxyProto {
         }
     }
 }
-

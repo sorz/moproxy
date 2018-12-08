@@ -8,15 +8,11 @@ use std::time::Duration;
 
 use futures::{Future, Poll};
 use tokio_core::reactor::{Handle, Timeout};
-use tokio_io::{AsyncRead, try_nb};
+use tokio_io::{try_nb, AsyncRead};
 
 #[derive(Debug)]
 enum State<R, T> {
-    Pending {
-        rd: R,
-        buf: T,
-        t: Timeout,
-    },
+    Pending { rd: R, buf: T, t: Timeout },
     Empty,
 }
 
@@ -28,14 +24,19 @@ enum State<R, T> {
 ///
 /// MODIFIED: When timed out, the future will resolve as normal expect the
 /// number of bytes is zero.
-pub fn read_with_timeout<R, T>(rd: R, buf: T, t: Duration,
-                               handle: &Handle) -> Read<R, T>
-    where R: AsyncRead,
-          T: AsMut<[u8]>
+pub fn read_with_timeout<R, T>(rd: R, buf: T, t: Duration, handle: &Handle) -> Read<R, T>
+where
+    R: AsyncRead,
+    T: AsMut<[u8]>,
 {
-    let t = Timeout::new(t, handle)
-        .expect("error on get timeout from reactor");
-    Read { state: State::Pending { rd: rd, buf: buf, t: t } }
+    let t = Timeout::new(t, handle).expect("error on get timeout from reactor");
+    Read {
+        state: State::Pending {
+            rd: rd,
+            buf: buf,
+            t: t,
+        },
+    }
 }
 
 /// A future which can be used to easily read available number of bytes to fill
@@ -48,21 +49,26 @@ pub struct Read<R, T> {
 }
 
 impl<R, T> Future for Read<R, T>
-    where R: AsyncRead,
-          T: AsMut<[u8]>
+where
+    R: AsyncRead,
+    T: AsMut<[u8]>,
 {
     type Item = (R, T, usize);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<(R, T, usize), io::Error> {
         let nread = match self.state {
-            State::Pending { ref mut rd, ref mut buf, ref mut t } => {
+            State::Pending {
+                ref mut rd,
+                ref mut buf,
+                ref mut t,
+            } => {
                 if t.poll()?.is_ready() {
                     0
                 } else {
                     try_nb!(rd.read(&mut buf.as_mut()[..]))
                 }
-            },
+            }
             State::Empty => panic!("poll a Read after it's done"),
         };
 

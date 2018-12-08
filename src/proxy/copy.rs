@@ -1,22 +1,25 @@
+use futures::{Async, Future, Poll};
+use log::{debug, info};
 use std::{
+    cell::RefCell,
     fmt,
+    io::ErrorKind::WouldBlock,
+    io::{self, Read, Write},
+    net::Shutdown,
     ops::Neg,
     rc::Rc,
     sync::Arc,
-    cell::RefCell,
-    net::Shutdown,
-    io::{self, Read, Write},
-    io::ErrorKind::WouldBlock,
 };
-use futures::{Async, Poll, Future};
 use tokio_core::net::TcpStream;
-use log::{debug, info};
 
-use crate::proxy::{ProxyServer, Traffic};
 use self::Side::{Left, Right};
+use crate::proxy::{ProxyServer, Traffic};
 
 #[derive(Debug, Clone)]
-enum Side { Left, Right }
+enum Side {
+    Left,
+    Right,
+}
 
 impl fmt::Display for Side {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -55,11 +58,10 @@ impl SharedBuf {
 
     /// Take the inner buffer or allocate a new one.
     fn take(&self) -> Box<[u8]> {
-        self.buf.borrow_mut().take()
-            .unwrap_or_else(|| {
-                debug!("allocate new buffer");
-                vec![0; self.size].into_boxed_slice()
-            })
+        self.buf.borrow_mut().take().unwrap_or_else(|| {
+            debug!("allocate new buffer");
+            vec![0; self.size].into_boxed_slice()
+        })
     }
 
     fn is_empty(&self) -> bool {
@@ -85,9 +87,11 @@ struct StreamWithBuffer {
 impl StreamWithBuffer {
     pub fn new(stream: TcpStream, shared_buf: SharedBuf) -> Self {
         StreamWithBuffer {
-            stream, shared_buf,
+            stream,
+            shared_buf,
             buf: None,
-            pos: 0, cap: 0,
+            pos: 0,
+            cap: 0,
             read_eof: false,
             all_done: false,
         }
@@ -136,8 +140,10 @@ impl StreamWithBuffer {
         let result = (|buf: &Box<[u8]>| {
             let n = writer.write(&buf[self.pos..self.cap])?;
             if n == 0 {
-                return Err(io::Error::new(io::ErrorKind::WriteZero,
-                                          "write zero byte into writer"));
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "write zero byte into writer",
+                ));
             } else {
                 self.pos += n;
             }
@@ -148,7 +154,6 @@ impl StreamWithBuffer {
     }
 }
 
-
 // Pipe two TcpStream in both direction,
 // update traffic amount to ProxyServer on the fly.
 pub struct BiPipe {
@@ -158,9 +163,12 @@ pub struct BiPipe {
     traffic: Traffic,
 }
 
-pub fn pipe(left: TcpStream, right: TcpStream, server: Arc<ProxyServer>,
-            shared_buf: SharedBuf)
-        -> BiPipe {
+pub fn pipe(
+    left: TcpStream,
+    right: TcpStream,
+    server: Arc<ProxyServer>,
+    shared_buf: SharedBuf,
+) -> BiPipe {
     BiPipe {
         left: StreamWithBuffer::new(left, shared_buf.clone()),
         right: StreamWithBuffer::new(right, shared_buf),
@@ -190,33 +198,37 @@ impl BiPipe {
         loop {
             // read something if buffer is empty
             if reader.is_empty() && !reader.read_eof {
-                let n = try_nb_log!(reader.read_to_buffer(),
-                        "error on read from {}: {}", side);
+                let n = try_nb_log!(reader.read_to_buffer(), "error on read from {}: {}", side);
                 let amt = match side {
                     Left => (n, 0),
                     Right => (0, n),
-                }.into();
+                }
+                .into();
                 self.server.add_traffic(amt);
                 self.traffic = self.traffic + amt;
             }
             // write out if buffer is not empty
             while !reader.is_empty() {
-                try_nb_log!(reader.write_to(&mut writer.stream),
-                        "error on write to {}: {}", -side);
+                try_nb_log!(
+                    reader.write_to(&mut writer.stream),
+                    "error on write to {}: {}",
+                    -side
+                );
             }
             // flush and does half close if seen eof
             if reader.read_eof {
-                try_nb_log!(writer.stream.flush(),
-                        "error on flush {}: {}", -side);
-                try_nb_log!(writer.stream.shutdown(Shutdown::Write),
-                        "error on shutdown {}: {}", -side);
+                try_nb_log!(writer.stream.flush(), "error on flush {}: {}", -side);
+                try_nb_log!(
+                    writer.stream.shutdown(Shutdown::Write),
+                    "error on shutdown {}: {}",
+                    -side
+                );
                 reader.all_done = true;
-                return Ok(().into())
+                return Ok(().into());
             }
         }
     }
 }
-
 
 impl Future for BiPipe {
     type Item = Traffic;
@@ -236,4 +248,3 @@ impl Future for BiPipe {
         }
     }
 }
-

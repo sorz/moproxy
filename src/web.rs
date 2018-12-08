@@ -1,19 +1,17 @@
-use std::{
-    io,
-    fmt::Debug,
-    sync::Arc,
-    time::{Instant, Duration},
-};
 use futures::{Future, Stream};
+use hyper::{
+    server::conn::Http, service::service_fn_ok, Body, Method, Request, Response, StatusCode,
+};
+use log::{debug, error};
+use serde_derive::Serialize;
+use std::{
+    fmt::Debug,
+    io,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio_core::reactor::Handle;
 use tokio_io::{AsyncRead, AsyncWrite};
-use hyper::{
-    Body, Request, Response, StatusCode, Method,
-    service::service_fn_ok,
-    server::conn::Http,
-};
-use serde_derive::Serialize;
-use log::{debug, error};
 
 use crate::{
     monitor::{Monitor, Throughput},
@@ -33,21 +31,25 @@ struct Status {
     throughput: Throughput,
 }
 
-fn status_json(start_time: &Instant, monitor: &Monitor)
-        -> serde_json::Result<String> {
+fn status_json(start_time: &Instant, monitor: &Monitor) -> serde_json::Result<String> {
     let mut thps = monitor.throughputs();
     let throughput = thps.values().fold(Default::default(), |a, b| a + *b);
-    let servers = monitor.servers().into_iter().map(|server| ServerStatus {
-        throughput: thps.remove(&server), server,
-    }).collect();
+    let servers = monitor
+        .servers()
+        .into_iter()
+        .map(|server| ServerStatus {
+            throughput: thps.remove(&server),
+            server,
+        })
+        .collect();
     serde_json::to_string(&Status {
-        servers, throughput,
+        servers,
+        throughput,
         uptime: start_time.elapsed(),
     })
 }
 
-fn response(req: Request<Body>, start_time: &Instant, monitor: &Monitor)
-        -> Response<Body> {
+fn response(req: Request<Body>, start_time: &Instant, monitor: &Monitor) -> Response<Body> {
     let mut resp = Response::builder();
     match (req.method(), req.uri().path()) {
         (&Method::GET, "/") => resp
@@ -67,27 +69,32 @@ fn response(req: Request<Body>, start_time: &Instant, monitor: &Monitor)
                 resp.status(StatusCode::INTERNAL_SERVER_ERROR)
                     .header("Content-Type", "text/plain")
                     .body(format!("internal error: {}", e).into())
-            },
+            }
         },
-        _ => resp.status(StatusCode::NOT_FOUND)
-                .header("Content-Type", "text/plain")
-                .body("page not found".into()),
-    }.unwrap()
+        _ => resp
+            .status(StatusCode::NOT_FOUND)
+            .header("Content-Type", "text/plain")
+            .body("page not found".into()),
+    }
+    .unwrap()
 }
 
-pub fn run_server<I, S, A>(incoming: I, monitor: Monitor, handle: &Handle)
-        -> impl Future<Item=(), Error=()>
-where I: Stream<Item=(S, A), Error=io::Error> + 'static,
-      S: AsyncRead + AsyncWrite + Send + 'static,
-      A: Debug {
+pub fn run_server<I, S, A>(
+    incoming: I,
+    monitor: Monitor,
+    handle: &Handle,
+) -> impl Future<Item = (), Error = ()>
+where
+    I: Stream<Item = (S, A), Error = io::Error> + 'static,
+    S: AsyncRead + AsyncWrite + Send + 'static,
+    A: Debug,
+{
     handle.spawn(monitor.monitor_throughput(handle.clone()));
     let start_time = Instant::now();
 
     let new_service = move || {
         let monitor = monitor.clone();
-        service_fn_ok(move |req| {
-            response(req, &start_time, &monitor)
-        })
+        service_fn_ok(move |req| response(req, &start_time, &monitor))
     };
 
     let incoming = incoming.map(|(conn, addr)| {
@@ -95,8 +102,7 @@ where I: Stream<Item=(S, A), Error=io::Error> + 'static,
         conn
     });
     let http = Http::new().with_executor(handle.remote().clone());
-    let server = hyper::server::Builder::new(incoming, http)
-        .serve(new_service);
+    let server = hyper::server::Builder::new(incoming, http).serve(new_service);
 
     server.map_err(|err| error!("error on http server: {}", err))
 }

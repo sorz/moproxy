@@ -1,10 +1,6 @@
-use std::{
-    time::Instant,
-    ops::Add,
-    collections::VecDeque,
-};
-use serde_derive::Serialize;
 use crate::proxy::Traffic;
+use serde_derive::Serialize;
+use std::{collections::VecDeque, ops::Add, time::Instant};
 
 /// Monitor & caculate throughtput using traffic samples.
 #[derive(Debug)]
@@ -64,13 +60,17 @@ impl Meter {
     }
 
     pub fn add_sample<T>(&mut self, sample: T)
-    where T: Into<TrafficSample> {
+    where
+        T: Into<TrafficSample>,
+    {
         self.samples.truncate(1);
         self.samples.push_front(sample.into());
     }
 
     pub fn throughput<T>(&self, sample: T) -> Throughput
-    where T: Into<TrafficSample> {
+    where
+        T: Into<TrafficSample>,
+    {
         let current = sample.into();
         if let Some(oldest) = self.samples.back() {
             Throughput::from_samples(oldest, &current)
@@ -79,4 +79,3 @@ impl Meter {
         }
     }
 }
-

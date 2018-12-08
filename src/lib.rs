@@ -1,9 +1,9 @@
 pub mod client;
 pub mod monitor;
 pub mod proxy;
+pub mod tcp;
 #[cfg(feature = "web_console")]
 pub mod web;
-pub mod tcp;
 
 pub trait ToMillis {
     fn millis(&self) -> u32;
@@ -21,7 +21,9 @@ pub struct RcBox<T: ?Sized> {
 }
 impl<T: ?Sized> RcBox<T> {
     fn new(item: Box<T>) -> Self {
-        RcBox { item: std::rc::Rc::new(item) }
+        RcBox {
+            item: std::rc::Rc::new(item),
+        }
     }
 }
 impl<T: ?Sized> AsRef<T> for RcBox<T> {
@@ -31,7 +33,8 @@ impl<T: ?Sized> AsRef<T> for RcBox<T> {
 }
 impl<T: ?Sized> Clone for RcBox<T> {
     fn clone(&self) -> Self {
-        RcBox { item: self.item.clone() }
+        RcBox {
+            item: self.item.clone(),
+        }
     }
 }
-

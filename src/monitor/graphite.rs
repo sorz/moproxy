@@ -37,13 +37,17 @@ impl Graphite {
         }
     }
 
+    // Should always return ok
     pub fn write_records<R>(self, records: R, handle: &Handle) ->
-        impl Future<Item = Self, Error = io::Error>
+        impl Future<Item = Self, Error = ()>
     where R: Iterator<Item = Record> {
         let Graphite { server_addr, stream } = self;
         let addr = server_addr.clone();
-        let stream = stream.ok_or(Err(())).into_future()
-            .or_else(move |_: Result<TcpStream, ()>| TcpStream::connect2(&addr));
+        let stream = stream.ok_or(()).into_future()
+            .or_else(move |_| {
+                debug!("start new connection to graphite server");
+                TcpStream::connect2(&addr)
+            });
 
         let mut buf = Vec::new();
         let records = records
@@ -61,16 +65,19 @@ impl Graphite {
             .map(|(stream, _buf)| stream) // TODO: keep buf
             .select2(timeout)
             .map_err(|err| err.split().0)
-            .map(move |either| match either {
-                Either::A((stream, _)) => Graphite {
+            .then(move |result| match result {
+                Ok(Either::A((stream, _))) => Ok(Graphite {
                     server_addr,
                     stream: Some(stream),
-                },
-                Either::B(_) => panic!("timeout return ok"),
-            })
-            .map_err(|err| {
-                warn!("fail to send metrics: {}", err);
-                err
+                }),
+                Err(err) => {
+                    warn!("fail to send metrics: {}", err);
+                    Ok(Graphite {
+                        server_addr,
+                        stream: None,
+                    })
+                }
+                Ok(Either::B(_)) => panic!("timeout return ok")
             })
     }
 }

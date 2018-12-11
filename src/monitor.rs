@@ -28,8 +28,7 @@ pub type ServerList = Vec<Arc<ProxyServer>>;
 pub struct Monitor {
     servers: Arc<Mutex<ServerList>>,
     meters: Arc<Mutex<HashMap<Arc<ProxyServer>, Meter>>>,
-    graphite_: Arc<Option<Graphite>>,
-    graphite: Option<SocketAddr>,
+    graphite: Option<Arc<Graphite>>,
 }
 
 impl Monitor {
@@ -42,8 +41,7 @@ impl Monitor {
         Monitor {
             servers: Arc::new(Mutex::new(servers)),
             meters: Arc::new(Mutex::new(meters)),
-            graphite_: Arc::new(graphite.map(Graphite::new)),
-            graphite,
+            graphite: graphite.map(|addr| Arc::new(Graphite::new(addr))),
         }
     }
 
@@ -152,10 +150,11 @@ fn send_metrics(
     monitor: Monitor,
     handle: Handle,
 ) -> impl Future<Item = (Monitor, Handle), Error = ()> {
-    if let Some(ref addr) = monitor.graphite {
-        let servers = monitor.servers();
+    let servers_ = monitor.servers();
+    let Monitor { servers, meters, graphite } = monitor;
+    graphite.ok_or(()).into_future().and_then(|graphite| {
         let now = Some(SystemTime::now());
-        let records = servers
+        let records = servers_
             .iter()
             .flat_map(|server| {
                 let r = |path, value| Record::new(server.graphite_path(path), value, now);
@@ -171,28 +170,12 @@ fn send_metrics(
                 ]
             })
             .filter_map(|v| v);
-        let mut buf = Vec::new();
-        write_records(&mut buf, records).unwrap();
-
-        let timeout = Duration::from_secs(GRAPHITE_TIMEOUT_SECS);
-        let timeout = Timeout::new(timeout, &handle).expect("error on get timeout from reactor");
-
-        let send = TcpStream::connect(addr, &handle)
-            .and_then(move |conn| write_all(conn, buf))
-            .map(|_| ())
-            .select(timeout)
-            .map_err(|(err, _)| err)
-            .then(|result| {
-                if let Err(err) = result {
-                    warn!("fail to send metrics: {}", err);
-                }
-                Ok(())
-            });
-        Box::new(send) as Box<Future<Item = (), Error = ()>>
-    } else {
-        Box::new(Ok(()).into_future()) as Box<Future<Item = (), Error = ()>>
-    }
-    .map(|()| (monitor, handle))
+        graphite.write_records(records, &handle)
+    })
+    .map(|graphite| Some(graphite))
+    .or_else(|()| Ok(None))
+    .map(move |graphite| Monitor { servers, meters, graphite })
+    .map(move |monitor| (monitor, handle))
 }
 
 fn alive_test(

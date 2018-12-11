@@ -1,11 +1,78 @@
-use std::io::{self, Write};
-use std::time::SystemTime;
+use std::{
+    io::{self, Write},
+    time::{Duration, SystemTime},
+    net::SocketAddr,
+};
+use log::{debug, warn};
+use futures::{
+    Future, IntoFuture,
+    future::Either,
+};
+use tokio_core::{
+    net::TcpStream,
+    reactor::{Handle, Timeout},
+};
+use tokio_io::io::write_all;
+
+static GRAPHITE_TIMEOUT_SECS: u64 = 5;
+
+#[derive(Debug)]
+pub struct Graphite {
+    server_addr: SocketAddr,
+    stream: Option<TcpStream>,
+}
 
 #[derive(Clone, Debug)]
 pub struct Record {
     path: String,
     value: u64,
     time: Option<SystemTime>,
+}
+
+impl Graphite {
+    pub fn new(server_addr: SocketAddr) -> Self {
+        Graphite {
+            stream: None,
+            server_addr,
+        }
+    }
+
+    pub fn write_records<R>(self, records: R, handle: &Handle) ->
+        impl Future<Item = Self, Error = io::Error>
+    where R: Iterator<Item = Record> {
+        let Graphite { server_addr, stream } = self;
+        let addr = server_addr.clone();
+        let stream = stream.ok_or(Err(())).into_future()
+            .or_else(move |_: Result<TcpStream, ()>| TcpStream::connect2(&addr));
+
+        let mut buf = Vec::new();
+        let records = records
+            .map(|record| record.write_paintext(&mut buf))
+            .find(|result| result.is_err())
+            .unwrap_or(Ok(()));
+
+        let timeout = Duration::from_secs(GRAPHITE_TIMEOUT_SECS);
+        let timeout = Timeout::new(timeout, handle)
+            .expect("error on get timeout from reactor");
+
+        records.into_future()
+            .and_then(|_| stream)
+            .and_then(move |stream| write_all(stream, buf))
+            .map(|(stream, _buf)| stream) // TODO: keep buf
+            .select2(timeout)
+            .map_err(|err| err.split().0)
+            .map(move |either| match either {
+                Either::A((stream, _)) => Graphite {
+                    server_addr,
+                    stream: Some(stream),
+                },
+                Either::B(_) => panic!("timeout return ok"),
+            })
+            .map_err(|err| {
+                warn!("fail to send metrics: {}", err);
+                err
+            })
+    }
 }
 
 impl Record {

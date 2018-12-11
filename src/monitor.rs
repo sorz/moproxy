@@ -14,7 +14,7 @@ use tokio_core::net::TcpStream;
 use tokio_core::reactor::{Handle, Timeout};
 use tokio_io::io::{read_exact, write_all};
 
-use self::graphite::{write_records, Record};
+use self::graphite::{write_records, Record, Graphite};
 use self::traffic::Meter;
 pub use self::traffic::Throughput;
 use crate::{proxy::ProxyServer, ToMillis};
@@ -28,6 +28,7 @@ pub type ServerList = Vec<Arc<ProxyServer>>;
 pub struct Monitor {
     servers: Arc<Mutex<ServerList>>,
     meters: Arc<Mutex<HashMap<Arc<ProxyServer>, Meter>>>,
+    graphite_: Arc<Option<Graphite>>,
     graphite: Option<SocketAddr>,
 }
 
@@ -41,6 +42,7 @@ impl Monitor {
         Monitor {
             servers: Arc::new(Mutex::new(servers)),
             meters: Arc::new(Mutex::new(meters)),
+            graphite_: Arc::new(graphite.map(Graphite::new)),
             graphite,
         }
     }

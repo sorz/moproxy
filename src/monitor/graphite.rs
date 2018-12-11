@@ -1,12 +1,9 @@
+use futures::{future::Either, Future, IntoFuture};
+use log::{debug, warn};
 use std::{
     io::{self, Write},
-    time::{Duration, SystemTime},
     net::SocketAddr,
-};
-use log::{debug, warn};
-use futures::{
-    Future, IntoFuture,
-    future::Either,
+    time::{Duration, SystemTime},
 };
 use tokio_core::{
     net::TcpStream,
@@ -38,29 +35,30 @@ impl Graphite {
     }
 
     // Should always return ok
-    pub fn write_records<R>(self, records: R, handle: &Handle) ->
-        impl Future<Item = Self, Error = ()>
-    where R: Iterator<Item = Record> {
-        let Graphite { server_addr, stream } = self;
+    pub fn write_records(
+        self,
+        records: Vec<Record>,
+        handle: &Handle,
+    ) -> impl Future<Item = Self, Error = ()> {
+        let Graphite {
+            server_addr,
+            stream,
+        } = self;
         let addr = server_addr.clone();
-        let stream = stream.ok_or(()).into_future()
-            .or_else(move |_| {
-                debug!("start new connection to graphite server");
-                TcpStream::connect2(&addr)
-            });
+        let stream = stream.ok_or(()).into_future().or_else(move |_| {
+            debug!("start new connection to graphite server");
+            TcpStream::connect2(&addr)
+        });
 
         let mut buf = Vec::new();
-        let records = records
-            .map(|record| record.write_paintext(&mut buf))
-            .find(|result| result.is_err())
-            .unwrap_or(Ok(()));
+        for record in records {
+            record.write_paintext(&mut buf).unwrap();
+        }
 
         let timeout = Duration::from_secs(GRAPHITE_TIMEOUT_SECS);
-        let timeout = Timeout::new(timeout, handle)
-            .expect("error on get timeout from reactor");
+        let timeout = Timeout::new(timeout, handle).expect("error on get timeout from reactor");
 
-        records.into_future()
-            .and_then(|_| stream)
+        stream
             .and_then(move |stream| write_all(stream, buf))
             .map(|(stream, _buf)| stream) // TODO: keep buf
             .select2(timeout)
@@ -77,7 +75,7 @@ impl Graphite {
                         stream: None,
                     })
                 }
-                Ok(Either::B(_)) => panic!("timeout return ok")
+                Ok(Either::B(_)) => panic!("timeout return ok"),
             })
     }
 }
@@ -108,15 +106,4 @@ impl Record {
         };
         writeln!(buf, "{} {} {}", self.path, self.value, time)
     }
-}
-
-pub fn write_records<B, R>(buf: &mut B, records: R) -> io::Result<()>
-where
-    B: Write,
-    R: Iterator<Item = Record>,
-{
-    records
-        .map(|record| record.write_paintext(buf))
-        .find(|result| result.is_err())
-        .unwrap_or(Ok(()))
 }

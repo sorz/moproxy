@@ -1,8 +1,8 @@
 mod graphite;
 mod traffic;
 use futures::future::Loop;
-use futures::{future, Future, IntoFuture};
-use log::{debug, warn};
+use futures::{future, Future};
+use log::debug;
 use rand::{self, Rng};
 use std;
 use std::collections::HashMap;
@@ -10,17 +10,15 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
-use tokio_core::net::TcpStream;
 use tokio_core::reactor::{Handle, Timeout};
-use tokio_io::io::{read_exact, write_all};
+use tokio_io::io::read_exact;
 
-use self::graphite::{write_records, Record, Graphite};
+use self::graphite::{Graphite, Record};
 use self::traffic::Meter;
 pub use self::traffic::Throughput;
 use crate::{proxy::ProxyServer, ToMillis};
 
 static THROUGHPUT_INTERVAL_SECS: u64 = 1;
-static GRAPHITE_TIMEOUT_SECS: u64 = 5;
 
 pub type ServerList = Vec<Arc<ProxyServer>>;
 
@@ -28,7 +26,7 @@ pub type ServerList = Vec<Arc<ProxyServer>>;
 pub struct Monitor {
     servers: Arc<Mutex<ServerList>>,
     meters: Arc<Mutex<HashMap<Arc<ProxyServer>, Meter>>>,
-    graphite: Option<Arc<Graphite>>,
+    graphite: Option<SocketAddr>,
 }
 
 impl Monitor {
@@ -41,7 +39,7 @@ impl Monitor {
         Monitor {
             servers: Arc::new(Mutex::new(servers)),
             meters: Arc::new(Mutex::new(meters)),
-            graphite: graphite.map(|addr| Arc::new(Graphite::new(addr))),
+            graphite,
         }
     }
 
@@ -61,15 +59,24 @@ impl Monitor {
     /// Start monitoring delays.
     /// Returned Future won't return unless error on timer.
     pub fn monitor_delay(&self, probe: u64, handle: Handle) -> impl Future<Item = (), Error = ()> {
-        let init = test_all(self.clone(), true, handle);
+        let graphite = self.graphite.map(Graphite::new);
         let interval = Duration::from_secs(probe);
+        let init = test_all(self.clone(), true, handle);
         init.and_then(move |(mon, hd)| {
-            future::loop_fn((mon, hd), move |(mon, hd)| {
+            future::loop_fn((mon, hd, graphite), move |(mon, hd, graphite)| {
                 let wait = Timeout::new(interval, &hd)
                     .expect("error on get timeout from reactor")
                     .map_err(|err| panic!("error on timer: {}", err));
                 wait.and_then(move |_| {
-                    test_all(mon, false, hd).and_then(|(mon, hd)| send_metrics(mon, hd))
+                    let test = test_all(mon, false, hd);
+                    if let Some(graphite) = graphite {
+                        let send = test
+                            .and_then(|(mon, hd)| send_metrics(mon, hd, graphite))
+                            .map(|(mon, hd, graphite)| (mon, hd, Some(graphite)));
+                        Box::new(send) as Box<dyn Future<Item = _, Error = ()>>
+                    } else {
+                        Box::new(test.map(|(mon, hd)| (mon, hd, None)))
+                    }
                 })
                 .and_then(|args| Ok(Loop::Continue(args)))
             })
@@ -149,33 +156,30 @@ fn test_all(
 fn send_metrics(
     monitor: Monitor,
     handle: Handle,
-) -> impl Future<Item = (Monitor, Handle), Error = ()> {
-    let servers_ = monitor.servers();
-    let Monitor { servers, meters, graphite } = monitor;
-    graphite.ok_or(()).into_future().and_then(|graphite| {
-        let now = Some(SystemTime::now());
-        let records = servers_
-            .iter()
-            .flat_map(|server| {
-                let r = |path, value| Record::new(server.graphite_path(path), value, now);
-                let traffic = server.traffic();
-                vec![
-                    server.delay().map(|t| r("delay", t.millis() as u64)),
-                    server.score().map(|s| r("score", s as u64)),
-                    Some(r("tx_bytes", traffic.tx_bytes as u64)),
-                    Some(r("rx_bytes", traffic.rx_bytes as u64)),
-                    Some(r("conns.total", server.conn_total() as u64)),
-                    Some(r("conns.alive", server.conn_alive() as u64)),
-                    Some(r("conns.error", server.conn_error() as u64)),
-                ]
-            })
-            .filter_map(|v| v);
-        graphite.write_records(records, &handle)
-    })
-    .map(|graphite| Some(graphite))
-    .or_else(|()| Ok(None))
-    .map(move |graphite| Monitor { servers, meters, graphite })
-    .map(move |monitor| (monitor, handle))
+    graphite: Graphite,
+) -> impl Future<Item = (Monitor, Handle, Graphite), Error = ()> {
+    let records = monitor
+        .servers()
+        .iter()
+        .flat_map(|server| {
+            let now = Some(SystemTime::now());
+            let r = |path, value| Record::new(server.graphite_path(path), value, now);
+            let traffic = server.traffic();
+            vec![
+                server.delay().map(|t| r("delay", t.millis() as u64)),
+                server.score().map(|s| r("score", s as u64)),
+                Some(r("tx_bytes", traffic.tx_bytes as u64)),
+                Some(r("rx_bytes", traffic.rx_bytes as u64)),
+                Some(r("conns.total", server.conn_total() as u64)),
+                Some(r("conns.alive", server.conn_alive() as u64)),
+                Some(r("conns.error", server.conn_error() as u64)),
+            ]
+        })
+        .filter_map(|v| v)
+        .collect(); // FIXME: avoid allocate large memory
+    graphite
+        .write_records(records, &handle)
+        .map(move |graphite| (monitor, handle, graphite))
 }
 
 fn alive_test(

@@ -50,6 +50,7 @@ impl Monitor {
     /// Replace internal servers with provided list.
     pub fn update_servers(&self, new_servers: Vec<Arc<ProxyServer>>) {
         // TODO: keep status of proxy server
+        // FIXME: all newly added servers get score penalty
         let mut servers = self.servers.lock().unwrap();
         *servers = new_servers;
 

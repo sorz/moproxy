@@ -30,8 +30,7 @@ pub struct Monitor {
 }
 
 impl Monitor {
-    pub fn new(servers: Vec<ProxyServer>, graphite: Option<SocketAddr>) -> Monitor {
-        let servers: Vec<_> = servers.into_iter().map(|server| Arc::new(server)).collect();
+    pub fn new(servers: Vec<Arc<ProxyServer>>, graphite: Option<SocketAddr>) -> Monitor {
         let meters = servers
             .iter()
             .map(|server| (server.clone(), Meter::new()))
@@ -46,6 +45,19 @@ impl Monitor {
     /// Return an ordered list of servers.
     pub fn servers(&self) -> ServerList {
         self.servers.lock().unwrap().clone()
+    }
+
+    /// Replace internal servers with provided list.
+    pub fn update_servers(&self, new_servers: Vec<Arc<ProxyServer>>) {
+        // TODO: keep status of proxy server
+        let mut servers = self.servers.lock().unwrap();
+        *servers = new_servers;
+
+        let mut meters = self.meters.lock().unwrap();
+        meters.clear();
+        for server in servers.iter() {
+            meters.insert(server.clone(), Meter::new());
+        }
     }
 
     fn resort(&self) {

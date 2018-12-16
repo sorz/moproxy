@@ -2,10 +2,11 @@ use clap::load_yaml;
 use futures::{future::Either, Future, Stream};
 use ini::Ini;
 use log::{debug, info, warn, LevelFilter};
-use std::{env, fs, io::Write, net::SocketAddr, path::Path};
+use std::{env, fs, io::Write, net::SocketAddr, path::Path, sync::Arc};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
 use tokio_uds::UnixListener;
+use tokio_signal::unix::{Signal, SIGHUP};
 
 #[cfg(feature = "web_console")]
 use moproxy::web;
@@ -67,19 +68,16 @@ fn main() {
     let graphite = args
         .value_of("graphite")
         .map(|addr| addr.parse().expect("not a valid address"));
+    let servers_cfg = ServerListCfg::new(&args);
 
-    let servers = parse_servers(&args);
-    if servers.len() == 0 {
-        panic!("missing server list");
-    }
-    info!("total {} server(s) added", servers.len());
+    let servers = servers_cfg.load();
     let monitor = Monitor::new(servers, graphite);
 
     let mut lp = Core::new().expect("fail to create event loop");
     let handle = lp.handle();
 
+    // Setup monitor & web server
     let mut sock_file = None;
-
     if let Some(http_addr) = args.value_of("web-bind") {
         if !cfg!(feature = "web_console") {
             panic!("web console has been disabled during compiling");
@@ -113,7 +111,20 @@ fn main() {
         }
         info!("http run on {}", http_addr);
     }
+    handle.spawn(monitor.monitor_delay(probe, handle.clone()));
 
+    // Setup signal listener for reloading server list
+    let monitor_ = monitor.clone();
+    let list_reloader = Signal::new(SIGHUP).flatten_stream().for_each(move |_sig| {
+        debug!("SIGHUP received, reload server list.");
+        // TODO: avoid panic when fail on paring
+        let servers = servers_cfg.load();
+        monitor_.update_servers(servers);
+        Ok(())
+    }).map_err(|err| warn!("fail to listen SIGHUP: {}", err));
+    handle.spawn(list_reloader);
+
+    // Setup proxy server
     let listener = TcpListener::bind(&bind_addr, &handle).expect("cannot bind to port");
     info!("listen on {}", bind_addr);
     if let Some(alg) = cong_local {
@@ -123,7 +134,6 @@ fn main() {
              check tcp_allowed_congestion_control?",
         );
     }
-    handle.spawn(monitor.monitor_delay(probe, handle.clone()));
     let shared_buf = SharedBuf::new(8192);
     let server = listener.incoming().for_each(move |(sock, addr)| {
         debug!("incoming {}", addr);
@@ -151,77 +161,101 @@ fn main() {
     drop(sock_file);
 }
 
-fn parse_servers(args: &clap::ArgMatches) -> Vec<ProxyServer> {
-    let default_test_dns = args
-        .value_of("test-dns")
-        .expect("missing test-dns")
-        .parse()
-        .expect("not a valid socket address");
-    let mut servers: Vec<ProxyServer> = vec![];
-    if let Some(s) = args.values_of("socks5-servers") {
-        for s in s.map(parse_server) {
-            servers.push(ProxyServer::new(
-                s,
-                ProxyProto::socks5(),
-                default_test_dns,
-                None,
-                None,
-            ));
+
+struct ServerListCfg {
+    default_test_dns: SocketAddr,
+    cli_servers: Vec<Arc<ProxyServer>>,
+    path: Option<String>,
+}
+
+impl ServerListCfg {
+    fn new(args: &clap::ArgMatches) -> Self {
+        let default_test_dns = args
+            .value_of("test-dns")
+            .expect("missing test-dns")
+            .parse()
+            .expect("not a valid socket address");
+        let mut cli_servers = vec![];
+        if let Some(s) = args.values_of("socks5-servers") {
+            for s in s.map(parse_server) {
+                cli_servers.push(Arc::new(ProxyServer::new(
+                    s,
+                    ProxyProto::socks5(),
+                    default_test_dns,
+                    None,
+                    None,
+                )));
+            }
+        }
+        if let Some(s) = args.values_of("http-servers") {
+            for s in s.map(parse_server) {
+                cli_servers.push(Arc::new(ProxyServer::new(
+                    s,
+                    ProxyProto::http(false),
+                    default_test_dns,
+                    None,
+                    None,
+                )));
+            }
+        }
+        let path = args.value_of("server-list").map(|s| s.to_string());
+
+        ServerListCfg {
+            default_test_dns, cli_servers, path,
         }
     }
-    if let Some(s) = args.values_of("http-servers") {
-        for s in s.map(parse_server) {
-            servers.push(ProxyServer::new(
-                s,
-                ProxyProto::http(false),
-                default_test_dns,
-                None,
-                None,
-            ));
+
+    fn load(&self) -> Vec<Arc<ProxyServer>> {
+        let mut servers = self.cli_servers.clone();
+        if let Some(path) = &self.path {
+            let ini = Ini::load_from_file(path)
+                .expect("cannot read server list file");
+            for (tag, props) in ini.iter() {
+                let tag = if let Some(s) = props.get("tag") {
+                    Some(s.as_str())
+                } else if let Some(ref s) = *tag {
+                    Some(s.as_str())
+                } else {
+                    None
+                };
+                let addr: SocketAddr = props
+                    .get("address")
+                    .expect("address not specified")
+                    .parse()
+                    .expect("not a valid socket address");
+                let base = props
+                    .get("score base")
+                    .map(|i| i.parse().expect("score base not a integer"));
+                let test_dns = props
+                    .get("test dns")
+                    .map(|i| i.parse().expect("not a valid socket address"))
+                    .unwrap_or(self.default_test_dns);
+                let proto = match props
+                    .get("protocol")
+                    .expect("protocol not specified")
+                    .to_lowercase()
+                    .as_str()
+                {
+                    "socks5" => ProxyProto::socks5(),
+                    "socksv5" => ProxyProto::socks5(),
+                    "http" => {
+                        let cwp = props
+                            .get("http allow connect payload")
+                            .map_or(false, |v| v.parse().expect("not a boolean value"));
+                        ProxyProto::http(cwp)
+                    }
+                    _ => panic!("unknown proxy protocol"),
+                };
+                let server = ProxyServer::new(addr, proto, test_dns, tag, base);
+                servers.push(Arc::new(server));
+            }
         }
-    }
-    if let Some(path) = args.value_of("server-list") {
-        let ini = Ini::load_from_file(path).expect("cannot read server list file");
-        for (tag, props) in ini.iter() {
-            let tag = if let Some(s) = props.get("tag") {
-                Some(s.as_str())
-            } else if let Some(ref s) = *tag {
-                Some(s.as_str())
-            } else {
-                None
-            };
-            let addr: SocketAddr = props
-                .get("address")
-                .expect("address not specified")
-                .parse()
-                .expect("not a valid socket address");
-            let base = props
-                .get("score base")
-                .map(|i| i.parse().expect("score base not a integer"));
-            let test_dns = props
-                .get("test dns")
-                .map(|i| i.parse().expect("not a valid socket address"))
-                .unwrap_or(default_test_dns);
-            let proto = match props
-                .get("protocol")
-                .expect("protocol not specified")
-                .to_lowercase()
-                .as_str()
-            {
-                "socks5" => ProxyProto::socks5(),
-                "socksv5" => ProxyProto::socks5(),
-                "http" => {
-                    let cwp = props
-                        .get("http allow connect payload")
-                        .map_or(false, |v| v.parse().expect("not a boolean value"));
-                    ProxyProto::http(cwp)
-                }
-                _ => panic!("unknown proxy protocol"),
-            };
-            servers.push(ProxyServer::new(addr, proto, test_dns, tag, base));
+        if servers.len() == 0 {
+            panic!("missing server list");
         }
+        info!("total {} server(s) loaded", servers.len());
+        servers
     }
-    servers
 }
 
 fn parse_server(addr: &str) -> SocketAddr {

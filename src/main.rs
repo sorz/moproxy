@@ -87,9 +87,10 @@ fn main() {
         let monitor = monitor.clone();
         if http_addr.starts_with("/") {
             let sock = AutoRemoveFile::new(&http_addr);
-            let incoming = UnixListener::bind(&sock, &handle)
+            let incoming = UnixListener::bind(&sock)
                 .expect("fail to bind web server")
-                .incoming();
+                .incoming()
+                .and_then(|s| s.peer_addr().map(|addr| (s, addr)));
             sock_file = Some(sock);
             #[cfg(feature = "web_console")]
             {

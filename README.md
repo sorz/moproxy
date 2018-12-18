@@ -73,6 +73,8 @@ score base=5000 ;add 5k to pull away from preferred server.
 
 Pass the file path to `moproxy` via `--list` argument.
 
+Signal `SIGHUP` will tigger the program to reload the list.
+
 ## Install
 
 You may download the binray executable file on

@@ -185,6 +185,10 @@ impl ProxyServer {
         }
     }
 
+    pub fn replace_status(&self, from: &Self) {
+        *self.status() = from.status().clone();
+    }
+
     pub fn connect<T>(&self, addr: Destination, data: Option<T>, handle: &Handle) -> Box<Connect>
     where
         T: AsRef<[u8]> + 'static,

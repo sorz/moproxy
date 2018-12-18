@@ -55,6 +55,8 @@ pub struct ProxyServer {
 
 #[derive(Debug, Serialize, Clone, Copy, Default)]
 struct ProxyServerStatus {
+    #[serde(skip_serializing)]
+    probe_at_least_once: bool,
     delay: Option<Duration>,
     score: Option<i32>,
     traffic: Traffic,
@@ -234,29 +236,30 @@ impl ProxyServer {
         self.status().conn_error
     }
 
-    pub fn set_delay(&self, delay: Option<Duration>) {
-        self.status().delay = delay;
-        self.status().score = delay.map(|t| t.millis() as i32 + self.score_base);
-    }
-
     pub fn update_delay(&self, delay: Option<Duration>) {
         let mut status = self.status();
         status.delay = delay;
-        let score = delay
-            .map(|t| t.millis() as i32 + self.score_base)
-            .map(|new| {
-                let old = status
-                    .score
-                    .unwrap_or_else(|| self.max_wait.millis() as i32);
-                // give more weight to delays exceed the mean, to
-                // punish for network jitter.
-                if new < old {
-                    (old * 9 + new * 1) / 10
-                } else {
-                    (old * 8 + new * 2) / 10
-                }
-            });
-        status.score = score;
+        status.score = if !status.probe_at_least_once {
+            // First update, just set it
+            status.probe_at_least_once = true;
+            delay.map(|t| t.millis() as i32 + self.score_base)
+        } else {
+            // Moving average on delay and pently on failure
+            delay
+                .map(|t| t.millis() as i32 + self.score_base)
+                .map(|new| {
+                    let old = status
+                        .score
+                        .unwrap_or_else(|| self.max_wait.millis() as i32);
+                    // give more weight to delays exceed the mean, to
+                    // punish for network jitter.
+                    if new < old {
+                        (old * 9 + new * 1) / 10
+                    } else {
+                        (old * 8 + new * 2) / 10
+                    }
+                })
+        }
     }
 
     pub fn add_traffic(&self, traffic: Traffic) {

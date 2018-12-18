@@ -49,7 +49,6 @@ impl Monitor {
 
     /// Replace internal servers with provided list.
     pub fn update_servers(&self, mut new_servers: Vec<Arc<ProxyServer>>) {
-        // FIXME: all newly added servers get score penalty
         let mut servers = self.servers.lock().unwrap();
         for server in new_servers.iter_mut() {
             let old = servers.iter().filter(|s| *s == server).next();
@@ -79,14 +78,14 @@ impl Monitor {
     pub fn monitor_delay(&self, probe: u64, handle: Handle) -> impl Future<Item = (), Error = ()> {
         let graphite = self.graphite.map(Graphite::new);
         let interval = Duration::from_secs(probe);
-        let init = test_all(self.clone(), true, handle);
+        let init = test_all(self.clone(), handle);
         init.and_then(move |(mon, hd)| {
             future::loop_fn((mon, hd, graphite), move |(mon, hd, graphite)| {
                 let wait = Timeout::new(interval, &hd)
                     .expect("error on get timeout from reactor")
                     .map_err(|err| panic!("error on timer: {}", err));
                 wait.and_then(move |_| {
-                    let test = test_all(mon, false, hd);
+                    let test = test_all(mon, hd);
                     if let Some(graphite) = graphite {
                         let send = test
                             .and_then(|(mon, hd)| send_metrics(mon, hd, graphite))
@@ -143,7 +142,6 @@ fn info_stats(infos: &ServerList) -> String {
 
 fn test_all(
     monitor: Monitor,
-    init: bool,
     handle: Handle,
 ) -> impl Future<Item = (Monitor, Handle), Error = ()> {
     debug!("testing all servers...");
@@ -153,11 +151,7 @@ fn test_all(
         .into_iter()
         .map(move |server| {
             let test = alive_test(&server, &handle_).then(move |result| {
-                if init {
-                    server.set_delay(result.ok());
-                } else {
-                    server.update_delay(result.ok());
-                }
+                server.update_delay(result.ok());
                 Ok(())
             });
             Box::new(test) as Box<Future<Item = (), Error = ()>>

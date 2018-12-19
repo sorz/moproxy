@@ -57,8 +57,8 @@ impl NewClient {
         list: ServerList,
         handle: Handle,
     ) -> impl Future<Item = Self, Error = ()> {
-        let dest4 = future::result(get_original_dest(&left)).map(|dest| SocketAddr::V4(dest));
-        let dest6 = future::result(get_original_dest6(&left)).map(|dest| SocketAddr::V6(dest));
+        let dest4 = future::result(get_original_dest(&left)).map(SocketAddr::V4);
+        let dest6 = future::result(get_original_dest6(&left)).map(SocketAddr::V6);
         // TODO: call either v6 or v4 according to our socket
         let src_dest = future::result(left.peer_addr())
             .join(dest4.or_else(|_| dest6))
@@ -143,7 +143,7 @@ impl NewClient {
             list,
             handle,
         } = self;
-        let pending_data = pending_data.map(|v| RcBox::new(v));
+        let pending_data = pending_data.map(RcBox::new);
         let conn = try_connect_all(
             dest.clone(),
             list,

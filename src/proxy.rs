@@ -20,7 +20,7 @@ use tokio_core::reactor::Handle;
 use crate::ToMillis;
 
 const DEFAULT_MAX_WAIT_MILLILS: u64 = 4_000;
-const GRAPHITE_PATH_PREFIX: &'static str = "moproxy.proxy_servers";
+const GRAPHITE_PATH_PREFIX: &str = "moproxy.proxy_servers";
 
 pub type Connect = Future<Item = TcpStream, Error = io::Error>;
 
@@ -174,7 +174,8 @@ impl ProxyServer {
                     if !s.is_ascii() || s.contains(' ') || s.contains('\n') {
                         panic!(
                             "Tag \"{}\" contains white spaces, line \
-                             breaks, or non-ASCII characters."
+                             breaks, or non-ASCII characters.",
+                            s
                         );
                     }
                     String::from(s)
@@ -188,7 +189,7 @@ impl ProxyServer {
     }
 
     pub fn replace_status(&self, from: &Self) {
-        *self.status() = from.status().clone();
+        *self.status() = *from.status();
     }
 
     pub fn connect<T>(&self, addr: Destination, data: Option<T>, handle: &Handle) -> Box<Connect>
@@ -254,7 +255,7 @@ impl ProxyServer {
                     // give more weight to delays exceed the mean, to
                     // punish for network jitter.
                     if new < old {
-                        (old * 9 + new * 1) / 10
+                        (old * 9 + new) / 10
                     } else {
                         (old * 8 + new * 2) / 10
                     }

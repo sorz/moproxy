@@ -86,11 +86,10 @@ fn build_request(addr: &Destination) -> String {
         },
         Address::Domain(ref s) => format!("{}:{}", s, port),
     };
-    let request = format!(
+    format!(
         "CONNECT {host} HTTP/1.1\r\n\
          Host: {host}\r\n\
          Connection: close\r\n\r\n",
         host = host
-    );
-    return request;
+    )
 }

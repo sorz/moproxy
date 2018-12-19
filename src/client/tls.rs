@@ -25,14 +25,13 @@ fn truncate(data: &[u8], len_pos: Range<usize>) -> Result<&[u8], &'static str> {
     for bit in len_bits {
         len = len << 8 | (*bit as usize);
     }
-    return data
-        .get(len_pos.end..len_pos.end + len)
-        .ok_or("not enough data");
+    data.get(len_pos.end..len_pos.end + len)
+        .ok_or("not enough data")
 }
 
 fn drop_before(data: &[u8], len_pos: Range<usize>) -> Result<&[u8], &'static str> {
     let len = truncate(data, len_pos.clone())?.len();
-    return Ok(&data[len_pos.end + len..]);
+    Ok(&data[len_pos.end + len..])
 }
 
 fn parse_tls_record<'a>(data: &'a [u8]) -> Result<TlsRecord<'a>, &'static str> {
@@ -113,7 +112,7 @@ fn parse_server_name_ext(ext_data: &[u8]) -> Result<Option<&str>, &'static str> 
             }
             if !name
                 .chars()
-                .all(|c| c.is_digit(36) || c == '.' || c == '-' || c == '-')
+                .all(|c| c.is_digit(36) || c == '.' || c == '-' || c == '_')
             {
                 return Err("illegal char in server name");
             }

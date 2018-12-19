@@ -150,7 +150,7 @@ impl StreamWithBuffer {
             Ok(n)
         })(&buf);
         self.return_buf(buf);
-        return result;
+        result
     }
 }
 
@@ -205,7 +205,7 @@ impl BiPipe {
                 }
                 .into();
                 self.server.add_traffic(amt);
-                self.traffic = self.traffic + amt;
+                self.traffic += amt;
             }
             // write out if buffer is not empty
             while !reader.is_empty() {

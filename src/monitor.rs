@@ -51,7 +51,7 @@ impl Monitor {
     pub fn update_servers(&self, mut new_servers: Vec<Arc<ProxyServer>>) {
         let mut servers = self.servers.lock().unwrap();
         for server in new_servers.iter_mut() {
-            let old = servers.iter().filter(|s| *s == server).next();
+            let old = servers.iter().find(|s| *s == server);
             if let Some(old) = old {
                 server.replace_status(old);
             }
@@ -141,10 +141,7 @@ fn info_stats(infos: &ServerList) -> String {
     stats
 }
 
-fn test_all(
-    monitor: Monitor,
-    handle: Handle,
-) -> impl Future<Item = (Monitor, Handle), Error = ()> {
+fn test_all(monitor: Monitor, handle: Handle) -> impl Future<Item = (Monitor, Handle), Error = ()> {
     debug!("testing all servers...");
     let handle_ = handle.clone();
     let tests: Vec<_> = monitor

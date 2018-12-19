@@ -5,8 +5,8 @@ use log::{debug, info, warn, LevelFilter};
 use std::{env, fs, io::Write, net::SocketAddr, path::Path, sync::Arc};
 use tokio_core::net::TcpListener;
 use tokio_core::reactor::Core;
-use tokio_uds::UnixListener;
 use tokio_signal::unix::{Signal, SIGHUP};
+use tokio_uds::UnixListener;
 
 #[cfg(feature = "web_console")]
 use moproxy::web;
@@ -115,13 +115,16 @@ fn main() {
 
     // Setup signal listener for reloading server list
     let monitor_ = monitor.clone();
-    let list_reloader = Signal::new(SIGHUP).flatten_stream().for_each(move |_sig| {
-        debug!("SIGHUP received, reload server list.");
-        // TODO: avoid panic when fail on paring
-        let servers = servers_cfg.load();
-        monitor_.update_servers(servers);
-        Ok(())
-    }).map_err(|err| warn!("fail to listen SIGHUP: {}", err));
+    let list_reloader = Signal::new(SIGHUP)
+        .flatten_stream()
+        .for_each(move |_sig| {
+            debug!("SIGHUP received, reload server list.");
+            // TODO: avoid panic when fail on paring
+            let servers = servers_cfg.load();
+            monitor_.update_servers(servers);
+            Ok(())
+        })
+        .map_err(|err| warn!("fail to listen SIGHUP: {}", err));
     handle.spawn(list_reloader);
 
     // Setup proxy server
@@ -160,7 +163,6 @@ fn main() {
     // unnecessary drop() but make complier happy about unused var.
     drop(sock_file);
 }
-
 
 struct ServerListCfg {
     default_test_dns: SocketAddr,
@@ -201,15 +203,16 @@ impl ServerListCfg {
         let path = args.value_of("server-list").map(|s| s.to_string());
 
         ServerListCfg {
-            default_test_dns, cli_servers, path,
+            default_test_dns,
+            cli_servers,
+            path,
         }
     }
 
     fn load(&self) -> Vec<Arc<ProxyServer>> {
         let mut servers = self.cli_servers.clone();
         if let Some(path) = &self.path {
-            let ini = Ini::load_from_file(path)
-                .expect("cannot read server list file");
+            let ini = Ini::load_from_file(path).expect("cannot read server list file");
             for (tag, props) in ini.iter() {
                 let tag = if let Some(s) = props.get("tag") {
                     Some(s.as_str())

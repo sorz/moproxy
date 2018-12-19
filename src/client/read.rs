@@ -31,11 +31,7 @@ where
 {
     let t = Timeout::new(t, handle).expect("error on get timeout from reactor");
     Read {
-        state: State::Pending {
-            rd: rd,
-            buf: buf,
-            t: t,
-        },
+        state: State::Pending { rd, buf, t },
     }
 }
 

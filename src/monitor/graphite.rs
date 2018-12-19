@@ -44,10 +44,9 @@ impl Graphite {
             server_addr,
             stream,
         } = self;
-        let addr = server_addr.clone();
         let stream = stream.ok_or(()).into_future().or_else(move |_| {
             debug!("start new connection to graphite server");
-            TcpStream::connect2(&addr)
+            TcpStream::connect2(&server_addr)
         });
 
         let mut buf = Vec::new();

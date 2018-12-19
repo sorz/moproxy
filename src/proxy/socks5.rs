@@ -25,23 +25,23 @@ where
 
 fn build_request(addr: &Destination) -> Vec<u8> {
     let mut buffer = Vec::with_capacity(13);
-    buffer.write(&[5, 1, 0]).unwrap();
-    buffer.write(&[5, 1, 0]).unwrap();
+    buffer.write_all(&[5, 1, 0]).unwrap();
+    buffer.write_all(&[5, 1, 0]).unwrap();
     match addr.host {
         Address::Ip(ip) => match ip {
             IpAddr::V4(ip) => {
-                buffer.write(&[0x01]).unwrap();
-                buffer.write(&ip.octets()).unwrap();
+                buffer.write_all(&[0x01]).unwrap();
+                buffer.write_all(&ip.octets()).unwrap();
             }
             IpAddr::V6(ip) => {
-                buffer.write(&[0x04]).unwrap();
-                buffer.write(&ip.octets()).unwrap();
+                buffer.write_all(&[0x04]).unwrap();
+                buffer.write_all(&ip.octets()).unwrap();
             }
         },
         Address::Domain(ref host) => {
-            buffer.write(&[0x03]).unwrap();
+            buffer.write_all(&[0x03]).unwrap();
             buffer.push(host.len() as u8);
-            buffer.write(host.as_bytes()).unwrap();
+            buffer.write_all(host.as_bytes()).unwrap();
         }
     };
     buffer.push((addr.port >> 8) as u8);

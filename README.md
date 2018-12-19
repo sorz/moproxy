@@ -87,7 +87,7 @@ Or complie it manually:
 
 ```bash
 # Install Rust
-curl -sSf https://static.rust-lang.org/rustup.sh | sh
+curl https://sh.rustup.rs -sSf | sh
 
 # Clone source code
 git clone https://github.com/sorz/moproxy

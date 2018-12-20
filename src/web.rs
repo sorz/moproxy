@@ -49,7 +49,7 @@ fn status_json(start_time: &Instant, monitor: &Monitor) -> serde_json::Result<St
     })
 }
 
-fn response(req: Request<Body>, start_time: &Instant, monitor: &Monitor) -> Response<Body> {
+fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Response<Body> {
     let mut resp = Response::builder();
     match (req.method(), req.uri().path()) {
         (&Method::GET, "/") => resp
@@ -94,7 +94,7 @@ where
 
     let new_service = move || {
         let monitor = monitor.clone();
-        service_fn_ok(move |req| response(req, &start_time, &monitor))
+        service_fn_ok(move |req| response(&req, &start_time, &monitor))
     };
 
     let incoming = incoming.map(|(conn, addr)| {

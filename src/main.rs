@@ -83,7 +83,7 @@ fn main() {
             panic!("web console has been disabled during compiling");
         };
         let monitor = monitor.clone();
-        if http_addr.starts_with("/") {
+        if http_addr.starts_with('/') {
             let sock = AutoRemoveFile::new(&http_addr);
             let incoming = UnixListener::bind(&sock)
                 .expect("fail to bind web server")
@@ -253,7 +253,7 @@ impl ServerListCfg {
                 servers.push(Arc::new(server));
             }
         }
-        if servers.len() == 0 {
+        if servers.is_empty() {
             panic!("missing server list");
         }
         info!("total {} server(s) loaded", servers.len());
@@ -262,7 +262,7 @@ impl ServerListCfg {
 }
 
 fn parse_server(addr: &str) -> SocketAddr {
-    if addr.contains(":") {
+    if addr.contains(':') {
         addr.parse()
     } else {
         format!("127.0.0.1:{}", addr).parse()

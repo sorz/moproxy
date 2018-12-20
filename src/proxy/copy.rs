@@ -132,12 +132,12 @@ impl StreamWithBuffer {
             Ok(n)
         })(&mut buf);
         self.return_buf(buf);
-        return result;
+        result
     }
 
     pub fn write_to(&mut self, writer: &mut TcpStream) -> io::Result<usize> {
         let buf = self.buf.take().expect("try to write empty buffer");
-        let result = (|buf: &Box<[u8]>| {
+        let result = (|buf: &[u8]| {
             let n = writer.write(&buf[self.pos..self.cap])?;
             if n == 0 {
                 return Err(io::Error::new(

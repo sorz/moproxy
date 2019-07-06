@@ -152,7 +152,7 @@ fn test_all(monitor: Monitor, handle: Handle) -> impl Future<Item = (Monitor, Ha
                 server.update_delay(result.ok());
                 Ok(())
             });
-            Box::new(test) as Box<Future<Item = (), Error = ()>>
+            Box::new(test) as Box<dyn Future<Item = (), Error = ()>>
         })
         .collect();
 

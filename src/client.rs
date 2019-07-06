@@ -45,7 +45,7 @@ pub struct ConnectedClient {
     server: Arc<ProxyServer>,
 }
 
-type ConnectServer = Box<Future<Item = ConnectedClient, Error = ()>>;
+type ConnectServer = Box<dyn Future<Item = ConnectedClient, Error = ()>>;
 
 pub trait Connectable {
     fn connect_server(self, n_parallel: usize) -> ConnectServer;

@@ -1,5 +1,6 @@
 use crate::proxy::{Address, Destination};
 use futures::{future::Either, Future, IntoFuture};
+use log::trace;
 use std::io::{self, Write, ErrorKind};
 use std::net::IpAddr;
 use tokio_core::net::TcpStream;
@@ -15,8 +16,10 @@ where
     T: AsRef<[u8]>,
 {
     if fake_handshaking {
+        trace!("socks: do FAKE handshake w/ {:?}", addr);
         Either::A(fake_handshake(stream, addr, data))
     } else {
+        trace!("socks: do FULL handshake w/ {:?}", addr);
         Either::B(full_handshake(stream, addr, data))
     }
 }
@@ -53,10 +56,12 @@ where
     build_request(&mut request, addr);
 
     // Send request w/ auth method 0x00 (no auth)
+    trace!("socks: write [5, 1, 0]");
     write_all(stream, [0x05, 0x01, 0x00]).and_then(|(stream, _)| {
         read_exact(stream, [0; 2])
     }).and_then(|(stream, buf)| {
-        // Check: server should select 0x00 as auth method
+        // Server should select 0x00 as auth method
+        trace!("socks: read {:?}", buf);
         match buf {
             [0x05, 0xff] => Err(io::Error::new(ErrorKind::Other,
                     "auth required by socks server")),
@@ -66,12 +71,14 @@ where
         }
     }).and_then(|stream| {
         // Write the actual request
+        trace!("socks: write request {:?}", request);
         write_all(stream, request)
     }).and_then(|(stream, mut buf)| {
         buf.resize_with(10, Default::default);
         read_exact(stream, buf)
     }).and_then(|(stream, buf)| {
         // Check server's reply
+        trace!("socks: read reply {:?}", buf);
         if buf.starts_with(&[0x05, 0x00]) {
             Ok((stream, buf))
         } else {
@@ -83,6 +90,7 @@ where
         if let Some(data) = data {
             buf.clear();
             buf.extend(data.as_ref());
+            trace!("socks: write payload {:?}", buf);
             Either::A(write_all(stream, buf))
         } else {
             Either::B(Ok((stream, buf)).into_future())

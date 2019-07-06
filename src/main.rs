@@ -45,7 +45,7 @@ fn main() -> Result<(), &'static str> {
 
     let mut logger = env_logger::Builder::new();
     if let Ok(env_log) = env::var("RUST_LOG") {
-        logger.parse(&env_log);
+        logger.parse_filters(&env_log);
     }
     let log_level = args
         .value_of("log-level")

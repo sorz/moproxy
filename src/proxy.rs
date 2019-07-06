@@ -22,12 +22,18 @@ use crate::ToMillis;
 const DEFAULT_MAX_WAIT_MILLILS: u64 = 4_000;
 const GRAPHITE_PATH_PREFIX: &str = "moproxy.proxy_servers";
 
-pub type Connect = Future<Item = TcpStream, Error = io::Error>;
+pub type Connect = dyn Future<Item = TcpStream, Error = io::Error>;
 
 #[derive(Hash, Eq, PartialEq, Copy, Clone, Debug, Serialize)]
 pub enum ProxyProto {
     #[serde(rename = "SOCKSv5")]
-    Socks5,
+    Socks5 {
+        /// Not actually do the SOCKSv5 handshaking but sending all bytes as
+        /// per protocol specified in once followed by the actual request.
+        /// This saves [TODO] round-trip delay but may cause problem on some
+        /// servers.
+        fake_handshaking: bool,
+    },
     #[serde(rename = "HTTP")]
     Http {
         /// Allow to send app-level data as payload on CONNECT request.
@@ -145,8 +151,10 @@ impl AddAssign for Traffic {
 }
 
 impl ProxyProto {
-    pub fn socks5() -> Self {
-        ProxyProto::Socks5
+    pub fn socks5(fake_handshaking: bool) -> Self {
+        ProxyProto::Socks5 {
+            fake_handshaking,
+        }
     }
 
     pub fn http(connect_with_payload: bool) -> Self {
@@ -204,7 +212,9 @@ impl ProxyServer {
                 warn!("fail to set nodelay: {}", e);
             };
             match proto {
-                ProxyProto::Socks5 => Either::A(socks5::handshake(stream, &addr, data)),
+                ProxyProto::Socks5 {
+                    fake_handshaking
+                } => Either::A(socks5::handshake(stream, &addr, data, fake_handshaking)),
                 ProxyProto::Http {
                     connect_with_payload,
                 } => Either::B(http::handshake(stream, &addr, data, connect_with_payload)),
@@ -302,7 +312,7 @@ impl fmt::Display for ProxyServer {
 impl fmt::Display for ProxyProto {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            ProxyProto::Socks5 => write!(f, "SOCKSv5"),
+            ProxyProto::Socks5 { .. } => write!(f, "SOCKSv5"),
             ProxyProto::Http { .. } => write!(f, "HTTP"),
         }
     }
@@ -327,8 +337,8 @@ impl FromStr for ProxyProto {
     type Err = ();
     fn from_str(s: &str) -> Result<ProxyProto, ()> {
         match s.to_lowercase().as_str() {
-            "socks5" => Ok(ProxyProto::socks5()),
-            "socksv5" => Ok(ProxyProto::socks5()),
+            // default to disable fake handshaking
+            "socks5" | "socksv5" => Ok(ProxyProto::socks5(false)),
             // default to disable connect with payload
             "http" => Ok(ProxyProto::http(false)),
             _ => Err(()),

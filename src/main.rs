@@ -203,7 +203,7 @@ impl ServerListCfg {
             for s in s.map(parse_server) {
                 cli_servers.push(Arc::new(ProxyServer::new(
                     s?,
-                    ProxyProto::socks5(),
+                    ProxyProto::socks5(false),
                     default_test_dns,
                     None,
                     None,
@@ -262,8 +262,14 @@ impl ServerListCfg {
                     .to_lowercase()
                     .as_str()
                 {
-                    "socks5" => ProxyProto::socks5(),
-                    "socksv5" => ProxyProto::socks5(),
+                    "socks5" | "socksv5" => {
+                        let fake_hs = props
+                            .get("socks fake handshaking")
+                            .parse()
+                            .or(Err("not a boolean value"))?
+                            .unwrap_or(false);
+                        ProxyProto::socks5(fake_hs)
+                    }
                     "http" => {
                         let cwp = props
                             .get("http allow connect payload")

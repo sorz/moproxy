@@ -9,6 +9,7 @@ pub fn handshake<T>(
     stream: TcpStream,
     addr: &Destination,
     data: Option<T>,
+    fake_handshaking: bool,
 ) -> impl Future<Item = TcpStream, Error = io::Error>
 where
     T: AsRef<[u8]>,

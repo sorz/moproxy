@@ -8,8 +8,9 @@ use std;
 use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
+use parking_lot::Mutex;
 use tokio_core::reactor::{Handle, Timeout};
 use tokio_io::io::read_exact;
 
@@ -44,12 +45,12 @@ impl Monitor {
 
     /// Return an ordered list of servers.
     pub fn servers(&self) -> ServerList {
-        self.servers.lock().unwrap().clone()
+        self.servers.lock().clone()
     }
 
     /// Replace internal servers with provided list.
     pub fn update_servers(&self, mut new_servers: Vec<Arc<ProxyServer>>) {
-        let mut servers = self.servers.lock().unwrap();
+        let mut servers = self.servers.lock();
         for server in new_servers.iter_mut() {
             let old = servers.iter().find(|s| *s == server);
             if let Some(old) = old {
@@ -58,7 +59,7 @@ impl Monitor {
         }
         *servers = new_servers;
 
-        let mut meters = self.meters.lock().unwrap();
+        let mut meters = self.meters.lock();
         meters.clear();
         for server in servers.iter() {
             meters.insert(server.clone(), Meter::new());
@@ -69,10 +70,10 @@ impl Monitor {
 
     fn resort(&self) {
         let mut rng = rand::thread_rng();
-        self.servers.lock().unwrap().sort_by_key(move |server| {
+        self.servers.lock().sort_by_key(move |server| {
             server.score().unwrap_or(std::i32::MAX) - (rng.gen::<u8>() % 30) as i32
         });
-        debug!("scores:{}", info_stats(&*self.servers.lock().unwrap()));
+        debug!("scores:{}", info_stats(&*self.servers.lock()));
     }
 
     /// Start monitoring delays.
@@ -108,7 +109,7 @@ impl Monitor {
     pub fn monitor_throughput(&self, handle: Handle) -> impl Future<Item = (), Error = ()> {
         let interval = Duration::from_secs(THROUGHPUT_INTERVAL_SECS);
         future::loop_fn(self.clone(), move |monitor| {
-            for (server, meter) in monitor.meters.lock().unwrap().iter_mut() {
+            for (server, meter) in monitor.meters.lock().iter_mut() {
                 meter.add_sample(server.traffic());
             }
             Timeout::new(interval, &handle)
@@ -123,7 +124,6 @@ impl Monitor {
     pub fn throughputs(&self) -> HashMap<Arc<ProxyServer>, Throughput> {
         self.meters
             .lock()
-            .unwrap()
             .iter()
             .map(|(server, meter)| (server.clone(), meter.throughput(server.traffic())))
             .collect()

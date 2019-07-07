@@ -63,6 +63,7 @@ impl Monitor {
         for server in servers.iter() {
             meters.insert(server.clone(), Meter::new());
         }
+        drop(servers);
         self.resort();
     }
 

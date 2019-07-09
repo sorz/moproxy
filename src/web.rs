@@ -84,7 +84,7 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor)
     ).unwrap();
 
     let mut table = Table::new();
-    table.add_row(row!["Server", "Score", "Delay", "CUR", "TTL", "Up", "Down", "⇅"]);
+    table.add_row(row!["Server", "Score", "Delay", "CUR", "TTL", "Up", "Down", "↑↓"]);
     table.set_format(*FORMAT_NO_LINESEP_WITH_TITLE);
 
     for ServerStatus { server, throughput } in status.servers {
@@ -109,7 +109,7 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor)
         // Up Down
         row.add_cell(cell!(r -> to_human_bytes(server.traffic().tx_bytes)));
         row.add_cell(cell!(r -> to_human_bytes(server.traffic().rx_bytes)));
-        // ⇅
+        // ↑↓
         if let Some(tp) = throughput {
             let sum = tp.tx_bps + tp.rx_bps;
             if sum > 0 {
@@ -120,7 +120,7 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor)
     write!(&mut buf, "{}", table).unwrap();
 
     Response::builder()
-        .header("Content-Type", "text/plain")
+        .header("Content-Type", "text/plain; charset=utf-8")
         .body(buf.into())
 }
 

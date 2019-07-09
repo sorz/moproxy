@@ -67,7 +67,7 @@ pub fn to_human_bytes(n: usize) -> String {
     } else {
         match NumberPrefix::binary(n as f64) {
             Standalone(bytes) => format!("{} bytes", bytes),
-            Prefixed(prefix, n) => format!("{:.0} {}B", n, prefix),
+            Prefixed(prefix, n) => format!("{:.1} {}B", n, prefix),
         }
     }
 }

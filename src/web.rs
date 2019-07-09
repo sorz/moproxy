@@ -1,7 +1,4 @@
-mod helpers;
-
 use futures::{Future, Stream};
-use handlebars::Handlebars;
 use http;
 use hyper::{
     http::response::Builder as ResponseBuilder,
@@ -55,23 +52,18 @@ impl Status {
     }
 }
 
-static TEMPLATE_HOME: &str = "home";
 
-fn home_page(req: &Request<Body>, mut resp: ResponseBuilder, handlebars: &Handlebars,
+fn home_page(req: &Request<Body>, mut resp: ResponseBuilder,
              start_time: &Instant, monitor: &Monitor) -> http::Result<Response<Body>> {
-    let status = Status::from(start_time, monitor);
-    let html = handlebars.render(TEMPLATE_HOME, &status)
-        .expect("Fail to render HTML.");
     resp
         .header("Content-Type", "text/html")
-        .body(html.into())
+        .body(include_str!("web/index.html").into())
 }
 
-fn response(req: &Request<Body>, handlebars: &Handlebars,
-            start_time: &Instant, monitor: &Monitor) -> Response<Body> {
+fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Response<Body> {
     let mut resp = Response::builder();
     match (req.method(), req.uri().path()) {
-        (&Method::GET, "/") => home_page(req, resp, handlebars, start_time, monitor),
+        (&Method::GET, "/") => home_page(req, resp, start_time, monitor),
         (&Method::GET, "/version") => resp
             .header("Content-Type", "text/plain")
             .body(env!("CARGO_PKG_VERSION").into()),
@@ -105,12 +97,7 @@ where
 
     let new_service = move || {
         let monitor = monitor.clone();
-        let mut handlebars = Handlebars::new();
-        handlebars.register_template_string(TEMPLATE_HOME, include_str!("web/index.html"))
-            .expect("Fail to parse template.");
-        handlebars.register_helper("duration", Box::new(helpers::helper_duration));
-
-        service_fn_ok(move |req| response(&req, &handlebars, &start_time, &monitor))
+        service_fn_ok(move |req| response(&req, &start_time, &monitor))
     };
 
     let incoming = incoming.map(|(conn, addr)| {

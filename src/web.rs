@@ -1,5 +1,8 @@
 use futures::{Future, Stream};
+use handlebars::Handlebars;
+use http;
 use hyper::{
+    http::response::Builder as ResponseBuilder,
     server::conn::Http, service::service_fn_ok, Body, Method, Request, Response, StatusCode,
 };
 use log::{debug, error};
@@ -31,46 +34,52 @@ struct Status {
     throughput: Throughput,
 }
 
-fn status_json(start_time: &Instant, monitor: &Monitor) -> serde_json::Result<String> {
-    let mut thps = monitor.throughputs();
-    let throughput = thps.values().fold(Default::default(), |a, b| a + *b);
-    let servers = monitor
-        .servers()
-        .into_iter()
-        .map(|server| ServerStatus {
-            throughput: thps.remove(&server),
-            server,
-        })
-        .collect();
-    serde_json::to_string(&Status {
-        servers,
-        throughput,
-        uptime: start_time.elapsed(),
-    })
+impl Status {
+    fn from(start_time: &Instant, monitor: &Monitor) -> Self {
+        let mut thps = monitor.throughputs();
+        let throughput = thps.values().fold(Default::default(), |a, b| a + *b);
+        let servers = monitor
+            .servers()
+            .into_iter()
+            .map(|server| ServerStatus {
+                throughput: thps.remove(&server),
+                server,
+            })
+            .collect();
+        Status {
+            servers, throughput,
+            uptime: start_time.elapsed(),
+        }
+    }
 }
 
-fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Response<Body> {
+static TEMPLATE_HOME: &str = "home";
+
+fn home_page(req: &Request<Body>, mut resp: ResponseBuilder, handlebars: &Handlebars,
+             start_time: &Instant, monitor: &Monitor) -> http::Result<Response<Body>> {
+    let status = Status::from(start_time, monitor);
+    let html = handlebars.render(TEMPLATE_HOME, &status)
+        .expect("Fail to render HTML.");
+    resp
+        .header("Content-Type", "text/html")
+        .body(html.into())
+}
+
+fn response(req: &Request<Body>, handlebars: &Handlebars,
+            start_time: &Instant, monitor: &Monitor) -> Response<Body> {
     let mut resp = Response::builder();
     match (req.method(), req.uri().path()) {
-        (&Method::GET, "/") => resp
-            .header("Content-Type", "text/html")
-            .body(include_str!("web/index.html").into()),
-
+        (&Method::GET, "/") => home_page(req, resp, handlebars, start_time, monitor),
         (&Method::GET, "/version") => resp
             .header("Content-Type", "text/plain")
             .body(env!("CARGO_PKG_VERSION").into()),
 
-        (&Method::GET, "/status") => match status_json(start_time, monitor) {
-            Ok(json) => resp
-                .header("Content-Type", "application/json")
-                .body(json.into()),
-            Err(e) => {
-                error!("fail to serialize servers to json: {}", e);
-                resp.status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .header("Content-Type", "text/plain")
-                    .body(format!("internal error: {}", e).into())
-            }
-        },
+        (&Method::GET, "/status") => {
+            let json = serde_json::to_string(&Status::from(start_time, monitor))
+                .expect("fail to serialize servers to json");
+            resp.header("Content-Type", "application/json")
+                .body(json.into())
+        }
         _ => resp
             .status(StatusCode::NOT_FOUND)
             .header("Content-Type", "text/plain")
@@ -94,7 +103,11 @@ where
 
     let new_service = move || {
         let monitor = monitor.clone();
-        service_fn_ok(move |req| response(&req, &start_time, &monitor))
+        let mut handlebars = Handlebars::new();
+        handlebars.register_template_string(TEMPLATE_HOME, include_str!("web/index.html"))
+            .expect("Fail to parse template.");
+
+        service_fn_ok(move |req| response(&req, &handlebars, &start_time, &monitor))
     };
 
     let incoming = incoming.map(|(conn, addr)| {

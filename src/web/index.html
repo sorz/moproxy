@@ -22,7 +22,7 @@
 <body>
   <h1>moproxy</h1>
   <p>moproxy <span id="version"></span> is running.
-    <span id="uptime"></span>
+    <span id="uptime">{{ duration uptime.secs }}</span>
   </p>
   <button id="refresh">Refresh</button>
   <input id="auto-refresh" type="checkbox" checked>
@@ -40,7 +40,9 @@
       <tr><th>Server<th>Score<th>Delay</th>
         <th>CUR / TTL<th>Up / Down<th>⇅</tr>
     </thead>
-    <tbody id="servers"></tbody>
+    <tbody id="servers">
+
+    </tbody>
   </table>
 
   <script>

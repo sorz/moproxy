@@ -1,3 +1,5 @@
+mod helpers;
+
 use futures::{Future, Stream};
 use handlebars::Handlebars;
 use http;
@@ -106,6 +108,7 @@ where
         let mut handlebars = Handlebars::new();
         handlebars.register_template_string(TEMPLATE_HOME, include_str!("web/index.html"))
             .expect("Fail to parse template.");
+        handlebars.register_helper("duration", Box::new(helpers::helper_duration));
 
         service_fn_ok(move |req| response(&req, &handlebars, &start_time, &monitor))
     };

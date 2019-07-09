@@ -1,9 +1,11 @@
+mod helpers;
+
 use futures::{Future, Stream};
 use http;
 use hyper::{
-    http::response::Builder as ResponseBuilder,
     server::conn::Http, service::service_fn_ok, Body, Method, Request, Response, StatusCode,
 };
+use helpers::{RequestExt, DurationExt};
 use log::{debug, error};
 use serde_derive::Serialize;
 use std::{
@@ -53,28 +55,42 @@ impl Status {
 }
 
 
-fn home_page(req: &Request<Body>, mut resp: ResponseBuilder,
-             start_time: &Instant, monitor: &Monitor) -> http::Result<Response<Body>> {
-    resp
-        .header("Content-Type", "text/html")
-        .body(include_str!("web/index.html").into())
+fn home_page(req: &Request<Body>, start_time: &Instant, monitor: &Monitor)
+        -> http::Result<Response<Body>>
+{
+    if req.accept_html() {
+        Response::builder()
+            .header("Content-Type", "text/html")
+            .body(include_str!("web/index.html").into())
+    } else {
+        plaintext_status(start_time, monitor)
+    }
 }
 
+fn plaintext_status(start_time: &Instant, monitor: &Monitor)
+        -> http::Result<Response<Body>>
+{
+    Response::builder()
+        .header("Content-Type", "text/html")
+        .body(("TODO\n").into())
+}
+
+
 fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Response<Body> {
-    let mut resp = Response::builder();
     match (req.method(), req.uri().path()) {
-        (&Method::GET, "/") => home_page(req, resp, start_time, monitor),
-        (&Method::GET, "/version") => resp
+        (&Method::GET, "/") => home_page(req, start_time, monitor),
+        (&Method::GET, "/plain") => plaintext_status(start_time, monitor),
+        (&Method::GET, "/version") => Response::builder()
             .header("Content-Type", "text/plain")
             .body(env!("CARGO_PKG_VERSION").into()),
-
         (&Method::GET, "/status") => {
             let json = serde_json::to_string(&Status::from(start_time, monitor))
                 .expect("fail to serialize servers to json");
-            resp.header("Content-Type", "application/json")
+            Response::builder()
+                .header("Content-Type", "application/json")
                 .body(json.into())
         }
-        _ => resp
+        _ => Response::builder()
             .status(StatusCode::NOT_FOUND)
             .header("Content-Type", "text/plain")
             .body("page not found".into()),

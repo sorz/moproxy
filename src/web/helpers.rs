@@ -5,6 +5,7 @@ use std::{
 };
 use lazy_static::lazy_static;
 use regex::Regex;
+use number_prefix::{NumberPrefix, Standalone, Prefixed};
 
 pub trait RequestExt {
     fn accept_html(&self) -> bool;
@@ -35,6 +36,7 @@ impl<T> RequestExt for Request<T> {
 
 pub trait DurationExt {
     fn format(&self) -> String;
+    fn format_millis(&self) -> String;
 }
 
 impl DurationExt for Duration {
@@ -52,5 +54,27 @@ impl DurationExt for Duration {
                 write!(&mut buf, "{}{}", v, u).unwrap();
             });
         buf
+    }
+
+    fn format_millis(&self) -> String {
+        format!("{} ms", self.as_millis())
+    }
+}
+
+pub fn to_human_bytes(n: usize) -> String {
+    if n == 0 {
+        String::new()
+    } else {
+        match NumberPrefix::binary(n as f64) {
+            Standalone(bytes) => format!("{} bytes", bytes),
+            Prefixed(prefix, n) => format!("{:.0} {}B", n, prefix),
+        }
+    }
+}
+
+pub fn to_human_bps(n: usize) -> String {
+    match NumberPrefix::decimal(n as f64) {
+        Standalone(n) => format!("{} bps", n),
+        Prefixed(prefix, n) => format!("{:.0} {}bps", n, prefix),
     }
 }

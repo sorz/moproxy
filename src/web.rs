@@ -5,11 +5,12 @@ use http;
 use hyper::{
     server::conn::Http, service::service_fn_ok, Body, Method, Request, Response, StatusCode,
 };
-use helpers::{RequestExt, DurationExt};
+use helpers::{RequestExt, DurationExt, to_human_bytes, to_human_bps};
 use log::{debug, error};
+use prettytable::{Table, row, cell, format::consts::FORMAT_NO_LINESEP_WITH_TITLE};
 use serde_derive::Serialize;
 use std::{
-    fmt::Debug,
+    fmt::{Debug, Write},
     io,
     sync::Arc,
     time::{Duration, Instant},
@@ -70,9 +71,57 @@ fn home_page(req: &Request<Body>, start_time: &Instant, monitor: &Monitor)
 fn plaintext_status(start_time: &Instant, monitor: &Monitor)
         -> http::Result<Response<Body>>
 {
+    let status = Status::from(start_time, monitor);
+    let mut buf = String::new();
+
+    writeln!(&mut buf, "moproxy ({}) is running. {}",
+        env!("CARGO_PKG_VERSION"), status.uptime.format()
+    ).unwrap();
+
+    writeln!(&mut buf, "↑ {} ↓ {}",
+        to_human_bps(status.throughput.tx_bps),
+        to_human_bps(status.throughput.rx_bps),
+    ).unwrap();
+
+    let mut table = Table::new();
+    table.add_row(row!["Server", "Score", "Delay", "CUR", "TTL", "Up", "Down", "⇅"]);
+    table.set_format(*FORMAT_NO_LINESEP_WITH_TITLE);
+
+    for ServerStatus { server, throughput } in status.servers {
+        let row = table.add_empty_row();
+        // Server
+        row.add_cell(cell!(l -> server.tag));
+        // Score
+        if let Some(v) = server.score() {
+            row.add_cell(cell!(r -> v));
+        } else {
+            row.add_cell(cell!(r -> "-"));
+        }
+        // Delay
+        if let Some(v) = server.delay() {
+            row.add_cell(cell!(r -> v.format_millis()));
+        } else {
+            row.add_cell(cell!(r -> "-"));
+        }
+        // CUR TTL
+        row.add_cell(cell!(r -> server.conn_alive()));
+        row.add_cell(cell!(r -> server.conn_total()));
+        // Up Down
+        row.add_cell(cell!(r -> to_human_bytes(server.traffic().tx_bytes)));
+        row.add_cell(cell!(r -> to_human_bytes(server.traffic().rx_bytes)));
+        // ⇅
+        if let Some(tp) = throughput {
+            let sum = tp.tx_bps + tp.rx_bps;
+            if sum > 0 {
+                row.add_cell(cell!(r -> to_human_bps(sum)));
+            }
+        }
+    }
+    write!(&mut buf, "{}", table).unwrap();
+
     Response::builder()
-        .header("Content-Type", "text/html")
-        .body(("TODO\n").into())
+        .header("Content-Type", "text/plain")
+        .body(buf.into())
 }
 
 

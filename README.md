@@ -12,7 +12,7 @@ Features:
  * Optional remote DNS resolving for TLS with SNI
  * Optional try-in-parallel for TLS (try multiple proxies and choose the one
    first response)
- * Optional status web page (latency, traffic, etc.)
+ * Optional status web page (latency, traffic, etc. w/ curl-friendly output)
  * Optional [Graphite](https://graphite.readthedocs.io/) support
    (to build fancy dashborad with [Grafana](https://grafana.com/) for example)
 
@@ -52,6 +52,10 @@ moproxy --port 2080 --socks5 2001 2002 2003 --http 3128 192.0.2.0:3128
 iptables -t nat -A OUTPUT -p tcp -m multiport --dports 80,443 -j REDIRECT --to-port 2080
 # redirect connections initiated by other hosts (if you are router)
 iptables -t nat -A PREROUTING -p tcp -m multiport --dports 80,443 -j REDIRECT --to-port 2080
+
+# or the nft equivalent
+nft add rule nat output tcp dport {80, 443} redirect to 2080
+nft add rule nat prerouting tcp dport {80, 443} redirect to 2080
 ```
 
 ### Server list file

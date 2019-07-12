@@ -1,5 +1,11 @@
 use libc::{self, c_void, setsockopt, socklen_t, IPPROTO_TCP, TCP_CONGESTION};
-use nix::{self, sys};
+use nix::{
+    self,
+    sys::socket::{
+        getsockopt,
+        sockopt::OriginalDst,
+    },
+};
 use std::{
     ffi::OsStr,
     io::{self, ErrorKind},
@@ -12,13 +18,16 @@ pub fn get_original_dest<F>(fd: &F) -> io::Result<SocketAddrV4>
 where
     F: AsRawFd,
 {
-    let addr = sys::socket::getsockopt(fd.as_raw_fd(), sys::socket::sockopt::OriginalDst).map_err(
+    let addr = getsockopt(fd.as_raw_fd(), OriginalDst).map_err(
         |e| match e {
             nix::Error::Sys(err) => io::Error::from(err),
             _ => io::Error::new(ErrorKind::Other, e),
         },
     )?;
-    let addr = SocketAddrV4::new(addr.sin_addr.s_addr.to_be().into(), addr.sin_port.to_be());
+    let addr = SocketAddrV4::new(
+        u32::from_be(addr.sin_addr.s_addr).into(),
+        u16::from_be(addr.sin_port),
+    );
     Ok(addr)
 }
 
@@ -42,7 +51,7 @@ where
     }
     let addr = SocketAddrV6::new(
         sockaddr.sin6_addr.s6_addr.into(),
-        sockaddr.sin6_port,
+        u16::from_be(sockaddr.sin6_port),
         sockaddr.sin6_flowinfo,
         sockaddr.sin6_scope_id,
     );

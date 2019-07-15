@@ -2,13 +2,17 @@
 // https://docs.rs/tokio-io/0.1.4/src/tokio_io/read.rs.html
 //
 // Modified to support timeout.
-use std::io;
-use std::mem;
-use std::time::Duration;
-
-use futures::{Future, Poll};
+use std::{
+    future::Future,
+    io,
+    mem,
+    pin::Pin,
+    task::{Poll, Context},
+    time::Duration,
+};
+use futures::{Async, Future as Future01};
 use tokio_core::reactor::{Handle, Timeout};
-use tokio_io::{try_nb, AsyncRead};
+use tokio_io::AsyncRead;
 
 #[derive(Debug)]
 enum State<R, T> {
@@ -46,13 +50,12 @@ pub struct Read<R, T> {
 
 impl<R, T> Future for Read<R, T>
 where
-    R: AsyncRead,
-    T: AsMut<[u8]>,
+    R: AsyncRead + Unpin,
+    T: AsMut<[u8]> + Unpin,
 {
-    type Item = (R, T, usize);
-    type Error = io::Error;
+    type Output = io::Result<(R, T, usize)>;
 
-    fn poll(&mut self) -> Poll<(R, T, usize), io::Error> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<(R, T, usize)>> {
         let nread = match self.state {
             State::Pending {
                 ref mut rd,
@@ -62,14 +65,18 @@ where
                 if t.poll()?.is_ready() {
                     0
                 } else {
-                    try_nb!(rd.read(&mut buf.as_mut()[..]))
+                    match rd.poll_read(&mut buf.as_mut()[..]) {
+                        Ok(Async::Ready(t)) => t,
+                        Ok(Async::NotReady) => return Poll::Pending,
+                        Err(e) => return Poll::Ready(Err(e)),
+                    }
                 }
             }
             State::Empty => panic!("poll a Read after it's done"),
         };
 
         match mem::replace(&mut self.state, State::Empty) {
-            State::Pending { rd, buf, .. } => Ok((rd, buf, nread).into()),
+            State::Pending { rd, buf, .. } => Poll::Ready(Ok((rd, buf, nread))),
             State::Empty => panic!("invalid internal state"),
         }
     }

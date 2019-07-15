@@ -2,6 +2,7 @@ mod connect;
 mod read;
 mod tls;
 use futures::{future, Future};
+use futures03::future::{FutureExt, TryFutureExt};
 use log::{debug, info, warn};
 use std::cmp;
 use std::net::SocketAddr;
@@ -89,7 +90,7 @@ impl NewClient {
         // try to read TLS ClientHello for
         //   1. --remote-dns: parse host name from SNI
         //   2. --n-parallel: need the whole request to be forwarded
-        let read = read_with_timeout(left, vec![0u8; 2048], wait, &handle);
+        let read = read_with_timeout(left, vec![0u8; 2048], wait, &handle).compat();
         read.map(move |(left, mut data, len)| {
             let (allow_parallel, pending_data) = if len == 0 {
                 info!("no tls request received before timeout");

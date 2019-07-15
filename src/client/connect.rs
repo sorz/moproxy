@@ -1,10 +1,15 @@
-use futures::{try_ready, Async, Future, Poll};
+use futures::{Async, Future as Future01};
 use log::info;
-use std::cmp;
-use std::collections::VecDeque;
-use std::io::{self, ErrorKind};
-use std::iter::FromIterator;
-use std::sync::Arc;
+use std::{
+    cmp,
+    collections::VecDeque,
+    future::Future,
+    io::{self, ErrorKind},
+    iter::FromIterator,
+    pin::Pin,
+    sync::Arc,
+    task::{Poll, Context},
+};
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::{Handle, Timeout};
 
@@ -47,12 +52,13 @@ fn try_connect(
 }
 
 impl Future for TryConnect {
-    type Item = (Arc<ProxyServer>, TcpStream);
-    type Error = io::Error;
+    type Output = io::Result<(Arc<ProxyServer>, TcpStream)>;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) 
+            -> Poll<io::Result<(Arc<ProxyServer>, TcpStream)>> {
         if self.timer.poll()?.is_ready() {
-            return Err(io::Error::new(ErrorKind::TimedOut, "connect timeout"));
+            return Poll::Ready(Err(io::Error::new(
+                    ErrorKind::TimedOut, "connect timeout")));
         }
         let new_state = match self.state {
             // waiting for proxy server connected
@@ -60,9 +66,13 @@ impl Future for TryConnect {
                 ref mut connect,
                 wait_response,
             } => {
-                let conn = try_ready!(connect.poll());
+                let conn = match connect.poll() {
+                    Ok(Async::NotReady) => return Poll::Pending,
+                    Err(e) => return Poll::Ready(Err(e)),
+                    Ok(Async::Ready(v)) => v,
+                };
                 if !wait_response || conn.poll_read().is_ready() {
-                    return Ok((self.server.clone(), conn).into());
+                    return Poll::Ready(Ok((self.server.clone(), conn)));
                 } else {
                     Some(TryConnectState::Waiting { conn: Some(conn) })
                 }
@@ -73,14 +83,16 @@ impl Future for TryConnect {
                     let conn = conn.take().unwrap();
                     let mut buf = [0; 8];
                     let len = conn.peek(&mut buf)?;
-                    return if len == 0 {
-                        Err(io::Error::new(
-                            ErrorKind::UnexpectedEof,
-                            "not response data",
-                        ))
-                    } else {
-                        Ok((self.server.clone(), conn).into())
-                    };
+                    return Poll::Ready(
+                        if len == 0 {
+                            Err(io::Error::new(
+                                ErrorKind::UnexpectedEof,
+                                "not response data",
+                            ))
+                        } else {
+                            Ok((self.server.clone(), conn))
+                        }
+                    );
                 }
                 None
             }
@@ -88,7 +100,7 @@ impl Future for TryConnect {
         if let Some(state) = new_state {
             self.state = state;
         }
-        Ok(Async::NotReady)
+        Poll::Pending
     }
 }
 
@@ -103,7 +115,7 @@ pub struct TryConnectAll {
     parallel_n: usize,
     wait_response: bool,
     standby: VecDeque<Arc<ProxyServer>>,
-    connects: VecDeque<TryConnect>,
+    connects: VecDeque<Pin<Box<TryConnect>>>,
     handle: Handle,
 }
 
@@ -129,10 +141,10 @@ pub fn try_connect_all(
 }
 
 impl Future for TryConnectAll {
-    type Item = (Arc<ProxyServer>, TcpStream);
-    type Error = ();
+    type Output = Option<(Arc<ProxyServer>, TcpStream)>;
 
-    fn poll(&mut self) -> Poll<Self::Item, ()> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context)
+            -> Poll<Option<(Arc<ProxyServer>, TcpStream)>> {
         loop {
             // if current connections less than parallel_n,
             // pick servers from queue to connect.
@@ -140,34 +152,34 @@ impl Future for TryConnectAll {
                 let server = self.standby.pop_front().unwrap();
                 let data = self.pending_data.clone();
                 let conn = try_connect(&self.dest, server, data, self.wait_response, &self.handle);
-                self.connects.push_back(conn);
+                self.connects.push_back(Box::pin(conn));
             }
 
             // poll all connects
             let mut i = 0;
             while i < self.connects.len() {
-                let result = self.connects[i].poll();
-                match result {
+                let mut conn = self.connects[i];
+                match conn.as_mut().poll(&mut cx) {
                     // error, stop trying, drop it.
-                    Err(e) => {
+                    Poll::Ready(Err(e)) => {
                         info!("connect proxy error: {}", e);
                         drop(self.connects.remove(i));
                     }
                     // not ready, keep here, poll next one.
-                    Ok(Async::NotReady) => i += 1,
+                    Poll::Pending => i += 1,
                     // ready, return it.
-                    Ok(Async::Ready(item)) => return Ok(item.into()),
+                    Poll::Ready(Ok(item)) => return Poll::Ready(Some(item)),
                 }
             }
 
             // if all servers failed, return error
             if self.connects.is_empty() && self.standby.is_empty() {
-                return Err(());
+                return Poll::Ready(None)
             }
 
             // if not need to connect standby server, wait for events.
             if self.connects.len() >= self.parallel_n || self.standby.is_empty() {
-                return Ok(Async::NotReady);
+                return Poll::Pending;
             }
         }
     }

@@ -1,8 +1,7 @@
 mod graphite;
 mod traffic;
-use futures::future::Loop;
-use futures::{future, Future};
-use log::debug;
+use futures03::future::join_all;
+use log::{debug, warn};
 use rand::{self, Rng};
 use std;
 use std::collections::HashMap;
@@ -11,8 +10,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 use parking_lot::Mutex;
-use tokio_core::reactor::{Handle, Timeout};
-use tokio_io::io::read_exact;
+use tokio::{
+    util::FutureExt as TokioFutureExt,
+    io::AsyncReadExt,
+    timer::Interval,
+};
 
 use self::graphite::{Graphite, Record};
 use self::traffic::Meter;
@@ -78,45 +80,36 @@ impl Monitor {
 
     /// Start monitoring delays.
     /// Returned Future won't return unless error on timer.
-    pub fn monitor_delay(&self, probe: u64, handle: Handle) -> impl Future<Item = (), Error = ()> {
-        let graphite = self.graphite.map(Graphite::new);
+    pub async fn monitor_delay(&self, probe: u64) {
+        let mut graphite = self.graphite.map(Graphite::new);
         let interval = Duration::from_secs(probe);
-        let init = test_all(self.clone(), handle);
-        init.and_then(move |(mon, hd)| {
-            future::loop_fn((mon, hd, graphite), move |(mon, hd, graphite)| {
-                let wait = Timeout::new(interval, &hd)
-                    .expect("error on get timeout from reactor")
-                    .map_err(|err| panic!("error on timer: {}", err));
-                wait.and_then(move |_| {
-                    let test = test_all(mon, hd);
-                    if let Some(graphite) = graphite {
-                        let send = test
-                            .and_then(|(mon, hd)| send_metrics(mon, hd, graphite))
-                            .map(|(mon, hd, graphite)| (mon, hd, Some(graphite)));
-                        Box::new(send) as Box<dyn Future<Item = _, Error = ()>>
-                    } else {
-                        Box::new(test.map(|(mon, hd)| (mon, hd, None)))
-                    }
-                })
-                .and_then(|args| Ok(Loop::Continue(args)))
-            })
-        })
-        .map_err(|_| ())
+
+        test_all(&self).await;
+        
+        let mut interval = Interval::new_interval(interval);
+        loop {
+            interval.next().await;
+            test_all(&self).await;
+            if let Some(ref mut graphite) = graphite {
+                match send_metrics(&self, graphite).await {
+                    Ok(_) => debug!("metrics sent"),
+                    Err(e) => warn!("fail to send metrics {:?}", e),
+                }
+            }
+        }
     }
 
     /// Start monitoring throughput.
     /// Returned Future won't return unless error on timer.
-    pub fn monitor_throughput(&self, handle: Handle) -> impl Future<Item = (), Error = ()> {
+    pub async fn monitor_throughput(&self) {
         let interval = Duration::from_secs(THROUGHPUT_INTERVAL_SECS);
-        future::loop_fn(self.clone(), move |monitor| {
-            for (server, meter) in monitor.meters.lock().iter_mut() {
+        let mut interval = Interval::new_interval(interval);
+        loop {
+            interval.next().await;
+            for (server, meter) in self.meters.lock().iter_mut() {
                 meter.add_sample(server.traffic());
             }
-            Timeout::new(interval, &handle)
-                .expect("error on get timeout from reactor")
-                .map_err(|err| panic!("error on timer: {}", err))
-                .map(move |_| Loop::Continue(monitor))
-        })
+        }
     }
 
     /// Return average throughputs of all servers in the recent monitor
@@ -142,33 +135,23 @@ fn info_stats(infos: &ServerList) -> String {
     stats
 }
 
-fn test_all(monitor: Monitor, handle: Handle) -> impl Future<Item = (Monitor, Handle), Error = ()> {
+async fn test_all(monitor: &Monitor) {
     debug!("testing all servers...");
-    let handle_ = handle.clone();
     let tests: Vec<_> = monitor
         .servers()
         .into_iter()
         .map(move |server| {
-            let test = alive_test(&server, &handle_).then(move |result| {
-                server.update_delay(result.ok());
-                Ok(())
-            });
-            Box::new(test) as Box<dyn Future<Item = (), Error = ()>>
-        })
-        .collect();
+            Box::pin(async move {
+                server.update_delay(alive_test(&server).await.ok());
+            })
+        }).collect();
 
-    future::join_all(tests).map(move |_| {
-        monitor.resort();
-        (monitor, handle)
-    })
+    join_all(tests).await;
+    monitor.resort();
 }
 
 // send graphite metrics if need
-fn send_metrics(
-    monitor: Monitor,
-    handle: Handle,
-    graphite: Graphite,
-) -> impl Future<Item = (Monitor, Handle, Graphite), Error = ()> {
+async fn send_metrics(monitor: &Monitor, graphite: &mut Graphite) -> io::Result<()> {
     let records = monitor
         .servers()
         .iter()
@@ -188,15 +171,10 @@ fn send_metrics(
         })
         .filter_map(|v| v)
         .collect(); // FIXME: avoid allocate large memory
-    graphite
-        .write_records(records, &handle)
-        .map(move |graphite| (monitor, handle, graphite))
+    graphite.write_records(records).await
 }
 
-fn alive_test(
-    server: &ProxyServer,
-    handle: &Handle,
-) -> impl Future<Item = Duration, Error = io::Error> {
+async fn alive_test(server: &ProxyServer) -> io::Result<Duration> {
     let request = [
         0,
         17, // length
@@ -220,26 +198,27 @@ fn alive_test(
     ];
     let tid = |req: &[u8]| (req[2] as u16) << 8 | (req[3] as u16);
     let req_tid = tid(&request);
-
     let now = Instant::now();
-    let tag = server.tag.clone();
-    let timeout = Timeout::new(server.max_wait, handle)
-        .expect("error on get timeout from reactor")
-        .map(|_| None);
-    let conn = server.connect(server.test_dns.into(), Some(request), handle);
-    let query = conn
-        .and_then(|stream| read_exact(stream, [0u8; 12]))
-        .and_then(move |(_, buf)| {
-            if req_tid == tid(&buf) {
-                Ok(Some(now.elapsed()))
-            } else {
-                Err(io::Error::new(io::ErrorKind::Other, "unknown response"))
-            }
-        });
-    let wait = query.select(timeout).map_err(|(err, _)| err);
-    wait.and_then(|(result, _)| match result {
-        Some(stream) => Ok(stream),
-        None => Err(io::Error::new(io::ErrorKind::TimedOut, "test timeout")),
-    })
-    .inspect(move |t| debug!("[{}] delay {}ms", tag, t.millis()))
+
+    let mut buf = [0u8; 12];
+    let test_dns = server.test_dns.into();
+    let result = async {
+        let mut stream = server.connect(&test_dns, Some(request)).await?;
+        stream.read_exact(&mut buf).await?;
+        Ok(())
+    }.timeout(server.max_wait).await;
+
+    match result {
+        Err(_) => return Err(io::Error::new(io::ErrorKind::TimedOut, "test timeout")),
+        Ok(Err(e)) => return Err(e),
+        Ok(Ok(_)) => (),
+    }
+
+    if req_tid == tid(&buf) {
+        let t = now.elapsed();
+        debug!("[{}] delay {}ms", server.tag, t.millis());
+        Ok(t)
+    } else {
+        Err(io::Error::new(io::ErrorKind::Other, "unknown response"))
+    }
 }

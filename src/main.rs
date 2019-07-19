@@ -3,10 +3,12 @@ use futures::{future::Either, Future, Stream};
 use ini::Ini;
 use log::{debug, error, info, warn, LevelFilter};
 use std::{env, fs, io::Write, net::SocketAddr, path::Path, str::FromStr, sync::Arc};
-use tokio_core::net::TcpListener;
-use tokio_core::reactor::Core;
-use tokio_signal::unix::{Signal, SIGHUP};
-use tokio_uds::UnixListener;
+use tokio::{
+    net::TcpListener,
+    reactor::Reactor,
+    signal::unix::{Signal, SIGHUP},
+    uds::UnixListener,
+};
 
 #[cfg(feature = "web_console")]
 use moproxy::web;

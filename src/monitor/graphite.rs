@@ -1,15 +1,14 @@
-use futures::{future::Either, Future, IntoFuture};
 use log::{debug, warn};
 use std::{
     io::{self, Write},
     net::SocketAddr,
     time::{Duration, SystemTime},
 };
-use tokio_core::{
+use tokio::{
+    util::FutureExt as TokioFutureExt,
+    io::AsyncWriteExt,
     net::TcpStream,
-    reactor::{Handle, Timeout},
 };
-use tokio_io::io::write_all;
 
 static GRAPHITE_TIMEOUT_SECS: u64 = 5;
 
@@ -34,20 +33,21 @@ impl Graphite {
         }
     }
 
-    // Should always return ok
-    pub fn write_records(
-        self,
+    pub async fn write_records(
+        &mut self,
         records: Vec<Record>,
-        handle: &Handle,
-    ) -> impl Future<Item = Self, Error = ()> {
+    ) -> io::Result<()> {
         let Graphite {
-            server_addr,
-            stream,
+            ref server_addr,
+            stream: ref mut stream_opt,
         } = self;
-        let stream = stream.ok_or(()).into_future().or_else(move |_| {
+
+        let mut stream = if let Some(stream) = stream_opt.take() {
+            stream
+        } else {
             debug!("start new connection to graphite server");
-            TcpStream::connect2(&server_addr)
-        });
+            TcpStream::connect(&server_addr).await?
+        };
 
         let mut buf = Vec::new();
         for record in records {
@@ -55,27 +55,18 @@ impl Graphite {
         }
 
         let timeout = Duration::from_secs(GRAPHITE_TIMEOUT_SECS);
-        let timeout = Timeout::new(timeout, handle).expect("error on get timeout from reactor");
-
-        stream
-            .and_then(move |stream| write_all(stream, buf))
-            .map(|(stream, _buf)| stream) // TODO: keep buf
-            .select2(timeout)
-            .map_err(|err| err.split().0)
-            .then(move |result| match result {
-                Ok(Either::A((stream, _))) => Ok(Graphite {
-                    server_addr,
-                    stream: Some(stream),
-                }),
-                Err(err) => {
-                    warn!("fail to send metrics: {}", err);
-                    Ok(Graphite {
-                        server_addr,
-                        stream: None,
-                    })
-                }
-                Ok(Either::B(_)) => panic!("timeout return ok"),
-            })
+        match stream.write_all(&buf).timeout(timeout).await {
+            Err(_) => Err(io::Error::from(io::ErrorKind::TimedOut)),
+            Ok(Err(err)) => {
+                warn!("fail to send metrics: {}", err);
+                self.stream = None;
+                Err(err)
+            }
+            Ok(Ok(_)) => {
+                stream_opt.replace(stream);
+                Ok(())
+            }
+        }
     }
 }
 

@@ -1,8 +1,7 @@
 pub mod copy;
 pub mod http;
 pub mod socks5;
-use futures::{future::Either, Future};
-use log::{debug, warn};
+use log::debug;
 use serde_derive::Serialize;
 use std::{
     fmt,
@@ -14,15 +13,13 @@ use std::{
     sync::{Mutex, MutexGuard},
     time::Duration,
 };
-use tokio_core::net::TcpStream;
-use tokio_core::reactor::Handle;
+use tokio::net::TcpStream;
 
 use crate::ToMillis;
 
 const DEFAULT_MAX_WAIT_MILLILS: u64 = 4_000;
 const GRAPHITE_PATH_PREFIX: &str = "moproxy.proxy_servers";
 
-pub type Connect = dyn Future<Item = TcpStream, Error = io::Error>;
 
 #[derive(Hash, Eq, PartialEq, Copy, Clone, Debug, Serialize)]
 pub enum ProxyProto {
@@ -200,27 +197,22 @@ impl ProxyServer {
         *self.status() = *from.status();
     }
 
-    pub fn connect<T>(&self, addr: Destination, data: Option<T>, handle: &Handle) -> Box<Connect>
+    pub async fn connect<T>(&self, addr: &Destination, data: Option<T>) -> io::Result<TcpStream>
     where
         T: AsRef<[u8]> + 'static,
     {
         let proto = self.proto;
-        let conn = TcpStream::connect(&self.addr, handle);
-        let handshake = conn.and_then(move |stream| {
-            debug!("connected with {:?}", stream.peer_addr());
-            if let Err(e) = stream.set_nodelay(true) {
-                warn!("fail to set nodelay: {}", e);
-            };
-            match proto {
-                ProxyProto::Socks5 {
-                    fake_handshaking
-                } => Either::A(socks5::handshake(stream, &addr, data, fake_handshaking)),
-                ProxyProto::Http {
-                    connect_with_payload,
-                } => Either::B(http::handshake(stream, &addr, data, connect_with_payload)),
-            }
-        });
-        Box::new(handshake)
+        let mut stream = TcpStream::connect(&self.addr).await?;
+        debug!("connected with {:?}", stream.peer_addr());
+        stream.set_nodelay(true)?;
+
+        match proto {
+            ProxyProto::Socks5 { fake_handshaking } =>
+                socks5::handshake(&mut stream, &addr, data, fake_handshaking).await?,
+            ProxyProto::Http { connect_with_payload } =>
+                http::handshake(&mut stream, &addr, data, connect_with_payload).await?,
+        }
+        Ok(stream)
     }
 
     fn status(&self) -> MutexGuard<ProxyServerStatus> {

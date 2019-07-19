@@ -1,16 +1,20 @@
-use futures::{Async, Future, Poll};
-use log::{debug, info};
+use log::debug;
 use std::{
     cell::RefCell,
     fmt,
-    io::ErrorKind::WouldBlock,
-    io::{self, Read, Write},
+    io,
     net::Shutdown,
     ops::Neg,
     rc::Rc,
     sync::Arc,
+    future::Future,
+    task::{Poll, Context},
+    pin::Pin,
 };
-use tokio_core::net::TcpStream;
+use tokio::{
+    net::TcpStream,
+    io::{AsyncRead, AsyncWrite},
+};
 
 use self::Side::{Left, Right};
 use crate::proxy::{ProxyServer, Traffic};
@@ -74,6 +78,15 @@ impl SharedBuf {
     }
 }
 
+
+macro_rules! try_poll {
+    ($expr:expr) => (match $expr {
+        Poll::Pending => return Poll::Pending,
+        Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+        Poll::Ready(Ok(v)) => v,
+    });
+}
+
 struct StreamWithBuffer {
     pub stream: TcpStream,
     buf: Option<Box<[u8]>>,
@@ -119,38 +132,37 @@ impl StreamWithBuffer {
         }
     }
 
-    pub fn read_to_buffer(&mut self) -> io::Result<usize> {
+    pub fn poll_read_to_buffer(&mut self, cx: &mut Context)
+             -> Poll<io::Result<usize>> {
         let mut buf = self.take_buf();
-        let result = (|buf| {
-            let n = self.stream.read(buf)?;
-            if n == 0 {
-                self.read_eof = true;
-            } else {
-                self.pos = 0;
-                self.cap = n;
-            }
-            Ok(n)
-        })(&mut buf);
+        let stream = Pin::new(&mut self.stream);
+        
+        let n = try_poll!(stream.poll_read(cx, &mut buf));
+        if n == 0 {
+            self.read_eof = true;
+        } else {
+            self.pos = 0;
+            self.cap = n;
+        }
         self.return_buf(buf);
-        result
+        Poll::Ready(Ok(n))
     }
 
-    pub fn write_to(&mut self, writer: &mut TcpStream) -> io::Result<usize> {
+    pub fn poll_write_buffer_to(&mut self, cx: &mut Context, writer: &mut TcpStream)
+             -> Poll<io::Result<usize>> {
         let buf = self.buf.take().expect("try to write empty buffer");
-        let result = (|buf: &[u8]| {
-            let n = writer.write(&buf[self.pos..self.cap])?;
-            if n == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::WriteZero,
-                    "write zero byte into writer",
-                ));
-            } else {
-                self.pos += n;
-            }
-            Ok(n)
-        })(&buf);
+        let writer = Pin::new(writer);
+        let n = try_poll!(writer.poll_write(cx, &buf[self.pos..self.cap]));
+        if n == 0 {
+            return Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "write zero byte into writer",
+            )));
+        } else {
+            self.pos += n;
+        }
         self.return_buf(buf);
-        result
+        Poll::Ready(Ok(n))
     }
 }
 
@@ -177,74 +189,61 @@ pub fn pipe(
     }
 }
 
-/// try_nb! with custom log for error.
-macro_rules! try_nb_log {
-    ($e:expr, $( $p:expr ),+) => (match $e {
-        Ok(t) => t,
-        Err(ref e) if e.kind() == WouldBlock => return Ok(Async::NotReady),
-        Err(e) => {
-            info!($( $p ),+, e);
-            return Err(e.into());
-        },
-    })
-}
-
 impl BiPipe {
-    fn poll_one_side(&mut self, side: Side) -> Poll<(), io::Error> {
+    fn poll_one_side(&mut self, cx: &mut Context, side: Side)
+            -> Poll<io::Result<()>> {
+        let Self {
+            ref mut left,
+            ref mut right,
+            ref mut server,
+            ref mut traffic,
+        } = *self;
         let (reader, writer) = match side {
-            Left => (&mut self.left, &mut self.right),
-            Right => (&mut self.right, &mut self.left),
+            Left => (left, right),
+            Right => (right, left),
         };
         loop {
             // read something if buffer is empty
             if reader.is_empty() && !reader.read_eof {
-                let n = try_nb_log!(reader.read_to_buffer(), "error on read from {}: {}", side);
+                let n = try_poll!(reader.poll_read_to_buffer(cx));
                 let amt = match side {
                     Left => (n, 0),
                     Right => (0, n),
                 }
                 .into();
-                self.server.add_traffic(amt);
-                self.traffic += amt;
+                server.add_traffic(amt);
+                *traffic += amt;
             }
             // write out if buffer is not empty
             while !reader.is_empty() {
-                try_nb_log!(
-                    reader.write_to(&mut writer.stream),
-                    "error on write to {}: {}",
-                    -side
-                );
+                try_poll!(reader.poll_write_buffer_to(cx, &mut writer.stream));
             }
             // flush and does half close if seen eof
             if reader.read_eof {
-                try_nb_log!(writer.stream.flush(), "error on flush {}: {}", -side);
-                try_nb_log!(
-                    writer.stream.shutdown(Shutdown::Write),
-                    "error on shutdown {}: {}",
-                    -side
-                );
+                try_poll!(Pin::new(&mut writer.stream).poll_flush(cx));
+                writer.stream.shutdown(Shutdown::Write);
                 reader.all_done = true;
-                return Ok(().into());
+                return Poll::Ready(Ok(()));
             }
         }
     }
 }
 
 impl Future for BiPipe {
-    type Item = Traffic;
-    type Error = io::Error;
+    type Output = io::Result<Traffic>;
 
-    fn poll(&mut self) -> Poll<Traffic, io::Error> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context)
+            -> Poll<io::Result<Traffic>> {
         if !self.left.all_done {
-            self.poll_one_side(Left)?;
+            try_poll!(self.poll_one_side(cx, Left));
         }
         if !self.right.all_done {
-            self.poll_one_side(Right)?;
+            try_poll!(self.poll_one_side(cx, Right));
         }
         if self.left.all_done && self.right.all_done {
-            Ok(self.traffic.into())
+            Poll::Ready(Ok(self.traffic))
         } else {
-            Ok(Async::NotReady)
+            Poll::Pending
         }
     }
 }

@@ -1,101 +1,95 @@
 use crate::proxy::{Address, Destination};
-use futures::{future::Either, Future, IntoFuture};
 use log::trace;
 use std::io::{self, Write, ErrorKind};
 use std::net::IpAddr;
-use tokio_core::net::TcpStream;
-use tokio_io::io::{read_exact, write_all};
+use tokio::{
+    io::{AsyncWriteExt, AsyncReadExt},
+    net::TcpStream,
+};
 
-pub fn handshake<T>(
-    stream: TcpStream,
+pub async fn handshake<T>(
+    stream: &mut TcpStream,
     addr: &Destination,
     data: Option<T>,
     fake_handshaking: bool,
-) -> impl Future<Item = TcpStream, Error = io::Error>
+) -> io::Result<()>
 where
     T: AsRef<[u8]>,
 {
     if fake_handshaking {
         trace!("socks: do FAKE handshake w/ {:?}", addr);
-        Either::A(fake_handshake(stream, addr, data))
+        fake_handshake(stream, addr, data).await
     } else {
         trace!("socks: do FULL handshake w/ {:?}", addr);
-        Either::B(full_handshake(stream, addr, data))
+        full_handshake(stream, addr, data).await
     }
 }
 
-pub fn fake_handshake<T>(
-    stream: TcpStream,
+pub async fn fake_handshake<T>(
+    stream: &mut TcpStream,
     addr: &Destination,
     data: Option<T>,
-) -> impl Future<Item = TcpStream, Error = io::Error>
+) -> io::Result<()>
 where
     T: AsRef<[u8]>,
 {
-    let mut request = Vec::with_capacity(16);
-    request.write_all(&[5, 1, 0]).unwrap();
-    build_request(&mut request, addr);
+    let mut buf = Vec::with_capacity(16);
+    buf.write_all(&[5, 1, 0]).unwrap();
+    build_request(&mut buf, addr);
+    stream.write_all(&buf).await?;
     if let Some(data) = data {
-        // TODO: remove copying
-        request.extend(data.as_ref());
+        stream.write_all(data.as_ref()).await?;
     }
-    write_all(stream, request)
-        .and_then(|(stream, _)| read_exact(stream, vec![0; 12]))
-        .map(|(stream, _)| stream)
+    buf.resize(12, 0);
+    stream.read_exact(&mut buf).await?;
+    Ok(())
 }
 
-pub fn full_handshake<T>(
-    stream: TcpStream,
+pub async fn full_handshake<T>(
+    stream: &mut TcpStream,
     addr: &Destination,
     data: Option<T>,
-) -> impl Future<Item = TcpStream, Error = io::Error>
+) -> io::Result<()>
 where
     T: AsRef<[u8]>,
 {
-    let mut request = Vec::with_capacity(13);
-    build_request(&mut request, addr);
-
     // Send request w/ auth method 0x00 (no auth)
     trace!("socks: write [5, 1, 0]");
-    write_all(stream, [0x05, 0x01, 0x00]).and_then(|(stream, _)| {
-        read_exact(stream, [0; 2])
-    }).and_then(|(stream, buf)| {
-        // Server should select 0x00 as auth method
-        trace!("socks: read {:?}", buf);
-        match buf {
-            [0x05, 0xff] => Err(io::Error::new(ErrorKind::Other,
-                    "auth required by socks server")),
-            [0x05, 0x00] => Ok(stream),
-            _ => Err(io::Error::new(ErrorKind::Other,
-                    "unrecognized reply from socks server"))
-        }
-    }).and_then(|stream| {
-        // Write the actual request
-        trace!("socks: write request {:?}", request);
-        write_all(stream, request)
-    }).and_then(|(stream, mut buf)| {
-        buf.resize_with(10, Default::default);
-        read_exact(stream, buf)
-    }).and_then(|(stream, buf)| {
-        // Check server's reply
-        trace!("socks: read reply {:?}", buf);
-        if buf.starts_with(&[0x05, 0x00]) {
-            Ok((stream, buf))
-        } else {
-            Err(io::Error::new(ErrorKind::Other,
-                    "socks server reply error"))
-        }
-    }).and_then(|(stream, mut buf)| {
-        // Write out payload if exist
-        if let Some(data) = data {
-            buf.clear();
-            buf.extend(data.as_ref());
-            trace!("socks: write payload {:?}", buf);
-            Either::A(write_all(stream, buf))
-        } else {
-            Either::B(Ok((stream, buf)).into_future())
-        }
-    }).map(|(stream, _)| stream)
+    stream.write_all(&[0x05, 0x01, 0x00]).await?;
+
+    // Server should select 0x00 as auth method
+    let mut buf = vec![0; 2];
+    stream.read_exact(&mut buf).await?;
+    trace!("socks: read {:?}", buf);
+    match buf[..2] {
+        [0x05, 0xff] => return Err(io::Error::new(ErrorKind::Other,
+                "auth required by socks server")),
+        [0x05, 0x00] => (),
+        _ => return Err(io::Error::new(ErrorKind::Other,
+                "unrecognized reply from socks server"))
+    }
+
+    // Write the actual request
+    buf.clear();
+    build_request(&mut buf, addr);
+    trace!("socks: write request {:?}", buf);
+    stream.write_all(&buf).await?;
+
+    // Check server's reply    
+    buf.resize_with(10, Default::default);
+    stream.read_exact(&mut buf).await?;
+    trace!("socks: read reply {:?}", buf);
+    if !buf.starts_with(&[0x05, 0x00]) {
+        return Err(io::Error::new(ErrorKind::Other,
+            "socks server reply error"));
+    }
+
+    // Write out payload if exist
+    if let Some(data) = data {
+        trace!("socks: write payload {:?}", data.as_ref());
+        stream.write_all(data.as_ref()).await?;
+    }
+    Ok(())
 }
 
 fn build_request(buffer: &mut Vec<u8>, addr: &Destination) {

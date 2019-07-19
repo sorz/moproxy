@@ -1,9 +1,12 @@
+#![feature(async_await)]
+#![feature(async_closure)]
 pub mod client;
 pub mod monitor;
 pub mod proxy;
 pub mod tcp;
 #[cfg(feature = "web_console")]
 pub mod web;
+mod tcp_stream_ext;
 
 pub trait ToMillis {
     fn millis(&self) -> u32;

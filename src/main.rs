@@ -1,17 +1,32 @@
+#![feature(async_await, async_closure)]
 use clap::load_yaml;
 use futures::{future::Either, Future, Stream};
 use ini::Ini;
 use log::{debug, error, info, warn, LevelFilter};
-use std::{env, fs, io::Write, net::SocketAddr, path::Path, str::FromStr, sync::Arc};
+use std::{
+    io,
+    env,
+    fs,
+    io::Write,
+    net::SocketAddr,
+    path::Path,
+    str::FromStr,
+    sync::Arc,
+};
 use tokio::{
+    self,
     net::TcpListener,
     reactor::Reactor,
-    signal::unix::{Signal, SIGHUP},
-    uds::UnixListener,
+};
+use tokio_uds::UnixListener;
+use tokio_signal::unix::{Signal, SIGHUP};
+use futures03::{
+    stream::{FuturesUnordered, StreamExt},
+    future::{self, FutureExt},
 };
 
-#[cfg(feature = "web_console")]
-use moproxy::web;
+//#[cfg(feature = "web_console")]
+//use moproxy::web;
 use moproxy::{
     client::{Connectable, NewClient},
     monitor::Monitor,
@@ -39,7 +54,8 @@ where
     }
 }
 
-fn main() -> Result<(), &'static str> {
+#[tokio::main]
+async fn main() -> Result<(), &'static str> {
     let yaml = load_yaml!("cli.yml");
     let args = clap::App::from_yaml(yaml)
         .version(env!("CARGO_PKG_VERSION"))
@@ -96,17 +112,16 @@ fn main() -> Result<(), &'static str> {
     let servers = servers_cfg.load()?;
     let monitor = Monitor::new(servers, graphite);
 
-    let mut lp = Core::new().or(Err("fail to create event loop"))?;
-    let handle = lp.handle();
-
     // Setup monitor & web server
-    let mut sock_file = None;
+    let mut sock_file: Option<AutoRemoveFile> = None;
     if let Some(http_addr) = args.value_of("web-bind") {
         if !cfg!(feature = "web_console") {
             return Err("web console has been disabled during compiling");
         };
         let monitor = monitor.clone();
         if http_addr.starts_with('/') {
+            unimplemented!();
+            /*
             let sock = AutoRemoveFile::new(&http_addr);
             let incoming = UnixListener::bind(&sock)
                 .or(Err("fail to bind web server"))?
@@ -115,44 +130,45 @@ fn main() -> Result<(), &'static str> {
             sock_file = Some(sock);
             #[cfg(feature = "web_console")]
             {
-                let serv = web::run_server(incoming, monitor, &handle);
-                handle.spawn(serv);
+                let serv = web::run_server(incoming, monitor);
+                tokio::spawn(serv);
             }
+            */
         } else {
             // FIXME: remove duplicate code
             let addr = http_addr
                 .parse()
                 .or(Err("not a valid address of TCP socket"))?;
-            let incoming = TcpListener::bind(&addr, &handle)
+            let incoming = TcpListener::bind(&addr)
                 .or(Err("fail to bind web server"))?
                 .incoming();
             #[cfg(feature = "web_console")]
             {
-                let serv = web::run_server(incoming, monitor, &handle);
-                handle.spawn(serv);
+                let serv = web::run_server(incoming, monitor);
+                tokio::spawn(serv);
             }
         }
         info!("http run on {}", http_addr);
     }
-    handle.spawn(monitor.monitor_delay(probe, handle.clone()));
+    let serv = monitor.monitor_delay(probe);
+    tokio::spawn(serv);
 
     // Setup signal listener for reloading server list
     let monitor_ = monitor.clone();
-    let list_reloader = Signal::new(SIGHUP)
-        .flatten_stream()
-        .for_each(move |_sig| {
+    let signals = Signal::new(SIGHUP).await
+        .or(Err("cannot catch signal"))?;
+    tokio::spawn(async move {
+        while let Some(_) = signals.next().await {
             debug!("SIGHUP received, reload server list.");
             match servers_cfg.load() {
                 Ok(servers) => monitor_.update_servers(servers),
                 Err(err) => error!("fail to reload servers: {}", err),
             }
-            Ok(())
-        })
-        .map_err(|err| warn!("fail to listen SIGHUP: {}", err));
-    handle.spawn(list_reloader);
+        }
+    });
 
     // Setup proxy server
-    let listener = TcpListener::bind(&bind_addr, &handle).or(Err("cannot bind to port"))?;
+    let listener = TcpListener::bind(&bind_addr).or(Err("cannot bind to port"))?;
     info!("listen on {}", bind_addr);
     if let Some(alg) = cong_local {
         info!("set {} on {}", alg, bind_addr);
@@ -160,30 +176,49 @@ fn main() -> Result<(), &'static str> {
                                                 check tcp_allowed_congestion_control?"))?;
     }
     let shared_buf = SharedBuf::new(8192);
-    let server = listener.incoming().for_each(move |(sock, addr)| {
-        debug!("incoming {}", addr);
-        let client = NewClient::from_socket(sock, monitor.servers(), handle.clone());
-        let conn = client.and_then(move |client| {
-            if remote_dns && client.dest.port == 443 {
-                Either::A(
-                    client
-                        .retrive_dest()
-                        .and_then(move |client| client.connect_server(n_parallel)),
-                )
-            } else {
-                Either::B(client.connect_server(0))
-            }
+    let clients = listener.incoming();
+    while let Some(sock) = clients.next().await {
+        let client = sock.and_then(|sock| {
+            NewClient::from_socket(sock, monitor.servers())
         });
         let buf = shared_buf.clone();
-        let serv = conn.and_then(|client| client.serve(buf));
-        handle.spawn(serv);
-        Ok(())
-    });
-    lp.run(server).or(Err("error on event loop"))?;
+        match client {
+            Ok(client) => {
+                tokio::spawn(async move {
+                    let result = handle_client(
+                        client, remote_dns, n_parallel, buf
+                    ).await;
+                    if let Err(e) = result {
+                        info!("error on hanle client: {}", e);
+                    }
+                });
+            }
+            Err(err) => info!("error on accept client: {}", err),
+        }
+    }
 
     // make sure socket file will be deleted on exit.
     // unnecessary drop() but make complier happy about unused var.
     drop(sock_file);
+    Ok(())
+}
+
+async fn handle_client(
+    client: NewClient,
+    remote_dns: bool,
+    n_parallel: usize,
+    shared_buf: SharedBuf
+) -> io::Result<()> {
+    let client = if remote_dns && client.dest.port == 443 {
+        client.retrive_dest().await?.connect_server(n_parallel).await
+    } else {
+        client.connect_server(0).await
+    };
+    if let Some(client) = client {
+        client.serve(shared_buf).await?;
+    } else {
+        warn!("no avaliable proxy server");
+    }
     Ok(())
 }
 

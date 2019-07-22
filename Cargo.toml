@@ -10,9 +10,8 @@ nix = "0.14"
 rand = "0.7"
 futures = "0.1"
 tokio = "0.2"
-tokio-io = "0.2"
-tokio-uds = "0.3"
 tokio-signal = "0.3"
+tokio-uds = "0.3"
 net2 = "0.2"
 clap = {version = "2.33", features = ["yaml"]}
 log = "0.4"
@@ -33,9 +32,9 @@ futures03 = { package = "futures-preview", version = "0.3.0-alpha.17", default-f
 
 [patch.crates-io]
 tokio = { git = 'https://github.com/tokio-rs/tokio', features = ['async-traits'] }
-tokio-io = { git = 'https://github.com/tokio-rs/tokio' }
-tokio-uds = { git = 'https://github.com/tokio-rs/tokio' }
 tokio-signal = { git = 'https://github.com/tokio-rs/tokio' }
+tokio-uds = { git = 'https://github.com/tokio-rs/tokio', features = ['async-traits'] }
+
 hyper = { git = 'https://github.com/hyperium/hyper' }
 
 

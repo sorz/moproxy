@@ -101,7 +101,7 @@ impl Monitor {
 
     /// Start monitoring throughput.
     /// Returned Future won't return unless error on timer.
-    pub async fn monitor_throughput(&self) {
+    pub async fn monitor_throughput(self) {
         let interval = Duration::from_secs(THROUGHPUT_INTERVAL_SECS);
         let mut interval = Interval::new_interval(interval);
         loop {

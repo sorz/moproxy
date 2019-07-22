@@ -1,22 +1,27 @@
 mod helpers;
 
-use futures::{Future, Stream};
 use http;
 use hyper::{
-    server::conn::Http, service::service_fn_ok, Body, Method, Request, Response, StatusCode,
+    server::conn::Http,
+    service::{make_service_fn, service_fn},
+    Body, Method, Request, Response, StatusCode,
 };
 use helpers::{RequestExt, DurationExt, to_human_bytes, to_human_bps};
-use log::{debug, error};
+use log::warn;
 use prettytable::{Table, row, cell, format::consts::FORMAT_NO_LINESEP_WITH_TITLE};
 use serde_derive::Serialize;
 use std::{
-    fmt::{Debug, Write},
+    fmt::Write,
     io,
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio_core::reactor::Handle;
-use tokio_io::{AsyncRead, AsyncWrite};
+use futures03::Stream;
+use tokio::{
+    self,
+    executor::DefaultExecutor,
+    io::{AsyncRead, AsyncWrite},
+};
 
 use crate::{
     monitor::{Monitor, Throughput},
@@ -147,30 +152,29 @@ fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Res
     .unwrap()
 }
 
-pub fn run_server<I, S, A>(
-    incoming: I,
-    monitor: Monitor,
-    handle: &Handle,
-) -> impl Future<Item = (), Error = ()>
+pub async fn run_server<I, S>(incoming: I, monitor: Monitor)
 where
-    I: Stream<Item = (S, A), Error = io::Error> + 'static,
-    S: AsyncRead + AsyncWrite + Send + 'static,
-    A: Debug,
+    I: Stream<Item=io::Result<S>> + 'static,
+    S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
-    handle.spawn(monitor.monitor_throughput(handle.clone()));
+    tokio::spawn(monitor.clone().monitor_throughput());
     let start_time = Instant::now();
 
-    let new_service = move || {
+    let make_svc = make_service_fn(move |sock| {
         let monitor = monitor.clone();
-        service_fn_ok(move |req| response(&req, &start_time, &monitor))
-    };
-
-    let incoming = incoming.map(|(conn, addr)| {
-        debug!("web server connected with {:?}", addr);
-        conn
+        async move {
+            Ok::<_, hyper::Error>(service_fn(move |req| {
+                let monitor = monitor.clone();
+                async move {
+                    Ok::<_, hyper::Error>(response(&req, &start_time, &monitor))
+                }
+            }))
+        }
     });
-    let http = Http::new().with_executor(handle.remote().clone());
-    let server = hyper::server::Builder::new(incoming, http).serve(new_service);
 
-    server.map_err(|err| error!("error on http server: {}", err))
+    let http = Http::new().with_executor(DefaultExecutor::current());
+    let server = hyper::server::Builder::new(incoming, http).serve(make_svc);
+    if let Err(e) = server.await {
+        warn!("web server error: {}", e);
+    }
 }

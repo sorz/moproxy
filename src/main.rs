@@ -1,6 +1,5 @@
 #![feature(async_await, async_closure)]
 use clap::load_yaml;
-use futures::{future::Either, Future, Stream};
 use ini::Ini;
 use log::{debug, error, info, warn, LevelFilter};
 use std::{
@@ -16,17 +15,13 @@ use std::{
 use tokio::{
     self,
     net::TcpListener,
-    reactor::Reactor,
 };
-use tokio_uds::UnixListener;
 use tokio_signal::unix::{Signal, SIGHUP};
-use futures03::{
-    stream::{FuturesUnordered, StreamExt},
-    future::{self, FutureExt},
-};
+use tokio_uds::UnixListener;
+use futures03::stream::StreamExt;
 
-//#[cfg(feature = "web_console")]
-//use moproxy::web;
+#[cfg(feature = "web_console")]
+use moproxy::web;
 use moproxy::{
     client::{Connectable, NewClient},
     monitor::Monitor,
@@ -119,20 +114,19 @@ async fn main() -> Result<(), &'static str> {
         };
         let monitor = monitor.clone();
         if http_addr.starts_with('/') {
-            unimplemented!();
-            /*
-            let sock = AutoRemoveFile::new(&http_addr);
-            let incoming = UnixListener::bind(&sock)
-                .or(Err("fail to bind web server"))?
-                .incoming()
-                .and_then(|s| s.peer_addr().map(|addr| (s, addr)));
-            sock_file = Some(sock);
             #[cfg(feature = "web_console")]
             {
+                let sock = AutoRemoveFile::new(&http_addr);
+                unimplemented!();
+                /*
+                let incoming = UnixListener::bind(&sock)
+                    .or(Err("fail to bind web server"))?
+                    .incoming();
+                sock_file = Some(sock);
                 let serv = web::run_server(incoming, monitor);
                 tokio::spawn(serv);
+                */
             }
-            */
         } else {
             // FIXME: remove duplicate code
             #[cfg(feature = "web_console")]

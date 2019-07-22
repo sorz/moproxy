@@ -30,7 +30,6 @@ use futures03::{
 use moproxy::{
     client::{Connectable, NewClient},
     monitor::Monitor,
-    proxy::copy::SharedBuf,
     proxy::{ProxyProto, ProxyServer},
     tcp::set_congestion,
 };
@@ -136,26 +135,25 @@ async fn main() -> Result<(), &'static str> {
             */
         } else {
             // FIXME: remove duplicate code
-            let addr = http_addr
-                .parse()
-                .or(Err("not a valid address of TCP socket"))?;
-            let incoming = TcpListener::bind(&addr)
-                .or(Err("fail to bind web server"))?
-                .incoming();
             #[cfg(feature = "web_console")]
             {
+                let addr = http_addr
+                    .parse()
+                    .or(Err("not a valid address of TCP socket"))?;
+                let incoming = TcpListener::bind(&addr)
+                    .or(Err("fail to bind web server"))?
+                    .incoming();
                 let serv = web::run_server(incoming, monitor);
                 tokio::spawn(serv);
             }
         }
         info!("http run on {}", http_addr);
     }
-    let serv = monitor.monitor_delay(probe);
-    tokio::spawn(serv);
+    tokio::spawn(monitor.clone().monitor_delay(probe));
 
     // Setup signal listener for reloading server list
     let monitor_ = monitor.clone();
-    let signals = Signal::new(SIGHUP).await
+    let mut signals = Signal::new(SIGHUP).await
         .or(Err("cannot catch signal"))?;
     tokio::spawn(async move {
         while let Some(_) = signals.next().await {
@@ -175,19 +173,15 @@ async fn main() -> Result<(), &'static str> {
         set_congestion(&listener, alg).or(Err("fail to set tcp congestion algorithm. \
                                                 check tcp_allowed_congestion_control?"))?;
     }
-    let shared_buf = SharedBuf::new(8192);
-    let clients = listener.incoming();
+    let mut clients = listener.incoming();
     while let Some(sock) = clients.next().await {
         let client = sock.and_then(|sock| {
             NewClient::from_socket(sock, monitor.servers())
         });
-        let buf = shared_buf.clone();
         match client {
             Ok(client) => {
                 tokio::spawn(async move {
-                    let result = handle_client(
-                        client, remote_dns, n_parallel, buf
-                    ).await;
+                    let result = handle_client(client, remote_dns, n_parallel).await;
                     if let Err(e) = result {
                         info!("error on hanle client: {}", e);
                     }
@@ -207,7 +201,6 @@ async fn handle_client(
     client: NewClient,
     remote_dns: bool,
     n_parallel: usize,
-    shared_buf: SharedBuf
 ) -> io::Result<()> {
     let client = if remote_dns && client.dest.port == 443 {
         client.retrive_dest().await?.connect_server(n_parallel).await
@@ -215,7 +208,7 @@ async fn handle_client(
         client.connect_server(0).await
     };
     if let Some(client) = client {
-        client.serve(shared_buf).await?;
+        client.serve().await?;
     } else {
         warn!("no avaliable proxy server");
     }

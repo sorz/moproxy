@@ -80,7 +80,7 @@ impl Monitor {
 
     /// Start monitoring delays.
     /// Returned Future won't return unless error on timer.
-    pub async fn monitor_delay(&self, probe: u64) {
+    pub async fn monitor_delay(self, probe: u64) {
         let mut graphite = self.graphite.map(Graphite::new);
         let interval = Duration::from_secs(probe);
 

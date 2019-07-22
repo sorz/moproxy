@@ -19,24 +19,24 @@ impl ToMillis for std::time::Duration {
 }
 
 #[derive(Debug)]
-pub struct RcBox<T: ?Sized> {
-    item: std::rc::Rc<Box<T>>,
+pub struct ArcBox<T: ?Sized> {
+    item: std::sync::Arc<Box<T>>,
 }
-impl<T: ?Sized> RcBox<T> {
+impl<T: ?Sized> ArcBox<T> {
     fn new(item: Box<T>) -> Self {
-        RcBox {
-            item: std::rc::Rc::new(item),
+        ArcBox {
+            item: std::sync::Arc::new(item),
         }
     }
 }
-impl<T: ?Sized> AsRef<T> for RcBox<T> {
+impl<T: ?Sized> AsRef<T> for ArcBox<T> {
     fn as_ref(&self) -> &T {
         &self.item
     }
 }
-impl<T: ?Sized> Clone for RcBox<T> {
+impl<T: ?Sized> Clone for ArcBox<T> {
     fn clone(&self) -> Self {
-        RcBox {
+        ArcBox {
             item: self.item.clone(),
         }
     }

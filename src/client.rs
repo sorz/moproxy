@@ -22,10 +22,10 @@ use crate::{
     client::connect::try_connect_all,
     client::tls::parse_client_hello,
     monitor::ServerList,
-    proxy::copy::{pipe, SharedBuf},
+    proxy::copy::pipe,
     proxy::{Destination, ProxyServer},
     tcp::{get_original_dest, get_original_dest6},
-    RcBox,
+    ArcBox,
 };
 
 #[derive(Debug)]
@@ -51,7 +51,7 @@ pub struct ConnectedClient {
     server: Arc<ProxyServer>,
 }
 
-type ConnectServer = Pin<Box<dyn Future<Output=Option<ConnectedClient>>>>;
+type ConnectServer = Pin<Box<dyn Future<Output=Option<ConnectedClient>> + Send>>;
 
 pub trait Connectable {
     fn connect_server(self, n_parallel: usize) -> ConnectServer;
@@ -118,7 +118,7 @@ impl NewClient {
         pending_data: Option<Box<[u8]>>,
     ) -> Option<ConnectedClient> {
         let NewClient { left, src, dest, list } = self;
-        let pending_data = pending_data.map(RcBox::new);
+        let pending_data = pending_data.map(ArcBox::new);
         let (server, right) = try_connect_all(
             dest.clone(),
             list,
@@ -154,7 +154,7 @@ impl Connectable for NewClientWithData {
 }
 
 impl ConnectedClient {
-    pub async fn serve(self, shared_buf: SharedBuf) -> io::Result<()> {
+    pub async fn serve(self) -> io::Result<()> {
         let ConnectedClient { left, right, dest, server } = self;
         // TODO: make keepalive configurable
         let timeout = Some(Duration::from_secs(180));
@@ -163,7 +163,7 @@ impl ConnectedClient {
             warn!("fail to set keepalive: {}", e);
         }
         server.update_stats_conn_open();
-        match pipe(left, right, server.clone(), shared_buf).await {
+        match pipe(left, right, server.clone()).await {
             Ok(amt) => {
                 server.update_stats_conn_close(false);
                 debug!(

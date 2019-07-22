@@ -46,7 +46,7 @@ impl Neg for Side {
 }
 
 #[derive(Clone)]
-pub struct SharedBuf {
+struct SharedBuf {
     size: usize,
     buf: Rc<RefCell<Option<Box<[u8]>>>>,
 }
@@ -78,6 +78,9 @@ impl SharedBuf {
     }
 }
 
+thread_local! {
+    static SHARED_BUF: SharedBuf = SharedBuf::new(8192);
+}
 
 macro_rules! try_poll {
     ($expr:expr) => (match $expr {
@@ -90,7 +93,6 @@ macro_rules! try_poll {
 struct StreamWithBuffer {
     pub stream: TcpStream,
     buf: Option<Box<[u8]>>,
-    shared_buf: SharedBuf,
     pos: usize,
     cap: usize,
     pub read_eof: bool,
@@ -98,10 +100,9 @@ struct StreamWithBuffer {
 }
 
 impl StreamWithBuffer {
-    pub fn new(stream: TcpStream, shared_buf: SharedBuf) -> Self {
+    pub fn new(stream: TcpStream) -> Self {
         StreamWithBuffer {
             stream,
-            shared_buf,
             buf: None,
             pos: 0,
             cap: 0,
@@ -114,19 +115,24 @@ impl StreamWithBuffer {
         self.pos == self.cap
     }
 
+    fn get_shared_buf(&self) -> SharedBuf {
+        SHARED_BUF.with(|buf| buf.clone())
+    }
+
     /// Take buffer from shared_buf or (private) buf.
     fn take_buf(&mut self) -> Box<[u8]> {
         if let Some(buf) = self.buf.take() {
             buf
         } else {
-            self.shared_buf.take()
+            self.get_shared_buf().take()
         }
     }
 
     /// Return buffer to shared_buf or (private) buf.
     fn return_buf(&mut self, buf: Box<[u8]>) {
-        if self.shared_buf.is_empty() && self.is_empty() {
-            self.shared_buf.set(buf);
+        let shared_buf = self.get_shared_buf();
+        if shared_buf.is_empty() && self.is_empty() {
+            shared_buf.set(buf);
         } else {
             self.buf.get_or_insert(buf);
         }
@@ -179,13 +185,14 @@ pub fn pipe(
     left: TcpStream,
     right: TcpStream,
     server: Arc<ProxyServer>,
-    shared_buf: SharedBuf,
 ) -> BiPipe {
+    let (left, right) = (
+        StreamWithBuffer::new(left),
+        StreamWithBuffer::new(right),
+    );
     BiPipe {
-        left: StreamWithBuffer::new(left, shared_buf.clone()),
-        right: StreamWithBuffer::new(right, shared_buf),
+        left, right, server,
         traffic: Default::default(),
-        server,
     }
 }
 

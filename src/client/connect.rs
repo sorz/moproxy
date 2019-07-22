@@ -16,7 +16,7 @@ use tokio::{
 
 use crate::{
     proxy::{Destination, ProxyServer},
-    RcBox,
+    ArcBox,
     tcp_stream_ext::TcpStreamExt,
 };
 
@@ -24,7 +24,7 @@ use crate::{
 async fn try_connect(
     dest: Destination,
     server: Arc<ProxyServer>,
-    pending_data: Option<RcBox<[u8]>>,
+    pending_data: Option<ArcBox<[u8]>>,
     wait_response: bool,
 ) -> io::Result<(Arc<ProxyServer>, TcpStream)> {
     // waiting for proxy server connected
@@ -56,11 +56,11 @@ async fn try_connect(
 /// others.
 pub struct TryConnectAll {
     dest: Destination,
-    pending_data: Option<RcBox<[u8]>>,
+    pending_data: Option<ArcBox<[u8]>>,
     parallel_n: usize,
     wait_response: bool,
     standby: VecDeque<Arc<ProxyServer>>,
-    connects: VecDeque<Pin<Box<dyn Future<Output=io::Result<(Arc<ProxyServer>, TcpStream)>>>>>,
+    connects: VecDeque<Pin<Box<dyn Future<Output=io::Result<(Arc<ProxyServer>, TcpStream)>> + Send>>>,
 }
 
 pub fn try_connect_all(
@@ -68,7 +68,7 @@ pub fn try_connect_all(
     servers: Vec<Arc<ProxyServer>>,
     parallel_n: usize,
     wait_response: bool,
-    pending_data: Option<RcBox<[u8]>>,
+    pending_data: Option<ArcBox<[u8]>>,
 ) -> TryConnectAll {
     let parallel_n = cmp::max(1, parallel_n);
     let servers = VecDeque::from_iter(servers.into_iter());

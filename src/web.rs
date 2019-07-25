@@ -160,7 +160,7 @@ where
     tokio::spawn(monitor.clone().monitor_throughput());
     let start_time = Instant::now();
 
-    let make_svc = make_service_fn(move |sock| {
+    let make_svc = make_service_fn(move |_sock| {
         let monitor = monitor.clone();
         async move {
             Ok::<_, hyper::Error>(service_fn(move |req| {

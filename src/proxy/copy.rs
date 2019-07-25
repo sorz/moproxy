@@ -228,7 +228,7 @@ impl BiPipe {
             // flush and does half close if seen eof
             if reader.read_eof {
                 try_poll!(Pin::new(&mut writer.stream).poll_flush(cx));
-                writer.stream.shutdown(Shutdown::Write);
+                drop(writer.stream.shutdown(Shutdown::Write));
                 reader.all_done = true;
                 return Poll::Ready(Ok(()));
             }

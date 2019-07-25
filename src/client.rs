@@ -1,6 +1,4 @@
-#![feature(async_await)]
 mod connect;
-mod read;
 mod tls;
 use log::{debug, info, warn};
 use std::{

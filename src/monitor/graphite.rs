@@ -4,11 +4,7 @@ use std::{
     net::SocketAddr,
     time::{Duration, SystemTime},
 };
-use tokio::{
-    util::FutureExt as TokioFutureExt,
-    io::AsyncWriteExt,
-    net::TcpStream,
-};
+use tokio::{io::AsyncWriteExt, net::TcpStream, util::FutureExt as TokioFutureExt};
 
 static GRAPHITE_TIMEOUT_SECS: u64 = 5;
 
@@ -33,10 +29,7 @@ impl Graphite {
         }
     }
 
-    pub async fn write_records(
-        &mut self,
-        records: Vec<Record>,
-    ) -> io::Result<()> {
+    pub async fn write_records(&mut self, records: Vec<Record>) -> io::Result<()> {
         let Graphite {
             ref server_addr,
             stream: ref mut stream_opt,

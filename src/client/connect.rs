@@ -7,19 +7,15 @@ use std::{
     iter::FromIterator,
     pin::Pin,
     sync::Arc,
-    task::{Poll, Context},
+    task::{Context, Poll},
 };
-use tokio::{
-    util::FutureExt as TokioFutureExt,
-    net::TcpStream,
-};
+use tokio::{net::TcpStream, util::FutureExt as TokioFutureExt};
 
 use crate::{
     proxy::{Destination, ProxyServer},
-    ArcBox,
     tcp_stream_ext::TcpStreamExt,
+    ArcBox,
 };
-
 
 async fn try_connect(
     dest: Destination,
@@ -36,14 +32,9 @@ async fn try_connect(
     // waiting for response data
     if wait_response {
         let mut buf = [0u8; 8];
-        let len = stream.peek(&mut buf)
-            .timeout(server.max_wait)
-            .await??;
+        let len = stream.peek(&mut buf).timeout(server.max_wait).await??;
         if len <= 0 {
-            return Err(io::Error::new(
-                ErrorKind::UnexpectedEof,
-                "no response data",
-            ));
+            return Err(io::Error::new(ErrorKind::UnexpectedEof, "no response data"));
         }
     }
     Ok((server, stream))
@@ -60,7 +51,8 @@ pub struct TryConnectAll {
     parallel_n: usize,
     wait_response: bool,
     standby: VecDeque<Arc<ProxyServer>>,
-    connects: VecDeque<Pin<Box<dyn Future<Output=io::Result<(Arc<ProxyServer>, TcpStream)>> + Send>>>,
+    connects:
+        VecDeque<Pin<Box<dyn Future<Output = io::Result<(Arc<ProxyServer>, TcpStream)>> + Send>>>,
 }
 
 pub fn try_connect_all(
@@ -85,8 +77,10 @@ pub fn try_connect_all(
 impl Future for TryConnectAll {
     type Output = Option<(Arc<ProxyServer>, TcpStream)>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context)
-            -> Poll<Option<(Arc<ProxyServer>, TcpStream)>> {
+    fn poll(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+    ) -> Poll<Option<(Arc<ProxyServer>, TcpStream)>> {
         loop {
             // if current connections less than parallel_n,
             // pick servers from queue to connect.
@@ -110,14 +104,13 @@ impl Future for TryConnectAll {
                     // not ready, keep here, poll next one.
                     Poll::Pending => i += 1,
                     // ready, return it.
-                    Poll::Ready(Ok(item)) =>
-                        return Poll::Ready(Some(item)),
+                    Poll::Ready(Ok(item)) => return Poll::Ready(Some(item)),
                 }
             }
 
             // if all servers failed, return error
             if self.connects.is_empty() && self.standby.is_empty() {
-                return Poll::Ready(None)
+                return Poll::Ready(None);
             }
 
             // if not need to connect standby server, wait for events.

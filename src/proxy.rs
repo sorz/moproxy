@@ -20,7 +20,6 @@ use crate::ToMillis;
 const DEFAULT_MAX_WAIT_MILLILS: u64 = 4_000;
 const GRAPHITE_PATH_PREFIX: &str = "moproxy.proxy_servers";
 
-
 #[derive(Hash, Eq, PartialEq, Copy, Clone, Debug, Serialize)]
 pub enum ProxyProto {
     #[serde(rename = "SOCKSv5")]
@@ -149,9 +148,7 @@ impl AddAssign for Traffic {
 
 impl ProxyProto {
     pub fn socks5(fake_handshaking: bool) -> Self {
-        ProxyProto::Socks5 {
-            fake_handshaking,
-        }
+        ProxyProto::Socks5 { fake_handshaking }
     }
 
     pub fn http(connect_with_payload: bool) -> Self {
@@ -207,10 +204,12 @@ impl ProxyServer {
         stream.set_nodelay(true)?;
 
         match proto {
-            ProxyProto::Socks5 { fake_handshaking } =>
-                socks5::handshake(&mut stream, &addr, data, fake_handshaking).await?,
-            ProxyProto::Http { connect_with_payload } =>
-                http::handshake(&mut stream, &addr, data, connect_with_payload).await?,
+            ProxyProto::Socks5 { fake_handshaking } => {
+                socks5::handshake(&mut stream, &addr, data, fake_handshaking).await?
+            }
+            ProxyProto::Http {
+                connect_with_payload,
+            } => http::handshake(&mut stream, &addr, data, connect_with_payload).await?,
         }
         Ok(stream)
     }

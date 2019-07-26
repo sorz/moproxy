@@ -1,11 +1,8 @@
 use hyper::Request;
-use std::{
-    fmt::Write,
-    time::Duration,
-};
 use lazy_static::lazy_static;
+use number_prefix::{NumberPrefix, Prefixed, Standalone};
 use regex::Regex;
-use number_prefix::{NumberPrefix, Standalone, Prefixed};
+use std::{fmt::Write, time::Duration};
 
 pub trait RequestExt {
     fn accept_html(&self) -> bool;
@@ -22,11 +19,13 @@ impl<T> RequestExt for Request<T> {
         }
 
         lazy_static! {
-            static ref RE: Regex = Regex::new(
-                r"(^(curl|Lynx)/|PowerShell/[\d\.]+$)"
-            ).unwrap();
+            static ref RE: Regex = Regex::new(r"(^(curl|Lynx)/|PowerShell/[\d\.]+$)").unwrap();
         }
-        if let Some(ua) = self.headers().get("user-agent").and_then(|v| v.to_str().ok()) {
+        if let Some(ua) = self
+            .headers()
+            .get("user-agent")
+            .and_then(|v| v.to_str().ok())
+        {
             !RE.is_match(ua)
         } else {
             true
@@ -47,7 +46,8 @@ impl DurationExt for Duration {
         let m = (secs % 3600) / 60;
         let s = secs % 60;
         let mut buf = String::new();
-        vec![(d, 'd'), (h, 'h'), (m, 'm'), (s, 's')].into_iter()
+        vec![(d, 'd'), (h, 'h'), (m, 'm'), (s, 's')]
+            .into_iter()
             .filter(|(v, _)| *v > 0)
             .take(2)
             .for_each(|(v, u)| {

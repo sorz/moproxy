@@ -1,23 +1,22 @@
+use httparse::{Response, Status, EMPTY_HEADER};
 use log::{debug, trace};
 use std::io::{self, ErrorKind};
 use std::net::IpAddr;
 use tokio::{
-    io::{AsyncWriteExt, AsyncReadExt},
+    io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
-use httparse::{Response, EMPTY_HEADER, Status};
 
 use crate::proxy::{Address, Destination};
 use crate::tcp_stream_ext::TcpStreamExt;
-
 
 macro_rules! ensure_200 {
     ($code:expr) => {
         if $code != 200 {
             return Err(io::Error::new(
                 ErrorKind::Other,
-                format!("proxy return error: {}", $code)
-            ))
+                format!("proxy return error: {}", $code),
+            ));
         }
     };
 }
@@ -63,22 +62,24 @@ where
                     ensure_200!(code);
                 }
                 if bytes_read > 64_000 {
-                    return Err(io::Error::new(
-                        ErrorKind::Other, "response too large"));
+                    return Err(io::Error::new(ErrorKind::Other, "response too large"));
                 }
                 // Drop peeked data from socket buffer
                 stream.read(&mut sink[..peek_len]).await?;
             }
             Ok(Status::Complete(bytes_request)) => {
-                trace!("response {}, {} bytes",
-                    response.code.unwrap(), bytes_request);
+                trace!(
+                    "response {}, {} bytes",
+                    response.code.unwrap(),
+                    bytes_request
+                );
                 ensure_200!(response.code.unwrap());
                 let len = peek_len - (bytes_read - bytes_request);
                 stream.read(&mut sink[..len]).await?;
                 break;
             }
         }
-    };
+    }
 
     // Write out payload if exist
     if !with_playload {

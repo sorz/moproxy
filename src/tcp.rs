@@ -1,10 +1,7 @@
 use libc::{self, c_void, setsockopt, socklen_t, IPPROTO_TCP, TCP_CONGESTION};
 use nix::{
     self,
-    sys::socket::{
-        getsockopt,
-        sockopt::OriginalDst,
-    },
+    sys::socket::{getsockopt, sockopt::OriginalDst},
 };
 use std::{
     ffi::OsStr,
@@ -18,12 +15,10 @@ pub fn get_original_dest<F>(fd: &F) -> io::Result<SocketAddrV4>
 where
     F: AsRawFd,
 {
-    let addr = getsockopt(fd.as_raw_fd(), OriginalDst).map_err(
-        |e| match e {
-            nix::Error::Sys(err) => io::Error::from(err),
-            _ => io::Error::new(ErrorKind::Other, e),
-        },
-    )?;
+    let addr = getsockopt(fd.as_raw_fd(), OriginalDst).map_err(|e| match e {
+        nix::Error::Sys(err) => io::Error::from(err),
+        _ => io::Error::new(ErrorKind::Other, e),
+    })?;
     let addr = SocketAddrV4::new(
         u32::from_be(addr.sin_addr.s_addr).into(),
         u16::from_be(addr.sin_port),

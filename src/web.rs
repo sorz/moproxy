@@ -1,24 +1,23 @@
 mod helpers;
 
+use futures::Stream;
+use helpers::{to_human_bps, to_human_bytes, DurationExt, RequestExt};
 use http;
 use hyper::{
     server::conn::Http,
     service::{make_service_fn, service_fn},
     Body, Method, Request, Response, StatusCode,
 };
-use helpers::{RequestExt, DurationExt, to_human_bytes, to_human_bps};
 use log::warn;
-use prettytable::{Table, row, cell, format::consts::FORMAT_NO_LINESEP_WITH_TITLE};
+use prettytable::{cell, format::consts::FORMAT_NO_LINESEP_WITH_TITLE, row, Table};
 use serde_derive::Serialize;
 use std::{
     fmt::Write,
-    fs,
-    io,
-    sync::Arc,
+    fs, io,
     path::Path,
+    sync::Arc,
     time::{Duration, Instant},
 };
-use futures::Stream;
 use tokio::{
     self,
     executor::DefaultExecutor,
@@ -56,16 +55,18 @@ impl Status {
             })
             .collect();
         Status {
-            servers, throughput,
+            servers,
+            throughput,
             uptime: start_time.elapsed(),
         }
     }
 }
 
-
-fn home_page(req: &Request<Body>, start_time: &Instant, monitor: &Monitor)
-        -> http::Result<Response<Body>>
-{
+fn home_page(
+    req: &Request<Body>,
+    start_time: &Instant,
+    monitor: &Monitor,
+) -> http::Result<Response<Body>> {
     if req.accept_html() {
         Response::builder()
             .header("Content-Type", "text/html")
@@ -75,23 +76,30 @@ fn home_page(req: &Request<Body>, start_time: &Instant, monitor: &Monitor)
     }
 }
 
-fn plaintext_status(start_time: &Instant, monitor: &Monitor)
-        -> http::Result<Response<Body>>
-{
+fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> http::Result<Response<Body>> {
     let status = Status::from(start_time, monitor);
     let mut buf = String::new();
 
-    writeln!(&mut buf, "moproxy ({}) is running. {}",
-        env!("CARGO_PKG_VERSION"), status.uptime.format()
-    ).unwrap();
+    writeln!(
+        &mut buf,
+        "moproxy ({}) is running. {}",
+        env!("CARGO_PKG_VERSION"),
+        status.uptime.format()
+    )
+    .unwrap();
 
-    writeln!(&mut buf, "↑ {} ↓ {}",
+    writeln!(
+        &mut buf,
+        "↑ {} ↓ {}",
         to_human_bps(status.throughput.tx_bps),
         to_human_bps(status.throughput.rx_bps),
-    ).unwrap();
+    )
+    .unwrap();
 
     let mut table = Table::new();
-    table.add_row(row!["Server", "Score", "Delay", "CUR", "TTL", "Up", "Down", "↑↓"]);
+    table.add_row(row![
+        "Server", "Score", "Delay", "CUR", "TTL", "Up", "Down", "↑↓"
+    ]);
     table.set_format(*FORMAT_NO_LINESEP_WITH_TITLE);
 
     for ServerStatus { server, throughput } in status.servers {
@@ -131,7 +139,6 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor)
         .body(buf.into())
 }
 
-
 fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Response<Body> {
     match (req.method(), req.uri().path()) {
         (&Method::GET, "/") => home_page(req, start_time, monitor),
@@ -156,7 +163,7 @@ fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Res
 
 pub async fn run_server<I, S>(incoming: I, monitor: Monitor)
 where
-    I: Stream<Item=io::Result<S>> + 'static,
+    I: Stream<Item = io::Result<S>> + 'static,
     S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
 {
     tokio::spawn(monitor.clone().monitor_throughput());
@@ -167,9 +174,7 @@ where
         async move {
             Ok::<_, hyper::Error>(service_fn(move |req| {
                 let monitor = monitor.clone();
-                async move {
-                    Ok::<_, hyper::Error>(response(&req, &start_time, &monitor))
-                }
+                async move { Ok::<_, hyper::Error>(response(&req, &start_time, &monitor)) }
             }))
         }
     });
@@ -180,7 +185,6 @@ where
         warn!("web server error: {}", e);
     }
 }
-
 
 /// File on this path will be removed on `drop()`.
 pub struct AutoRemoveFile<'a> {

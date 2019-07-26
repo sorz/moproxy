@@ -1,9 +1,9 @@
 use crate::proxy::{Address, Destination};
 use log::trace;
-use std::io::{self, Write, ErrorKind};
+use std::io::{self, ErrorKind, Write};
 use std::net::IpAddr;
 use tokio::{
-    io::{AsyncWriteExt, AsyncReadExt},
+    io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
 
@@ -62,11 +62,19 @@ where
     stream.read_exact(&mut buf).await?;
     trace!("socks: read {:?}", buf);
     match buf[..2] {
-        [0x05, 0xff] => return Err(io::Error::new(ErrorKind::Other,
-                "auth required by socks server")),
+        [0x05, 0xff] => {
+            return Err(io::Error::new(
+                ErrorKind::Other,
+                "auth required by socks server",
+            ))
+        }
         [0x05, 0x00] => (),
-        _ => return Err(io::Error::new(ErrorKind::Other,
-                "unrecognized reply from socks server"))
+        _ => {
+            return Err(io::Error::new(
+                ErrorKind::Other,
+                "unrecognized reply from socks server",
+            ))
+        }
     }
 
     // Write the actual request
@@ -75,13 +83,12 @@ where
     trace!("socks: write request {:?}", buf);
     stream.write_all(&buf).await?;
 
-    // Check server's reply    
+    // Check server's reply
     buf.resize_with(10, Default::default);
     stream.read_exact(&mut buf).await?;
     trace!("socks: read reply {:?}", buf);
     if !buf.starts_with(&[0x05, 0x00]) {
-        return Err(io::Error::new(ErrorKind::Other,
-            "socks server reply error"));
+        return Err(io::Error::new(ErrorKind::Other, "socks server reply error"));
     }
 
     // Write out payload if exist

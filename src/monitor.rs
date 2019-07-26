@@ -2,6 +2,7 @@ mod graphite;
 mod traffic;
 use futures::future::join_all;
 use log::{debug, warn};
+use parking_lot::Mutex;
 use rand::{self, Rng};
 use std;
 use std::collections::HashMap;
@@ -9,12 +10,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
-use parking_lot::Mutex;
-use tokio::{
-    util::FutureExt as TokioFutureExt,
-    io::AsyncReadExt,
-    timer::Interval,
-};
+use tokio::{io::AsyncReadExt, timer::Interval, util::FutureExt as TokioFutureExt};
 
 use self::graphite::{Graphite, Record};
 use self::traffic::Meter;
@@ -85,7 +81,7 @@ impl Monitor {
         let interval = Duration::from_secs(probe);
 
         test_all(&self).await;
-        
+
         let mut interval = Interval::new_interval(interval);
         loop {
             interval.next().await;
@@ -144,7 +140,8 @@ async fn test_all(monitor: &Monitor) {
             Box::pin(async move {
                 server.update_delay(alive_test(&server).await.ok());
             })
-        }).collect();
+        })
+        .collect();
 
     join_all(tests).await;
     monitor.resort();
@@ -206,7 +203,9 @@ async fn alive_test(server: &ProxyServer) -> io::Result<Duration> {
         let mut stream = server.connect(&test_dns, Some(request)).await?;
         stream.read_exact(&mut buf).await?;
         Ok(())
-    }.timeout(server.max_wait).await;
+    }
+        .timeout(server.max_wait)
+        .await;
 
     match result {
         Err(_) => return Err(io::Error::new(io::ErrorKind::TimedOut, "test timeout")),

@@ -4,9 +4,9 @@ pub mod client;
 pub mod monitor;
 pub mod proxy;
 pub mod tcp;
+mod tcp_stream_ext;
 #[cfg(feature = "web_console")]
 pub mod web;
-mod tcp_stream_ext;
 
 pub trait ToMillis {
     fn millis(&self) -> u32;

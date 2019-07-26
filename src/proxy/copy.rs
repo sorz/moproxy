@@ -2,18 +2,18 @@ use log::debug;
 use std::{
     cell::RefCell,
     fmt,
+    future::Future,
     io,
     net::Shutdown,
     ops::Neg,
+    pin::Pin,
     rc::Rc,
     sync::Arc,
-    future::Future,
-    task::{Poll, Context},
-    pin::Pin,
+    task::{Context, Poll},
 };
 use tokio::{
-    net::TcpStream,
     io::{AsyncRead, AsyncWrite},
+    net::TcpStream,
 };
 
 use self::Side::{Left, Right};
@@ -83,11 +83,13 @@ thread_local! {
 }
 
 macro_rules! try_poll {
-    ($expr:expr) => (match $expr {
-        Poll::Pending => return Poll::Pending,
-        Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
-        Poll::Ready(Ok(v)) => v,
-    });
+    ($expr:expr) => {
+        match $expr {
+            Poll::Pending => return Poll::Pending,
+            Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+            Poll::Ready(Ok(v)) => v,
+        }
+    };
 }
 
 struct StreamWithBuffer {
@@ -138,11 +140,10 @@ impl StreamWithBuffer {
         }
     }
 
-    pub fn poll_read_to_buffer(&mut self, cx: &mut Context)
-             -> Poll<io::Result<usize>> {
+    pub fn poll_read_to_buffer(&mut self, cx: &mut Context) -> Poll<io::Result<usize>> {
         let mut buf = self.take_buf();
         let stream = Pin::new(&mut self.stream);
-        
+
         let n = try_poll!(stream.poll_read(cx, &mut buf));
         if n == 0 {
             self.read_eof = true;
@@ -154,8 +155,11 @@ impl StreamWithBuffer {
         Poll::Ready(Ok(n))
     }
 
-    pub fn poll_write_buffer_to(&mut self, cx: &mut Context, writer: &mut TcpStream)
-             -> Poll<io::Result<usize>> {
+    pub fn poll_write_buffer_to(
+        &mut self,
+        cx: &mut Context,
+        writer: &mut TcpStream,
+    ) -> Poll<io::Result<usize>> {
         let buf = self.buf.take().expect("try to write empty buffer");
         let writer = Pin::new(writer);
         let n = try_poll!(writer.poll_write(cx, &buf[self.pos..self.cap]));
@@ -181,24 +185,18 @@ pub struct BiPipe {
     traffic: Traffic,
 }
 
-pub fn pipe(
-    left: TcpStream,
-    right: TcpStream,
-    server: Arc<ProxyServer>,
-) -> BiPipe {
-    let (left, right) = (
-        StreamWithBuffer::new(left),
-        StreamWithBuffer::new(right),
-    );
+pub fn pipe(left: TcpStream, right: TcpStream, server: Arc<ProxyServer>) -> BiPipe {
+    let (left, right) = (StreamWithBuffer::new(left), StreamWithBuffer::new(right));
     BiPipe {
-        left, right, server,
+        left,
+        right,
+        server,
         traffic: Default::default(),
     }
 }
 
 impl BiPipe {
-    fn poll_one_side(&mut self, cx: &mut Context, side: Side)
-            -> Poll<io::Result<()>> {
+    fn poll_one_side(&mut self, cx: &mut Context, side: Side) -> Poll<io::Result<()>> {
         let Self {
             ref mut left,
             ref mut right,
@@ -239,8 +237,7 @@ impl BiPipe {
 impl Future for BiPipe {
     type Output = io::Result<Traffic>;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context)
-            -> Poll<io::Result<Traffic>> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<Traffic>> {
         if !self.left.all_done {
             try_poll!(self.poll_one_side(cx, Left));
         }

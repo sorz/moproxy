@@ -1,20 +1,8 @@
 mod connect;
 mod tls;
 use log::{debug, info, warn};
-use std::{
-    io,
-    cmp,
-    net::SocketAddr,
-    sync::Arc,
-    time::Duration,
-    pin::Pin,
-    future::Future,
-};
-use tokio::{
-    util::FutureExt as TokioFutureExt,
-    io::AsyncReadExt,
-    net::TcpStream,
-};
+use std::{cmp, future::Future, io, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
+use tokio::{io::AsyncReadExt, net::TcpStream, util::FutureExt as TokioFutureExt};
 
 use crate::{
     client::connect::try_connect_all,
@@ -49,7 +37,7 @@ pub struct ConnectedClient {
     server: Arc<ProxyServer>,
 }
 
-type ConnectServer = Pin<Box<dyn Future<Output=Option<ConnectedClient>> + Send>>;
+type ConnectServer = Pin<Box<dyn Future<Output = Option<ConnectedClient>> + Send>>;
 
 pub trait Connectable {
     fn connect_server(self, n_parallel: usize) -> ConnectServer;
@@ -59,17 +47,28 @@ impl NewClient {
     pub fn from_socket(left: TcpStream, list: ServerList) -> io::Result<Self> {
         let src = left.peer_addr()?;
         // TODO: call either v6 or v4 according to our socket
-        let dest = get_original_dest(&left).map(SocketAddr::V4)
+        let dest = get_original_dest(&left)
+            .map(SocketAddr::V4)
             .or_else(|_| get_original_dest6(&left).map(SocketAddr::V6))?
             .into();
         debug!("dest {:?}", dest);
-        Ok(NewClient { left, src, dest, list })
+        Ok(NewClient {
+            left,
+            src,
+            dest,
+            list,
+        })
     }
 }
 
 impl NewClient {
     pub async fn retrive_dest(self) -> io::Result<NewClientWithData> {
-        let NewClient { mut left, src, mut dest, list } = self;
+        let NewClient {
+            mut left,
+            src,
+            mut dest,
+            list,
+        } = self;
         let wait = Duration::from_millis(500);
         // try to read TLS ClientHello for
         //   1. --remote-dns: parse host name from SNI
@@ -115,17 +114,22 @@ impl NewClient {
         wait_response: bool,
         pending_data: Option<Box<[u8]>>,
     ) -> Option<ConnectedClient> {
-        let NewClient { left, src, dest, list } = self;
-        let pending_data = pending_data.map(ArcBox::new);
-        let (server, right) = try_connect_all(
-            dest.clone(),
+        let NewClient {
+            left,
+            src,
+            dest,
             list,
-            n_parallel,
-            wait_response,
-            pending_data,
-        ).await?;
+        } = self;
+        let pending_data = pending_data.map(ArcBox::new);
+        let (server, right) =
+            try_connect_all(dest.clone(), list, n_parallel, wait_response, pending_data).await?;
         info!("{} => {} via {}", src, dest, server.tag);
-        Some(ConnectedClient { left, right, dest, server})
+        Some(ConnectedClient {
+            left,
+            right,
+            dest,
+            server,
+        })
     }
 }
 
@@ -153,11 +157,18 @@ impl Connectable for NewClientWithData {
 
 impl ConnectedClient {
     pub async fn serve(self) -> io::Result<()> {
-        let ConnectedClient { left, right, dest, server } = self;
+        let ConnectedClient {
+            left,
+            right,
+            dest,
+            server,
+        } = self;
         // TODO: make keepalive configurable
         let timeout = Some(Duration::from_secs(180));
-        if let Err(e) = left.set_keepalive(timeout)
-                .and(right.set_keepalive(timeout)) {
+        if let Err(e) = left
+            .set_keepalive(timeout)
+            .and(right.set_keepalive(timeout))
+        {
             warn!("fail to set keepalive: {}", e);
         }
         server.update_stats_conn_open();

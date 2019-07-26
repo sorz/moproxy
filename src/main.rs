@@ -1,23 +1,13 @@
 #![feature(async_await, async_closure)]
 use clap::load_yaml;
+use futures::stream::StreamExt;
 use ini::Ini;
 use log::{debug, error, info, warn, LevelFilter};
-use std::{
-    io,
-    env,
-    io::Write,
-    net::SocketAddr,
-    str::FromStr,
-    sync::Arc,
-};
-use tokio::{
-    self,
-    net::tcp::TcpListener,
-};
+use std::{env, io, io::Write, net::SocketAddr, str::FromStr, sync::Arc};
 #[cfg(feature = "web_console")]
 use tokio::net::unix::UnixListener;
+use tokio::{self, net::tcp::TcpListener};
 use tokio_signal::unix::{Signal, SIGHUP};
-use futures::stream::StreamExt;
 
 #[cfg(feature = "web_console")]
 use moproxy::web;
@@ -142,8 +132,7 @@ async fn main() -> Result<(), &'static str> {
 
     // Setup signal listener for reloading server list
     let monitor_ = monitor.clone();
-    let mut signals = Signal::new(SIGHUP).await
-        .or(Err("cannot catch signal"))?;
+    let mut signals = Signal::new(SIGHUP).await.or(Err("cannot catch signal"))?;
     tokio::spawn(async move {
         while let Some(_) = signals.next().await {
             debug!("SIGHUP received, reload server list.");
@@ -164,9 +153,7 @@ async fn main() -> Result<(), &'static str> {
     }
     let mut clients = listener.incoming();
     while let Some(sock) = clients.next().await {
-        let client = sock.and_then(|sock| {
-            NewClient::from_socket(sock, monitor.servers())
-        });
+        let client = sock.and_then(|sock| NewClient::from_socket(sock, monitor.servers()));
         match client {
             Ok(client) => {
                 tokio::spawn(async move {
@@ -187,13 +174,13 @@ async fn main() -> Result<(), &'static str> {
     Ok(())
 }
 
-async fn handle_client(
-    client: NewClient,
-    remote_dns: bool,
-    n_parallel: usize,
-) -> io::Result<()> {
+async fn handle_client(client: NewClient, remote_dns: bool, n_parallel: usize) -> io::Result<()> {
     let client = if remote_dns && client.dest.port == 443 {
-        client.retrive_dest().await?.connect_server(n_parallel).await
+        client
+            .retrive_dest()
+            .await?
+            .connect_server(n_parallel)
+            .await
     } else {
         client.connect_server(0).await
     };

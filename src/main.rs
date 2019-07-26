@@ -14,10 +14,12 @@ use std::{
 };
 use tokio::{
     self,
-    net::TcpListener,
+    net::{
+        tcp::TcpListener,
+        unix::UnixListener,
+    },
 };
 use tokio_signal::unix::{Signal, SIGHUP};
-use tokio_uds::UnixListener;
 use futures03::stream::StreamExt;
 
 #[cfg(feature = "web_console")]
@@ -112,32 +114,23 @@ async fn main() -> Result<(), &'static str> {
         if !cfg!(feature = "web_console") {
             return Err("web console has been disabled during compiling");
         };
-        let monitor = monitor.clone();
-        if http_addr.starts_with('/') {
-            #[cfg(feature = "web_console")]
-            {
+        #[cfg(feature = "web_console")] {
+            if http_addr.starts_with('/') {
                 let sock = AutoRemoveFile::new(&http_addr);
-                unimplemented!();
-                /*
                 let incoming = UnixListener::bind(&sock)
                     .or(Err("fail to bind web server"))?
                     .incoming();
                 sock_file = Some(sock);
-                let serv = web::run_server(incoming, monitor);
+                let serv = web::run_server(incoming, monitor.clone());
                 tokio::spawn(serv);
-                */
-            }
-        } else {
-            // FIXME: remove duplicate code
-            #[cfg(feature = "web_console")]
-            {
+            } else {
                 let addr = http_addr
                     .parse()
                     .or(Err("not a valid address of TCP socket"))?;
                 let incoming = TcpListener::bind(&addr)
                     .or(Err("fail to bind web server"))?
                     .incoming();
-                let serv = web::run_server(incoming, monitor);
+                let serv = web::run_server(incoming, monitor.clone());
                 tokio::spawn(serv);
             }
         }

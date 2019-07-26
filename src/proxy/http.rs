@@ -8,6 +8,7 @@ use tokio::{
 use httparse::{Response, EMPTY_HEADER, Status};
 
 use crate::proxy::{Address, Destination};
+use crate::tcp_stream_ext::TcpStreamExt;
 
 
 macro_rules! ensure_200 {
@@ -20,6 +21,8 @@ macro_rules! ensure_200 {
         }
     };
 }
+
+const BUF_LEN: usize = 1024;
 
 pub async fn handshake<T>(
     stream: &mut TcpStream,
@@ -43,12 +46,14 @@ where
     // Parse HTTP response
     buf.clear();
     let mut bytes_read = 0;
-    let bytes_request = loop {
+    let mut sink = [0u8; BUF_LEN];
+    loop {
         let mut headers = [EMPTY_HEADER; 16];
         let mut response = Response::new(&mut headers);
-        buf.resize(bytes_read + 1024, 0);
-        bytes_read += stream.read(&mut buf).await?;
-        trace!("bytes read: {}", bytes_read);
+        buf.resize(bytes_read + BUF_LEN, 0);
+        let peek_len = stream.peek(&mut buf).await?;
+        bytes_read += peek_len;
+        trace!("bytes peek: {}", bytes_read);
 
         match response.parse(&mut buf[..bytes_read]) {
             Err(e) => return Err(io::Error::new(ErrorKind::Other, e)),
@@ -61,22 +66,19 @@ where
                     return Err(io::Error::new(
                         ErrorKind::Other, "response too large"));
                 }
+                // Drop peeked data from socket buffer
+                stream.read(&mut sink[..peek_len]).await?;
             }
-            Ok(Status::Complete(n)) => {
+            Ok(Status::Complete(bytes_request)) => {
+                trace!("response {}, {} bytes",
+                    response.code.unwrap(), bytes_request);
                 ensure_200!(response.code.unwrap());
-                break n;
+                let len = peek_len - (bytes_read - bytes_request);
+                stream.read(&mut sink[..len]).await?;
+                break;
             }
         }
     };
-
-    // Pass received body to the left
-    if bytes_request < bytes_read {
-        // TODO: return read payload
-        return Err(io::Error::new(
-            ErrorKind::Other,
-            "unimplemented function"
-        ));
-    }
 
     // Write out payload if exist
     if !with_playload {
@@ -84,6 +86,7 @@ where
             stream.write_all(data.as_ref()).await?;
         }
     }
+    trace!("HTTP CONNECT handshaking done");
     Ok(())
 }
 

@@ -8,7 +8,6 @@ use tokio::{
 };
 
 use crate::proxy::{Address, Destination};
-use crate::tcp_stream_ext::TcpStreamExt;
 
 macro_rules! ensure_200 {
     ($code:expr) => {

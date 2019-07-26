@@ -13,7 +13,6 @@ use tokio::{net::TcpStream, util::FutureExt as TokioFutureExt};
 
 use crate::{
     proxy::{Destination, ProxyServer},
-    tcp_stream_ext::TcpStreamExt,
     ArcBox,
 };
 

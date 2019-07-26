@@ -4,7 +4,6 @@ pub mod client;
 pub mod monitor;
 pub mod proxy;
 pub mod tcp;
-mod tcp_stream_ext;
 #[cfg(feature = "web_console")]
 pub mod web;
 

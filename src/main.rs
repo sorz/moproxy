@@ -20,7 +20,7 @@ use tokio::{
     },
 };
 use tokio_signal::unix::{Signal, SIGHUP};
-use futures03::stream::StreamExt;
+use futures::stream::StreamExt;
 
 #[cfg(feature = "web_console")]
 use moproxy::web;

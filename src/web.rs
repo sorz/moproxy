@@ -16,7 +16,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use futures03::Stream;
+use futures::Stream;
 use tokio::{
     self,
     executor::DefaultExecutor,

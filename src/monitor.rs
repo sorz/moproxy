@@ -1,6 +1,6 @@
 mod graphite;
 mod traffic;
-use futures03::future::join_all;
+use futures::future::join_all;
 use log::{debug, warn};
 use rand::{self, Rng};
 use std;

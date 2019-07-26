@@ -5,20 +5,17 @@ use log::{debug, error, info, warn, LevelFilter};
 use std::{
     io,
     env,
-    fs,
     io::Write,
     net::SocketAddr,
-    path::Path,
     str::FromStr,
     sync::Arc,
 };
 use tokio::{
     self,
-    net::{
-        tcp::TcpListener,
-        unix::UnixListener,
-    },
+    net::tcp::TcpListener,
 };
+#[cfg(feature = "web_console")]
+use tokio::net::unix::UnixListener;
 use tokio_signal::unix::{Signal, SIGHUP};
 use futures::stream::StreamExt;
 
@@ -108,21 +105,22 @@ async fn main() -> Result<(), &'static str> {
     let servers = servers_cfg.load()?;
     let monitor = Monitor::new(servers, graphite);
 
-    // Setup monitor & web server
-    let mut sock_file: Option<AutoRemoveFile> = None;
-    if let Some(http_addr) = args.value_of("web-bind") {
-        if !cfg!(feature = "web_console") {
-            return Err("web console has been disabled during compiling");
-        };
-        #[cfg(feature = "web_console")] {
+    // Setup web server
+    if !cfg!(feature = "web_console") && args.is_present("web-bind") {
+        return Err("web console has been disabled during compiling");
+    };
+    #[cfg(feature = "web_console")]
+    let sock_file = {
+        if let Some(http_addr) = args.value_of("web-bind") {
+            info!("http run on {}", http_addr);
             if http_addr.starts_with('/') {
-                let sock = AutoRemoveFile::new(&http_addr);
+                let sock = web::AutoRemoveFile::new(&http_addr);
                 let incoming = UnixListener::bind(&sock)
                     .or(Err("fail to bind web server"))?
                     .incoming();
-                sock_file = Some(sock);
                 let serv = web::run_server(incoming, monitor.clone());
                 tokio::spawn(serv);
+                Some(sock)
             } else {
                 let addr = http_addr
                     .parse()
@@ -132,10 +130,14 @@ async fn main() -> Result<(), &'static str> {
                     .incoming();
                 let serv = web::run_server(incoming, monitor.clone());
                 tokio::spawn(serv);
+                None
             }
+        } else {
+            None
         }
-        info!("http run on {}", http_addr);
-    }
+    };
+
+    // Setup monitor
     tokio::spawn(monitor.clone().monitor_delay(probe));
 
     // Setup signal listener for reloading server list
@@ -180,6 +182,7 @@ async fn main() -> Result<(), &'static str> {
 
     // make sure socket file will be deleted on exit.
     // unnecessary drop() but make complier happy about unused var.
+    #[cfg(feature = "web_console")]
     drop(sock_file);
     Ok(())
 }
@@ -316,29 +319,4 @@ fn parse_server(addr: &str) -> Result<SocketAddr, &'static str> {
         format!("127.0.0.1:{}", addr).parse()
     }
     .or(Err("not a valid server address"))
-}
-
-/// File on this path will be removed on `drop()`.
-struct AutoRemoveFile<'a> {
-    path: &'a str,
-}
-
-impl<'a> AutoRemoveFile<'a> {
-    fn new(path: &'a str) -> Self {
-        AutoRemoveFile { path }
-    }
-}
-
-impl<'a> Drop for AutoRemoveFile<'a> {
-    fn drop(&mut self) {
-        if let Err(err) = fs::remove_file(&self.path) {
-            warn!("fail to remove {}: {}", self.path, err);
-        }
-    }
-}
-
-impl<'a> AsRef<Path> for &'a AutoRemoveFile<'a> {
-    fn as_ref(&self) -> &Path {
-        self.path.as_ref()
-    }
 }

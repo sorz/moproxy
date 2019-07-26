@@ -12,8 +12,10 @@ use prettytable::{Table, row, cell, format::consts::FORMAT_NO_LINESEP_WITH_TITLE
 use serde_derive::Serialize;
 use std::{
     fmt::Write,
+    fs,
     io,
     sync::Arc,
+    path::Path,
     time::{Duration, Instant},
 };
 use futures::Stream;
@@ -176,5 +178,31 @@ where
     let server = hyper::server::Builder::new(incoming, http).serve(make_svc);
     if let Err(e) = server.await {
         warn!("web server error: {}", e);
+    }
+}
+
+
+/// File on this path will be removed on `drop()`.
+pub struct AutoRemoveFile<'a> {
+    path: &'a str,
+}
+
+impl<'a> AutoRemoveFile<'a> {
+    pub fn new(path: &'a str) -> Self {
+        AutoRemoveFile { path }
+    }
+}
+
+impl<'a> Drop for AutoRemoveFile<'a> {
+    fn drop(&mut self) {
+        if let Err(err) = fs::remove_file(&self.path) {
+            warn!("fail to remove {}: {}", self.path, err);
+        }
+    }
+}
+
+impl<'a> AsRef<Path> for &'a AutoRemoveFile<'a> {
+    fn as_ref(&self) -> &Path {
+        self.path.as_ref()
     }
 }

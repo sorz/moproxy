@@ -1,13 +1,10 @@
-use log::debug;
 use std::{
-    cell::RefCell,
     fmt,
     future::Future,
     io,
     net::Shutdown,
     ops::Neg,
     pin::Pin,
-    rc::Rc,
     sync::Arc,
     task::{Context, Poll},
 };
@@ -45,43 +42,6 @@ impl Neg for Side {
     }
 }
 
-#[derive(Clone)]
-struct SharedBuf {
-    size: usize,
-    buf: Rc<RefCell<Option<Box<[u8]>>>>,
-}
-
-impl SharedBuf {
-    /// Create a empty buffer.
-    pub fn new(size: usize) -> Self {
-        SharedBuf {
-            size,
-            buf: Rc::new(RefCell::new(None)),
-        }
-    }
-
-    /// Take the inner buffer or allocate a new one.
-    fn take(&self) -> Box<[u8]> {
-        self.buf.borrow_mut().take().unwrap_or_else(|| {
-            debug!("allocate new buffer");
-            vec![0; self.size].into_boxed_slice()
-        })
-    }
-
-    fn is_empty(&self) -> bool {
-        self.buf.borrow().is_none()
-    }
-
-    /// Return the taken buffer back.
-    fn set(&self, buf: Box<[u8]>) {
-        self.buf.borrow_mut().get_or_insert(buf);
-    }
-}
-
-thread_local! {
-    static SHARED_BUF: SharedBuf = SharedBuf::new(8192);
-}
-
 macro_rules! try_poll {
     ($expr:expr) => {
         match $expr {
@@ -92,9 +52,11 @@ macro_rules! try_poll {
     };
 }
 
+const BUF_SIZE: usize = 4096;
+
 struct StreamWithBuffer {
     pub stream: TcpStream,
-    buf: Option<Box<[u8]>>,
+    buf: [u8; BUF_SIZE],
     pos: usize,
     cap: usize,
     pub read_eof: bool,
@@ -105,7 +67,7 @@ impl StreamWithBuffer {
     pub fn new(stream: TcpStream) -> Self {
         StreamWithBuffer {
             stream,
-            buf: None,
+            buf: [0u8; 4096],
             pos: 0,
             cap: 0,
             read_eof: false,
@@ -117,41 +79,16 @@ impl StreamWithBuffer {
         self.pos == self.cap
     }
 
-    fn get_shared_buf(&self) -> SharedBuf {
-        SHARED_BUF.with(|buf| buf.clone())
-    }
-
-    /// Take buffer from shared_buf or (private) buf.
-    fn take_buf(&mut self) -> Box<[u8]> {
-        if let Some(buf) = self.buf.take() {
-            buf
-        } else {
-            self.get_shared_buf().take()
-        }
-    }
-
-    /// Return buffer to shared_buf or (private) buf.
-    fn return_buf(&mut self, buf: Box<[u8]>) {
-        let shared_buf = self.get_shared_buf();
-        if shared_buf.is_empty() && self.is_empty() {
-            shared_buf.set(buf);
-        } else {
-            self.buf.get_or_insert(buf);
-        }
-    }
-
     pub fn poll_read_to_buffer(&mut self, cx: &mut Context) -> Poll<io::Result<usize>> {
-        let mut buf = self.take_buf();
         let stream = Pin::new(&mut self.stream);
 
-        let n = try_poll!(stream.poll_read(cx, &mut buf));
+        let n = try_poll!(stream.poll_read(cx, &mut self.buf));
         if n == 0 {
             self.read_eof = true;
         } else {
             self.pos = 0;
             self.cap = n;
         }
-        self.return_buf(buf);
         Poll::Ready(Ok(n))
     }
 
@@ -160,9 +97,8 @@ impl StreamWithBuffer {
         cx: &mut Context,
         writer: &mut TcpStream,
     ) -> Poll<io::Result<usize>> {
-        let buf = self.buf.take().expect("try to write empty buffer");
         let writer = Pin::new(writer);
-        let n = try_poll!(writer.poll_write(cx, &buf[self.pos..self.cap]));
+        let n = try_poll!(writer.poll_write(cx, &self.buf[self.pos..self.cap]));
         if n == 0 {
             return Poll::Ready(Err(io::Error::new(
                 io::ErrorKind::WriteZero,
@@ -171,7 +107,6 @@ impl StreamWithBuffer {
         } else {
             self.pos += n;
         }
-        self.return_buf(buf);
         Poll::Ready(Ok(n))
     }
 }

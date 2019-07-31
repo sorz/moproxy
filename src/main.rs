@@ -132,7 +132,7 @@ async fn main() -> Result<(), &'static str> {
 
     // Setup signal listener for reloading server list
     let monitor_ = monitor.clone();
-    let mut signals = Signal::new(SIGHUP).await.or(Err("cannot catch signal"))?;
+    let mut signals = Signal::new(SIGHUP).or(Err("cannot catch signal"))?;
     tokio::spawn(async move {
         while let Some(_) = signals.next().await {
             debug!("SIGHUP received, reload server list.");

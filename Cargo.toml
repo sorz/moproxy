@@ -34,7 +34,6 @@ tokio-signal = { git = 'https://github.com/tokio-rs/tokio' }
 
 hyper = { git = 'https://github.com/hyperium/hyper' }
 
-
 [features]
 default = ["web_console"]
 web_console = ["hyper"]

@@ -84,11 +84,16 @@ where
     stream.write_all(&buf).await?;
 
     // Check server's reply
-    buf.resize_with(10, Default::default);
+    buf.resize(10, 0);
     stream.read_exact(&mut buf).await?;
     trace!("socks: read reply {:?}", buf);
     if !buf.starts_with(&[0x05, 0x00]) {
         return Err(io::Error::new(ErrorKind::Other, "socks server reply error"));
+    }
+    if buf[3] == 4 {
+        // Consume truncted IPv6 address
+        buf.resize(16 - 4, 0);
+        stream.read_exact(&mut buf).await?;
     }
 
     // Write out payload if exist

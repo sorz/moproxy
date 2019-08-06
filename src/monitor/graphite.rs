@@ -4,7 +4,7 @@ use std::{
     net::SocketAddr,
     time::{Duration, SystemTime},
 };
-use tokio::{io::AsyncWriteExt, net::TcpStream, future::FutureExt};
+use tokio::{future::FutureExt, io::AsyncWriteExt, net::TcpStream};
 
 static GRAPHITE_TIMEOUT_SECS: u64 = 5;
 

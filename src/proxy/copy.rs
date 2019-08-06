@@ -1,3 +1,4 @@
+use log::trace;
 use std::{
     cell::RefCell,
     fmt,
@@ -10,7 +11,6 @@ use std::{
     task::{Context, Poll},
     thread_local,
 };
-use log::trace;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
@@ -92,9 +92,7 @@ impl StreamWithBuffer {
         let n = try_poll!(if let Some(ref mut buf) = self.buf {
             stream.poll_read(cx, buf)
         } else {
-            SHARED_BUFFER.with(|buf| {
-                stream.poll_read(cx, &mut buf.borrow_mut()[..])
-            })
+            SHARED_BUFFER.with(|buf| stream.poll_read(cx, &mut buf.borrow_mut()[..]))
         });
 
         if n == 0 {
@@ -117,16 +115,13 @@ impl StreamWithBuffer {
         let result = if let Some(ref buf) = self.buf {
             writer.poll_write(cx, &buf[self.pos..self.cap])
         } else {
-            SHARED_BUFFER.with(|buf| {
-                writer.poll_write(cx, &buf.borrow_mut()[self.pos..self.cap])
-            })
+            SHARED_BUFFER.with(|buf| writer.poll_write(cx, &buf.borrow_mut()[self.pos..self.cap]))
         };
         match result {
-            Poll::Ready(Ok(0)) => {
-                Poll::Ready(Err(io::Error::new(
-                    io::ErrorKind::WriteZero, "write zero byte into writer",
-                )))
-            }
+            Poll::Ready(Ok(0)) => Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "write zero byte into writer",
+            ))),
             Poll::Ready(Ok(n)) => {
                 self.pos += n;
                 trace!("{} bytes written", n);
@@ -146,7 +141,7 @@ impl StreamWithBuffer {
                 });
                 Poll::Pending
             }
-            _ => result
+            _ => result,
         }
     }
 }

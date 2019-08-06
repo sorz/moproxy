@@ -9,7 +9,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::{net::TcpStream, future::FutureExt};
+use tokio::{future::FutureExt, net::TcpStream};
 
 use crate::{
     proxy::{Destination, ProxyServer},
@@ -44,8 +44,8 @@ async fn try_connect(
 /// connect. Once any of them connected, move that to `reading` and wait
 /// for read respone. Once any of handshakings done, return it and cancel
 /// others.
-pub struct TryConnectAll {
-    dest: Destination,
+pub struct TryConnectAll<'a> {
+    dest: &'a Destination,
     pending_data: Option<ArcBox<[u8]>>,
     parallel_n: usize,
     wait_response: bool,
@@ -55,7 +55,7 @@ pub struct TryConnectAll {
 }
 
 pub fn try_connect_all(
-    dest: Destination,
+    dest: &Destination,
     servers: Vec<Arc<ProxyServer>>,
     parallel_n: usize,
     wait_response: bool,
@@ -73,7 +73,7 @@ pub fn try_connect_all(
     }
 }
 
-impl Future for TryConnectAll {
+impl<'a> Future for TryConnectAll<'a> {
     type Output = Option<(Arc<ProxyServer>, TcpStream)>;
 
     fn poll(

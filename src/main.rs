@@ -2,7 +2,7 @@
 use clap::load_yaml;
 use futures::stream::StreamExt;
 use ini::Ini;
-use log::{debug, error, info, warn, LevelFilter};
+use log::{debug, error, info, LevelFilter};
 use std::{env, io, io::Write, net::SocketAddr, str::FromStr, sync::Arc};
 #[cfg(feature = "web_console")]
 use tokio::net::unix::UnixListener;
@@ -188,8 +188,6 @@ async fn handle_client(client: NewClient, remote_dns: bool, n_parallel: usize) -
     };
     if let Some(client) = client {
         client.serve().await?;
-    } else {
-        warn!("no avaliable proxy server");
     }
     Ok(())
 }

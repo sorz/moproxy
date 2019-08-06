@@ -2,7 +2,7 @@ mod connect;
 mod tls;
 use log::{debug, info, warn};
 use std::{cmp, future::Future, io, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
-use tokio::{io::AsyncReadExt, net::TcpStream, future::FutureExt};
+use tokio::{future::FutureExt, io::AsyncReadExt, net::TcpStream};
 
 use crate::{
     client::connect::try_connect_all,
@@ -121,15 +121,19 @@ impl NewClient {
             list,
         } = self;
         let pending_data = pending_data.map(ArcBox::new);
-        let (server, right) =
-            try_connect_all(dest.clone(), list, n_parallel, wait_response, pending_data).await?;
-        info!("{} => {} via {}", src, dest, server.tag);
-        Some(ConnectedClient {
-            left,
-            right,
-            dest,
-            server,
-        })
+        let result = try_connect_all(&dest, list, n_parallel, wait_response, pending_data).await;
+        if let Some((server, right)) = result {
+            info!("{} => {} via {}", src, dest, server.tag);
+            Some(ConnectedClient {
+                left,
+                right,
+                dest,
+                server,
+            })
+        } else {
+            warn!("{} => {} no avaiable proxy", src, dest);
+            None
+        }
     }
 }
 

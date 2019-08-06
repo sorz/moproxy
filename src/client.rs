@@ -2,7 +2,7 @@ mod connect;
 mod tls;
 use log::{debug, info, warn};
 use std::{cmp, future::Future, io, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
-use tokio::{io::AsyncReadExt, net::TcpStream, util::FutureExt as TokioFutureExt};
+use tokio::{io::AsyncReadExt, net::TcpStream, future::FutureExt};
 
 use crate::{
     client::connect::try_connect_all,

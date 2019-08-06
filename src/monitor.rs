@@ -10,7 +10,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
-use tokio::{io::AsyncReadExt, timer::Interval, util::FutureExt as TokioFutureExt};
+use tokio::{io::AsyncReadExt, timer::Interval, future::FutureExt};
 
 use self::graphite::{Graphite, Record};
 use self::traffic::Meter;

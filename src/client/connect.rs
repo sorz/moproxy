@@ -9,7 +9,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::{net::TcpStream, util::FutureExt as TokioFutureExt};
+use tokio::{net::TcpStream, future::FutureExt};
 
 use crate::{
     proxy::{Destination, ProxyServer},

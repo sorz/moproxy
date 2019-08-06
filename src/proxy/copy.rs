@@ -8,6 +8,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
+use log::trace;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
@@ -89,6 +90,7 @@ impl StreamWithBuffer {
             self.pos = 0;
             self.cap = n;
         }
+        trace!("{} bytes read", n);
         Poll::Ready(Ok(n))
     }
 
@@ -107,6 +109,7 @@ impl StreamWithBuffer {
         } else {
             self.pos += n;
         }
+        trace!("{} bytes written", n);
         Poll::Ready(Ok(n))
     }
 }
@@ -174,14 +177,22 @@ impl Future for BiPipe {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<Traffic>> {
         if !self.left.all_done {
-            try_poll!(self.poll_one_side(cx, Left));
+            trace!("poll left");
+            if let Poll::Ready(Err(err)) = self.poll_one_side(cx, Left) {
+                return Poll::Ready(Err(err));
+            }
         }
         if !self.right.all_done {
-            try_poll!(self.poll_one_side(cx, Right));
+            trace!("poll right");
+            if let Poll::Ready(Err(err)) = self.poll_one_side(cx, Right) {
+                return Poll::Ready(Err(err));
+            }
         }
         if self.left.all_done && self.right.all_done {
+            trace!("all done");
             Poll::Ready(Ok(self.traffic))
         } else {
+            trace!("pending");
             Poll::Pending
         }
     }

@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     fmt,
     future::Future,
     io,
@@ -7,6 +8,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    thread_local,
 };
 use log::trace;
 use tokio::{
@@ -55,9 +57,13 @@ macro_rules! try_poll {
 
 const BUF_SIZE: usize = 4096;
 
+thread_local!(
+    static SHARED_BUFFER: RefCell<[u8; BUF_SIZE]> = RefCell::new([0u8; BUF_SIZE]);
+);
+
 struct StreamWithBuffer {
     pub stream: TcpStream,
-    buf: [u8; BUF_SIZE],
+    buf: Option<Box<[u8]>>,
     pos: usize,
     cap: usize,
     pub read_eof: bool,
@@ -68,7 +74,7 @@ impl StreamWithBuffer {
     pub fn new(stream: TcpStream) -> Self {
         StreamWithBuffer {
             stream,
-            buf: [0u8; 4096],
+            buf: None,
             pos: 0,
             cap: 0,
             read_eof: false,
@@ -83,7 +89,14 @@ impl StreamWithBuffer {
     pub fn poll_read_to_buffer(&mut self, cx: &mut Context) -> Poll<io::Result<usize>> {
         let stream = Pin::new(&mut self.stream);
 
-        let n = try_poll!(stream.poll_read(cx, &mut self.buf));
+        let n = try_poll!(if let Some(ref mut buf) = self.buf {
+            stream.poll_read(cx, buf)
+        } else {
+            SHARED_BUFFER.with(|buf| {
+                stream.poll_read(cx, &mut buf.borrow_mut()[..])
+            })
+        });
+
         if n == 0 {
             self.read_eof = true;
         } else {
@@ -100,17 +113,42 @@ impl StreamWithBuffer {
         writer: &mut TcpStream,
     ) -> Poll<io::Result<usize>> {
         let writer = Pin::new(writer);
-        let n = try_poll!(writer.poll_write(cx, &self.buf[self.pos..self.cap]));
-        if n == 0 {
-            return Poll::Ready(Err(io::Error::new(
-                io::ErrorKind::WriteZero,
-                "write zero byte into writer",
-            )));
+
+        let result = if let Some(ref buf) = self.buf {
+            writer.poll_write(cx, &buf[self.pos..self.cap])
         } else {
-            self.pos += n;
+            SHARED_BUFFER.with(|buf| {
+                writer.poll_write(cx, &buf.borrow_mut()[self.pos..self.cap])
+            })
+        };
+        match result {
+            Poll::Ready(Ok(0)) => {
+                Poll::Ready(Err(io::Error::new(
+                    io::ErrorKind::WriteZero, "write zero byte into writer",
+                )))
+            }
+            Poll::Ready(Ok(n)) => {
+                self.pos += n;
+                trace!("{} bytes written", n);
+                Poll::Ready(Ok(n))
+            }
+            Poll::Pending if self.buf.is_none() => {
+                // Move remaining data to the private buffer
+                let n = self.cap - self.pos;
+                trace!("allocate private buffer for {} bytes", n);
+                SHARED_BUFFER.with(|shared_buf| {
+                    let shared_buf = shared_buf.borrow();
+                    let mut buf = Vec::with_capacity(shared_buf.len());
+                    buf[..n].copy_from_slice(&shared_buf[self.pos..self.cap]);
+                    buf.resize(shared_buf.len(), 0);
+                    self.pos = 0;
+                    self.cap = n;
+                    self.buf = Some(buf.into_boxed_slice());
+                });
+                Poll::Pending
+            }
+            _ => result
         }
-        trace!("{} bytes written", n);
-        Poll::Ready(Ok(n))
     }
 }
 

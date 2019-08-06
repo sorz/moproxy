@@ -26,7 +26,7 @@ pub struct NewClient {
 pub struct NewClientWithData {
     client: NewClient,
     pending_data: Option<Box<[u8]>>,
-    allow_parallel: bool,
+    has_full_tls_hello: bool,
 }
 
 #[derive(Debug)]
@@ -73,7 +73,7 @@ impl NewClient {
         // try to read TLS ClientHello for
         //   1. --remote-dns: parse host name from SNI
         //   2. --n-parallel: need the whole request to be forwarded
-        let mut allow_parallel = false;
+        let mut has_full_tls_hello = false;
         let mut pending_data = None;
         let mut buf = vec![0u8; 2048];
         if let Ok(len) = left.read(&mut buf).timeout(wait).await {
@@ -82,7 +82,7 @@ impl NewClient {
             match parse_client_hello(&buf) {
                 Err(err) => info!("fail to parse hello: {}", err),
                 Ok(hello) => {
-                    allow_parallel = true;
+                    has_full_tls_hello = true;
                     if let Some(name) = hello.server_name {
                         dest = (name, dest.port).into();
                         debug!("SNI found: {}", name);
@@ -103,7 +103,7 @@ impl NewClient {
                 dest,
                 list,
             },
-            allow_parallel,
+            has_full_tls_hello,
             pending_data,
         })
     }
@@ -144,14 +144,14 @@ impl Connectable for NewClientWithData {
         let NewClientWithData {
             client,
             pending_data,
-            allow_parallel,
+            has_full_tls_hello,
         } = self;
-        let n_parallel = if allow_parallel {
+        let n_parallel = if has_full_tls_hello {
             cmp::min(client.list.len(), n_parallel)
         } else {
             1
         };
-        Box::pin(client.connect_server(n_parallel, true, pending_data))
+        Box::pin(client.connect_server(n_parallel, has_full_tls_hello, pending_data))
     }
 }
 

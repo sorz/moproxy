@@ -138,9 +138,8 @@ impl StreamWithBuffer {
                 trace!("allocate private buffer for {} bytes", n);
                 SHARED_BUFFER.with(|shared_buf| {
                     let shared_buf = shared_buf.borrow();
-                    let mut buf = Vec::with_capacity(shared_buf.len());
+                    let mut buf = vec![0; shared_buf.len()];
                     buf[..n].copy_from_slice(&shared_buf[self.pos..self.cap]);
-                    buf.resize(shared_buf.len(), 0);
                     self.pos = 0;
                     self.cap = n;
                     self.buf = Some(buf.into_boxed_slice());

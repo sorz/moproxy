@@ -17,7 +17,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::{
-    io::AsyncWrite,
+    io::{AsyncWrite, AsyncRead},
     net::TcpStream,
 };
 
@@ -104,8 +104,15 @@ impl StreamWithBuffer {
         self.bytes_in_pipe == 0
     }
 
-    pub fn poll_read_to_buffer(&mut self) -> Poll<io::Result<usize>> {
-        let n = try_poll!(splice(self.stream.as_raw_fd(), self.pipe_out));
+    pub fn poll_read_to_buffer(&mut self, cx: &mut Context) -> Poll<io::Result<usize>> {
+        let n = match splice(self.stream.as_raw_fd(), self.pipe_out) {
+            Poll::Pending => {
+                Pin::new(&mut self.stream).poll_read(cx, &mut [0u8; 0]);
+                return Poll::Pending;
+            }
+            Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+            Poll::Ready(Ok(v)) => v,
+        };
         if n == 0 {
             self.read_eof = true;
         } else {
@@ -117,9 +124,17 @@ impl StreamWithBuffer {
 
     pub fn poll_write_buffer_to(
         &mut self,
+        cx: &mut Context,
         writer: &mut TcpStream
     ) -> Poll<io::Result<usize>> {
-        let n = try_poll!(splice(self.pipe_in, writer.as_raw_fd()));
+        let n = match splice(self.pipe_in, writer.as_raw_fd()) {
+            Poll::Pending => {
+                Pin::new(&mut self.stream).poll_write(cx, &[0u8; 0]);
+                return Poll::Pending;
+            }
+            Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
+            Poll::Ready(Ok(v)) => v,
+        };
         Poll::Ready(if n == 0 {
             Err(io::Error::from(io::ErrorKind::WriteZero))
         } else {
@@ -164,7 +179,7 @@ impl BiPipe {
         loop {
             // read something if buffer is empty
             if reader.is_empty() && !reader.read_eof {
-                let n = try_poll!(reader.poll_read_to_buffer());
+                let n = try_poll!(reader.poll_read_to_buffer(cx));
                 let amt = match side {
                     Left => (n, 0),
                     Right => (0, n),
@@ -175,7 +190,7 @@ impl BiPipe {
             }
             // write out unitl buffer is not empty
             while !reader.is_empty() {
-                try_poll!(reader.poll_write_buffer_to(&mut writer.stream));
+                try_poll!(reader.poll_write_buffer_to(cx, &mut writer.stream));
             }
             // flush and does half close if seen eof
             if reader.read_eof {

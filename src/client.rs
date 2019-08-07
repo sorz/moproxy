@@ -176,7 +176,7 @@ impl ConnectedClient {
             warn!("fail to set keepalive: {}", e);
         }
         server.update_stats_conn_open();
-        match pipe(left, right, server.clone()).await {
+        match pipe(left, right, server.clone())?.await {
             Ok(amt) => {
                 server.update_stats_conn_close(false);
                 debug!(

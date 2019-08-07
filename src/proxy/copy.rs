@@ -1,23 +1,18 @@
 use log::trace;
-use nix::{
-    Error,
-    errno::EWOULDBLOCK,
-    fcntl::{SpliceFFlags, splice as unix_splice, OFlag},
-    unistd::pipe2 as unix_pipe,
-};
 use std::{
+    cell::RefCell,
     fmt,
     future::Future,
     io,
     net::Shutdown,
     ops::Neg,
-    os::unix::io::{RawFd, AsRawFd},
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    thread_local,
 };
 use tokio::{
-    io::{AsyncWrite, AsyncRead},
+    io::{AsyncRead, AsyncWrite},
     net::TcpStream,
 };
 
@@ -60,63 +55,51 @@ macro_rules! try_poll {
     };
 }
 
-const CHUNK_SIZE: usize = 64 * 1024;
+const BUF_SIZE: usize = 4096;
+
+thread_local!(
+    static SHARED_BUFFER: RefCell<[u8; BUF_SIZE]> = RefCell::new([0u8; BUF_SIZE]);
+);
 
 struct StreamWithBuffer {
     pub stream: TcpStream,
-    pipe_in: RawFd,
-    pipe_out: RawFd,
-    bytes_in_pipe: usize,
+    buf: Option<Box<[u8]>>,
+    pos: usize,
+    cap: usize,
     pub read_eof: bool,
-}
-
-fn splice(input: RawFd, output: RawFd) -> Poll<io::Result<usize>> {
-    let flags = SpliceFFlags::SPLICE_F_NONBLOCK;
-    trace!("splice {} to {}",input, output);
-    match unix_splice(input, None, output, None, CHUNK_SIZE, flags) {
-        Ok(n) => Poll::Ready(Ok(n)),
-        Err(Error::Sys(EWOULDBLOCK)) => Poll::Pending,
-        Err(Error::Sys(err)) => Poll::Ready(Err(err.into())),
-        Err(err) => Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, err))),
-    }
+    pub all_done: bool,
 }
 
 impl StreamWithBuffer {
-    pub fn new(stream: TcpStream) -> io::Result<Self> {
-        let (pipe_in, pipe_out) = match unix_pipe(OFlag::O_NONBLOCK | OFlag::O_CLOEXEC) {
-            Ok(v) => v,
-            Err(Error::Sys(e)) => return Err(e.into()),
-            Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
-        };
-        trace!("pipe ({}, {}) created", pipe_in, pipe_out);
-        Ok(Self {
-            stream, pipe_in, pipe_out,
-            bytes_in_pipe: 0,
+    pub fn new(stream: TcpStream) -> Self {
+        StreamWithBuffer {
+            stream,
+            buf: None,
+            pos: 0,
+            cap: 0,
             read_eof: false,
-        })
-    }
-
-    pub fn all_done(&self) -> bool {
-        self.read_eof && self.is_empty()
+            all_done: false,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.bytes_in_pipe == 0
+        self.pos == self.cap
     }
 
     pub fn poll_read_to_buffer(&mut self, cx: &mut Context) -> Poll<io::Result<usize>> {
-        let n = match splice(self.stream.as_raw_fd(), self.pipe_out) {
-            Poll::Pending => {
-                Pin::new(&mut self.stream).poll_read(cx, &mut [0u8; 0]);
-                return Poll::Pending;
-            }
-            Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
-            Poll::Ready(Ok(v)) => v,
-        };
+        let stream = Pin::new(&mut self.stream);
+
+        let n = try_poll!(if let Some(ref mut buf) = self.buf {
+            stream.poll_read(cx, buf)
+        } else {
+            SHARED_BUFFER.with(|buf| stream.poll_read(cx, &mut buf.borrow_mut()[..]))
+        });
+
         if n == 0 {
             self.read_eof = true;
         } else {
-            self.bytes_in_pipe += n;
+            self.pos = 0;
+            self.cap = n;
         }
         trace!("{} bytes read", n);
         Poll::Ready(Ok(n))
@@ -125,23 +108,41 @@ impl StreamWithBuffer {
     pub fn poll_write_buffer_to(
         &mut self,
         cx: &mut Context,
-        writer: &mut TcpStream
+        writer: &mut TcpStream,
     ) -> Poll<io::Result<usize>> {
-        let n = match splice(self.pipe_in, writer.as_raw_fd()) {
-            Poll::Pending => {
-                Pin::new(&mut self.stream).poll_write(cx, &[0u8; 0]);
-                return Poll::Pending;
-            }
-            Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
-            Poll::Ready(Ok(v)) => v,
-        };
-        Poll::Ready(if n == 0 {
-            Err(io::Error::from(io::ErrorKind::WriteZero))
+        let writer = Pin::new(writer);
+
+        let result = if let Some(ref buf) = self.buf {
+            writer.poll_write(cx, &buf[self.pos..self.cap])
         } else {
-            trace!("{} bytes written", n);
-            self.bytes_in_pipe -= n;
-            Ok(n)
-        })
+            SHARED_BUFFER.with(|buf| writer.poll_write(cx, &buf.borrow_mut()[self.pos..self.cap]))
+        };
+        match result {
+            Poll::Ready(Ok(0)) => Poll::Ready(Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "write zero byte into writer",
+            ))),
+            Poll::Ready(Ok(n)) => {
+                self.pos += n;
+                trace!("{} bytes written", n);
+                Poll::Ready(Ok(n))
+            }
+            Poll::Pending if self.buf.is_none() => {
+                // Move remaining data to the private buffer
+                let n = self.cap - self.pos;
+                trace!("allocate private buffer for {} bytes", n);
+                SHARED_BUFFER.with(|shared_buf| {
+                    let shared_buf = shared_buf.borrow();
+                    let mut buf = vec![0; shared_buf.len()];
+                    buf[..n].copy_from_slice(&shared_buf[self.pos..self.cap]);
+                    self.pos = 0;
+                    self.cap = n;
+                    self.buf = Some(buf.into_boxed_slice());
+                });
+                Poll::Pending
+            }
+            _ => result,
+        }
     }
 }
 
@@ -154,14 +155,14 @@ pub struct BiPipe {
     traffic: Traffic,
 }
 
-pub fn pipe(left: TcpStream, right: TcpStream, server: Arc<ProxyServer>) -> io::Result<BiPipe> {
-    let (left, right) = (StreamWithBuffer::new(left)?, StreamWithBuffer::new(right)?);
-    Ok(BiPipe {
+pub fn pipe(left: TcpStream, right: TcpStream, server: Arc<ProxyServer>) -> BiPipe {
+    let (left, right) = (StreamWithBuffer::new(left), StreamWithBuffer::new(right));
+    BiPipe {
         left,
         right,
         server,
         traffic: Default::default(),
-    })
+    }
 }
 
 impl BiPipe {
@@ -188,7 +189,7 @@ impl BiPipe {
                 server.add_traffic(amt);
                 *traffic += amt;
             }
-            // write out unitl buffer is not empty
+            // write out if buffer is not empty
             while !reader.is_empty() {
                 try_poll!(reader.poll_write_buffer_to(cx, &mut writer.stream));
             }
@@ -196,6 +197,7 @@ impl BiPipe {
             if reader.read_eof {
                 try_poll!(Pin::new(&mut writer.stream).poll_flush(cx));
                 drop(writer.stream.shutdown(Shutdown::Write));
+                reader.all_done = true;
                 return Poll::Ready(Ok(()));
             }
         }
@@ -206,20 +208,19 @@ impl Future for BiPipe {
     type Output = io::Result<Traffic>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<Traffic>> {
-        if !self.left.all_done() {
+        if !self.left.all_done {
             trace!("poll left");
             if let Poll::Ready(Err(err)) = self.poll_one_side(cx, Left) {
                 return Poll::Ready(Err(err));
             }
         }
-        if !self.right.all_done() {
+        if !self.right.all_done {
             trace!("poll right");
             if let Poll::Ready(Err(err)) = self.poll_one_side(cx, Right) {
                 return Poll::Ready(Err(err));
             }
         }
-
-        if self.left.all_done() && self.right.all_done() {
+        if self.left.all_done && self.right.all_done {
             trace!("all done");
             Poll::Ready(Ok(self.traffic))
         } else {

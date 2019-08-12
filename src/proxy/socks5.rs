@@ -1,6 +1,6 @@
 use crate::proxy::{Address, Destination};
 use log::trace;
-use std::io::{self, ErrorKind, Write};
+use std::io::{self, ErrorKind};
 use std::net::IpAddr;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -34,7 +34,7 @@ where
     T: AsRef<[u8]>,
 {
     let mut buf = Vec::with_capacity(16);
-    buf.write_all(&[5, 1, 0]).unwrap();
+    buf.extend_from_slice(&[5, 1, 0]);
     build_request(&mut buf, addr);
     stream.write_all(&buf).await?;
     if let Some(data) = data {
@@ -105,22 +105,22 @@ where
 }
 
 fn build_request(buffer: &mut Vec<u8>, addr: &Destination) {
-    buffer.write_all(&[5, 1, 0]).unwrap();
+    buffer.extend_from_slice(&[5, 1, 0]);
     match addr.host {
         Address::Ip(ip) => match ip {
             IpAddr::V4(ip) => {
-                buffer.write_all(&[0x01]).unwrap();
-                buffer.write_all(&ip.octets()).unwrap();
+                buffer.push(0x01);
+                buffer.extend_from_slice(&ip.octets());
             }
             IpAddr::V6(ip) => {
-                buffer.write_all(&[0x04]).unwrap();
-                buffer.write_all(&ip.octets()).unwrap();
+                buffer.push(0x04);
+                buffer.extend_from_slice(&ip.octets());
             }
         },
         Address::Domain(ref host) => {
-            buffer.write_all(&[0x03]).unwrap();
+            buffer.push(0x03);
             buffer.push(host.len() as u8);
-            buffer.write_all(host.as_bytes()).unwrap();
+            buffer.extend_from_slice(host.as_bytes());
         }
     };
     buffer.push((addr.port >> 8) as u8);

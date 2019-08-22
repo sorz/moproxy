@@ -1,5 +1,3 @@
-#![feature(async_await)]
-#![feature(async_closure)]
 pub mod client;
 pub mod monitor;
 pub mod proxy;

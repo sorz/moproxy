@@ -1,4 +1,3 @@
-#![feature(async_await, async_closure)]
 use clap::load_yaml;
 use futures::stream::StreamExt;
 use ini::Ini;
@@ -7,7 +6,7 @@ use std::{env, io, io::Write, net::SocketAddr, str::FromStr, sync::Arc};
 #[cfg(feature = "web_console")]
 use tokio::net::unix::UnixListener;
 use tokio::{self, net::tcp::TcpListener};
-use tokio_signal::unix::{Signal, SIGHUP};
+use tokio_net::signal::unix::{Signal, SignalKind};
 
 #[cfg(feature = "web_console")]
 use moproxy::web;
@@ -134,7 +133,7 @@ async fn main() -> Result<(), &'static str> {
 
     // Setup signal listener for reloading server list
     let monitor_ = monitor.clone();
-    let mut signals = Signal::new(SIGHUP).or(Err("cannot catch signal"))?;
+    let mut signals = Signal::new(SignalKind::hangup()).or(Err("cannot catch signal"))?;
     tokio::spawn(async move {
         while let Some(_) = signals.next().await {
             debug!("SIGHUP received, reload server list.");

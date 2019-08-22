@@ -54,9 +54,8 @@ async fn main() -> Result<(), &'static str> {
         .map_err(|_| "unknown log level")?;
     logger
         .filter(None, log_level)
-        .filter_module("tokio_threadpool", LevelFilter::Warn)
-        .filter_module("tokio_reactor", LevelFilter::Warn)
-        .filter_module("tokio_core", LevelFilter::Warn)
+        .filter_module("tokio_executor", LevelFilter::Warn)
+        .filter_module("tokio_net", LevelFilter::Warn)
         .filter_module("hyper", LevelFilter::Warn)
         .filter_module("mio", LevelFilter::Warn)
         .filter_module("ini", LevelFilter::Warn)

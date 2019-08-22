@@ -1,4 +1,3 @@
-#![feature(async_await)]
 use moproxy::proxy::socks5::handshake;
 use std::net::SocketAddr;
 use tokio::{

@@ -42,6 +42,7 @@ pub enum ProxyProto {
         /// cause some existing implementations to reject the request.
         connect_with_payload: bool,
     },
+    Direct
 }
 
 #[derive(Debug, Serialize)]
@@ -190,6 +191,18 @@ impl ProxyServer {
         }
     }
 
+    pub fn direct() -> Self {
+        Self {
+            addr: "0.0.0.0:0".parse().unwrap(),
+            proto: ProxyProto::Direct,
+            test_dns: "0.0.0.0:0".parse().unwrap(),
+            tag: "DIRECT".into(),
+            max_wait: Duration::from_millis(DEFAULT_MAX_WAIT_MILLILS),
+            score_base: Default::default(),
+            status: Default::default(),
+        }
+    }
+
     pub fn replace_status(&self, from: &Self) {
         *self.status() = *from.status();
     }
@@ -204,6 +217,7 @@ impl ProxyServer {
         stream.set_nodelay(true)?;
 
         match proto {
+            ProxyProto::Direct => unimplemented!(),
             ProxyProto::Socks5 { fake_handshaking } => {
                 socks5::handshake(&mut stream, &addr, data, fake_handshaking).await?
             }
@@ -296,7 +310,11 @@ impl ProxyServer {
 
 impl fmt::Display for ProxyServer {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} ({} {})", self.tag, self.proto, self.addr)
+        if self.proto == ProxyProto::Direct {
+            f.write_str("DIRECT")
+        } else {
+            write!(f, "{} ({} {})", self.tag, self.proto, self.addr)
+        }
     }
 }
 
@@ -305,6 +323,7 @@ impl fmt::Display for ProxyProto {
         match *self {
             ProxyProto::Socks5 { .. } => write!(f, "SOCKSv5"),
             ProxyProto::Http { .. } => write!(f, "HTTP"),
+            ProxyProto::Direct { .. } => write!(f, "DIRECT"),
         }
     }
 }

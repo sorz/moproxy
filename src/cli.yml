@@ -74,6 +74,10 @@ args:
         takes_value: true
         help: >
           Set TCP congestion control algorithm on local (client) side.
+    - allow-direct:
+        long: allow-direct
+        help: >
+          Fallback to direct connect (without proxy) if all proxies failed.
     - graphite:
         long: graphite
         value_name: IP-ADDR:PORT

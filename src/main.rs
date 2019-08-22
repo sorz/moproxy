@@ -87,6 +87,7 @@ async fn main() -> Result<(), &'static str> {
         .or(Err("not a valid number"))?
         .unwrap_or(0 as usize);
     let cong_local = args.value_of("cong-local");
+    let allow_direct = args.is_present("allow-direct");
     let graphite = args
         .value_of("graphite")
         .parse()
@@ -144,6 +145,13 @@ async fn main() -> Result<(), &'static str> {
         }
     });
 
+    // Optional direct connect
+    let direct_server = if allow_direct {
+        Some(Arc::new(ProxyServer::direct()))
+    } else {
+        None
+    };
+
     // Setup proxy server
     let listener = TcpListener::bind(&bind_addr).or(Err("cannot bind to port"))?;
     info!("listen on {}", bind_addr);
@@ -155,10 +163,11 @@ async fn main() -> Result<(), &'static str> {
     let mut clients = listener.incoming();
     while let Some(sock) = clients.next().await {
         let client = sock.and_then(|sock| NewClient::from_socket(sock, monitor.servers()));
+        let direct = direct_server.clone();
         match client {
             Ok(client) => {
                 tokio::spawn(async move {
-                    let result = handle_client(client, remote_dns, n_parallel).await;
+                    let result = handle_client(client, remote_dns, n_parallel, direct).await;
                     if let Err(e) = result {
                         info!("error on hanle client: {}", e);
                     }
@@ -175,7 +184,12 @@ async fn main() -> Result<(), &'static str> {
     Ok(())
 }
 
-async fn handle_client(client: NewClient, remote_dns: bool, n_parallel: usize) -> io::Result<()> {
+async fn handle_client(
+    client: NewClient,
+    remote_dns: bool,
+    n_parallel: usize,
+    direct_server: Option<Arc<ProxyServer>>,
+) -> io::Result<()> {
     let client = if remote_dns && client.dest.port == 443 {
         client
             .retrive_dest()
@@ -185,8 +199,11 @@ async fn handle_client(client: NewClient, remote_dns: bool, n_parallel: usize) -
     } else {
         client.connect_server(0).await
     };
-    if let Some(client) = client {
-        client.serve().await?;
+    match client {
+        Ok(client) => client.serve().await?,
+        Err(client) => if let Some(server) = direct_server {
+            client.direct_connect(server).await?.serve().await?
+        }
     }
     Ok(())
 }

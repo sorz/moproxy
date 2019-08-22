@@ -2,7 +2,7 @@ mod connect;
 mod tls;
 use log::{debug, info, warn};
 use std::{cmp, future::Future, io, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
-use tokio::{future::FutureExt, io::AsyncReadExt, net::TcpStream};
+use tokio::{future::FutureExt, io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream};
 
 use crate::{
     client::connect::try_connect_all,
@@ -37,7 +37,13 @@ pub struct ConnectedClient {
     server: Arc<ProxyServer>,
 }
 
-type ConnectServer = Pin<Box<dyn Future<Output = Option<ConnectedClient>> + Send>>;
+#[derive(Debug)]
+pub struct FailedClient {
+    pub left: TcpStream,
+    pub pending_data: Option<Box<[u8]>>,
+}
+
+type ConnectServer = Pin<Box<dyn Future<Output = Result<ConnectedClient, FailedClient>> + Send>>;
 
 pub trait Connectable {
     fn connect_server(self, n_parallel: usize) -> ConnectServer;
@@ -113,7 +119,7 @@ impl NewClient {
         n_parallel: usize,
         wait_response: bool,
         pending_data: Option<Box<[u8]>>,
-    ) -> Option<ConnectedClient> {
+    ) -> Result<ConnectedClient, FailedClient> {
         let NewClient {
             left,
             src,
@@ -124,7 +130,7 @@ impl NewClient {
         let result = try_connect_all(&dest, list, n_parallel, wait_response, pending_data).await;
         if let Some((server, right)) = result {
             info!("{} => {} via {}", src, dest, server.tag);
-            Some(ConnectedClient {
+            Ok(ConnectedClient {
                 left,
                 right,
                 dest,
@@ -132,7 +138,7 @@ impl NewClient {
             })
         } else {
             warn!("{} => {} no avaiable proxy", src, dest);
-            None
+            Err(FailedClient { left, pending_data: None })
         }
     }
 }
@@ -159,6 +165,34 @@ impl Connectable for NewClientWithData {
     }
 }
 
+impl FailedClient {
+    pub async fn direct_connect(self, pseudo_server: Arc<ProxyServer>) -> io::Result<ConnectedClient> {
+        let Self { left, pending_data } = self;
+        // TODO: call either v6 or v4 according to our socket
+        let dest = get_original_dest(&left)
+            .map(SocketAddr::V4)
+            .or_else(|_| get_original_dest6(&left).map(SocketAddr::V6))?
+            .into();
+
+        let mut right = TcpStream::connect(&dest).await?;
+        debug!("connected with {:?}", right.peer_addr());
+        right.set_nodelay(true)?;
+
+        if let Some(data) = pending_data {
+            right.write_all(&data).await?;
+        }
+
+        info!("{} => {} via {}", left.peer_addr()?, dest, pseudo_server.tag);
+        Ok(ConnectedClient {
+            left,
+            right,
+            dest: dest.into(),
+            server: pseudo_server,
+        })
+    }
+}
+
+
 impl ConnectedClient {
     pub async fn serve(self) -> io::Result<()> {
         let ConnectedClient {
@@ -181,13 +215,13 @@ impl ConnectedClient {
                 server.update_stats_conn_close(false);
                 debug!(
                     "tx {}, rx {} bytes ({} => {})",
-                    amt.tx_bytes, amt.rx_bytes, server.tag, dest
+                    amt.tx_bytes, amt.rx_bytes, server, dest
                 );
                 Ok(())
             }
             Err(err) => {
                 server.update_stats_conn_close(true);
-                warn!("{} (=> {}) close with error", server.tag, dest);
+                warn!("{} (=> {}) close with error", server, dest);
                 Err(err)
             }
         }

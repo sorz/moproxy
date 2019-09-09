@@ -6,7 +6,7 @@ use std::{env, io, io::Write, net::SocketAddr, str::FromStr, sync::Arc};
 #[cfg(feature = "web_console")]
 use tokio::net::unix::UnixListener;
 use tokio::{self, net::tcp::TcpListener};
-use tokio_net::signal::unix::{Signal, SignalKind};
+use tokio_net::signal::unix::{signal, SignalKind};
 
 #[cfg(feature = "web_console")]
 use moproxy::web;
@@ -113,10 +113,7 @@ async fn main() -> Result<(), &'static str> {
                 tokio::spawn(serv);
                 Some(sock)
             } else {
-                let addr = http_addr
-                    .parse()
-                    .or(Err("not a valid address of TCP socket"))?;
-                let incoming = TcpListener::bind(&addr)
+                let incoming = TcpListener::bind(&http_addr).await
                     .or(Err("fail to bind web server"))?
                     .incoming();
                 let serv = web::run_server(incoming, monitor.clone());
@@ -133,7 +130,7 @@ async fn main() -> Result<(), &'static str> {
 
     // Setup signal listener for reloading server list
     let monitor_ = monitor.clone();
-    let mut signals = Signal::new(SignalKind::hangup()).or(Err("cannot catch signal"))?;
+    let mut signals = signal(SignalKind::hangup()).or(Err("cannot catch signal"))?;
     tokio::spawn(async move {
         while let Some(_) = signals.next().await {
             debug!("SIGHUP received, reload server list.");
@@ -152,7 +149,8 @@ async fn main() -> Result<(), &'static str> {
     };
 
     // Setup proxy server
-    let listener = TcpListener::bind(&bind_addr).or(Err("cannot bind to port"))?;
+    let listener = TcpListener::bind(&bind_addr).await
+        .or(Err("cannot bind to port"))?;
     info!("listen on {}", bind_addr);
     if let Some(alg) = cong_local {
         info!("set {} on {}", alg, bind_addr);

@@ -4,7 +4,7 @@ use futures::Stream;
 use helpers::{to_human_bps, to_human_bytes, DurationExt, RequestExt};
 use http;
 use hyper::{
-    server::conn::Http,
+    server::{accept::from_stream, conn::Http},
     service::{make_service_fn, service_fn},
     Body, Method, Request, Response, StatusCode,
 };
@@ -178,9 +178,9 @@ where
             }))
         }
     });
-
+    let accept = from_stream(incoming);
     let http = Http::new().with_executor(DefaultExecutor::current());
-    let server = hyper::server::Builder::new(incoming, http).serve(make_svc);
+    let server = hyper::server::Builder::new(accept, http).serve(make_svc);
     if let Err(e) = server.await {
         warn!("web server error: {}", e);
     }

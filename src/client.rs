@@ -169,7 +169,7 @@ impl FailedClient {
     pub async fn direct_connect(self, pseudo_server: Arc<ProxyServer>) -> io::Result<ConnectedClient> {
         let Self { left, pending_data } = self;
         // TODO: call either v6 or v4 according to our socket
-        let dest = get_original_dest(&left)
+        let dest: SocketAddr = get_original_dest(&left)
             .map(SocketAddr::V4)
             .or_else(|_| get_original_dest6(&left).map(SocketAddr::V6))?
             .into();

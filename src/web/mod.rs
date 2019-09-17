@@ -70,7 +70,7 @@ fn home_page(
     if req.accept_html() {
         Response::builder()
             .header("Content-Type", "text/html")
-            .body(include_str!("web/index.html").into())
+            .body(include_str!("index.html").into())
     } else {
         plaintext_status(start_time, monitor)
     }

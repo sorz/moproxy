@@ -113,7 +113,8 @@ async fn main() -> Result<(), &'static str> {
                 tokio::spawn(serv);
                 Some(sock)
             } else {
-                let incoming = TcpListener::bind(&http_addr).await
+                let incoming = TcpListener::bind(&http_addr)
+                    .await
                     .or(Err("fail to bind web server"))?
                     .incoming();
                 let serv = web::run_server(incoming, monitor.clone());
@@ -149,7 +150,8 @@ async fn main() -> Result<(), &'static str> {
     };
 
     // Setup proxy server
-    let listener = TcpListener::bind(&bind_addr).await
+    let listener = TcpListener::bind(&bind_addr)
+        .await
         .or(Err("cannot bind to port"))?;
     info!("listen on {}", bind_addr);
     if let Some(alg) = cong_local {
@@ -198,8 +200,10 @@ async fn handle_client(
     };
     match client {
         Ok(client) => client.serve().await?,
-        Err(client) => if let Some(server) = direct_server {
-            client.direct_connect(server).await?.serve().await?
+        Err(client) => {
+            if let Some(server) = direct_server {
+                client.direct_connect(server).await?.serve().await?
+            }
         }
     }
     Ok(())

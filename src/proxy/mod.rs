@@ -42,7 +42,7 @@ pub enum ProxyProto {
         /// cause some existing implementations to reject the request.
         connect_with_payload: bool,
     },
-    Direct
+    Direct,
 }
 
 #[derive(Debug, Serialize)]

@@ -2,7 +2,11 @@ mod connect;
 mod tls;
 use log::{debug, info, warn};
 use std::{cmp, future::Future, io, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
-use tokio::{future::FutureExt, io::{AsyncReadExt, AsyncWriteExt}, net::TcpStream};
+use tokio::{
+    future::FutureExt,
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpStream,
+};
 
 use crate::{
     client::connect::try_connect_all,
@@ -138,7 +142,10 @@ impl NewClient {
             })
         } else {
             warn!("{} => {} no avaiable proxy", src, dest);
-            Err(FailedClient { left, pending_data: None })
+            Err(FailedClient {
+                left,
+                pending_data: None,
+            })
         }
     }
 }
@@ -166,7 +173,10 @@ impl Connectable for NewClientWithData {
 }
 
 impl FailedClient {
-    pub async fn direct_connect(self, pseudo_server: Arc<ProxyServer>) -> io::Result<ConnectedClient> {
+    pub async fn direct_connect(
+        self,
+        pseudo_server: Arc<ProxyServer>,
+    ) -> io::Result<ConnectedClient> {
         let Self { left, pending_data } = self;
         // TODO: call either v6 or v4 according to our socket
         let dest: SocketAddr = get_original_dest(&left)
@@ -182,7 +192,12 @@ impl FailedClient {
             right.write_all(&data).await?;
         }
 
-        info!("{} => {} via {}", left.peer_addr()?, dest, pseudo_server.tag);
+        info!(
+            "{} => {} via {}",
+            left.peer_addr()?,
+            dest,
+            pseudo_server.tag
+        );
         Ok(ConnectedClient {
             left,
             right,
@@ -191,7 +206,6 @@ impl FailedClient {
         })
     }
 }
-
 
 impl ConnectedClient {
     pub async fn serve(self) -> io::Result<()> {

@@ -87,8 +87,9 @@
       let throughput = status.throughput.tx_bps + status.throughput.rx_bps;
       throughput = throughput ? humanBandwidth(throughput) : "";
       let row = document.createElement('tr');
+      const proto = Object.keys(server.proto)[0];
       row.innerHTML = `<tr>
-         <td><span title="${server.proto}://${server.addr}"
+         <td><span title="${proto}://${server.addr}"
              >${server.tag}</span></td>
          <td><span title="based on average delay"
              >${server.status.score || '-'}</span></td>

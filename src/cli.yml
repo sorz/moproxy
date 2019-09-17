@@ -47,7 +47,6 @@ args:
         value_name: IP-ADDR:PORT
         help: >
           Address of a DNS server with TCP support to do delay probing.
-          Default to Google Public DNS (8.8.8.8:53).
         default_value: "8.8.8.8:53"
     - web-bind:
         long: stats-bind

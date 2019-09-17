@@ -1,4 +1,4 @@
-use clap::load_yaml;
+use clap::{AppSettings, load_yaml};
 use futures::stream::StreamExt;
 use ini::Ini;
 use log::{debug, error, info, LevelFilter};
@@ -41,6 +41,8 @@ async fn main() -> Result<(), &'static str> {
     let yaml = load_yaml!("cli.yml");
     let args = clap::App::from_yaml(yaml)
         .version(env!("CARGO_PKG_VERSION"))
+        .setting(AppSettings::ColoredHelp)
+        .setting(AppSettings::UnifiedHelpMessage)
         .get_matches();
 
     let mut logger = env_logger::Builder::new();

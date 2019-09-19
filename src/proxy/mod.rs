@@ -73,12 +73,20 @@ impl Hash for ProxyServer {
         self.addr.hash(state);
         self.proto.hash(state);
         self.tag.hash(state);
+        self.test_dns.hash(state);
+        self.max_wait.hash(state);
+        self.score_base.hash(state);
     }
 }
 
 impl PartialEq for ProxyServer {
     fn eq(&self, other: &ProxyServer) -> bool {
-        self.addr == other.addr && self.proto == other.proto && self.tag == other.tag
+        self.addr == other.addr
+            && self.proto == other.proto
+            && self.tag == other.tag
+            && self.test_dns == other.test_dns
+            && self.max_wait == self.max_wait
+            && self.score_base == self.score_base
     }
 }
 

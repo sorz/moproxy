@@ -4,12 +4,15 @@ use futures::future::join_all;
 use log::{debug, warn};
 use parking_lot::Mutex;
 use rand::{self, Rng};
-use std;
-use std::collections::HashMap;
-use std::io;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime};
+use std::{
+    self,
+    collections::{HashMap, HashSet},
+    io,
+    iter::FromIterator,
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant, SystemTime},
+};
 use tokio::{future::FutureExt, io::AsyncReadExt, timer::Interval};
 
 use self::graphite::{Graphite, Record};
@@ -47,22 +50,35 @@ impl Monitor {
     }
 
     /// Replace internal servers with provided list.
-    pub fn update_servers(&self, mut new_servers: Vec<Arc<ProxyServer>>) {
-        let mut servers = self.servers.lock();
-        for server in new_servers.iter_mut() {
-            let old = servers.iter().find(|s| *s == server);
-            if let Some(old) = old {
-                server.copy_status_from(old);
+    pub fn update_servers(&self, new_servers: Vec<Arc<ProxyServer>>) {
+        let oldset: HashSet<_> = self.servers().into_iter().collect();
+        let newset = HashSet::from_iter(new_servers);
+        let mut new_servers = Vec::with_capacity(newset.len());
+
+        // Use old server object if unchange
+        for server in oldset.intersection(&newset) {
+            new_servers.push(oldset.get(server).unwrap().clone());
+        }
+
+        // Use new server object and try to copy status from old ones.
+        let oldmap: HashMap<_, _> = oldset.difference(&newset)
+            .map(|s| ((&s.tag, &s.proto, &s.addr), s))
+            .collect();
+        for new in newset.difference(&oldset) {
+            if let Some(old) = oldmap.get(&(&new.tag, &new.proto, &new.addr)) {
+                new.copy_status_from(old);
+                new_servers.push(new.clone());
             }
         }
-        *servers = new_servers;
 
+        // Create new meters
         let mut meters = self.meters.lock();
         meters.clear();
-        for server in servers.iter() {
+        for server in new_servers.iter() {
             meters.insert(server.clone(), Meter::new());
         }
-        drop(servers);
+
+        *self.servers.lock() = new_servers;
         self.resort();
     }
 

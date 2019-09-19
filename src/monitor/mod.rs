@@ -52,7 +52,7 @@ impl Monitor {
         for server in new_servers.iter_mut() {
             let old = servers.iter().find(|s| *s == server);
             if let Some(old) = old {
-                server.replace_status(old);
+                server.copy_status_from(old);
             }
         }
         *servers = new_servers;

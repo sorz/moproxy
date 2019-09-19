@@ -203,8 +203,11 @@ impl ProxyServer {
         }
     }
 
-    pub fn replace_status(&self, from: &Self) {
-        *self.status.lock() = *from.status.lock();
+    pub fn copy_status_from(&self, from: &Self) {
+        let mut status = self.status.lock();
+        *status = *from.status.lock();
+        // Do not copy alive connection counter since nobody will deduce it.
+        status.conn_alive = 0;
     }
 
     pub async fn connect<T>(&self, addr: &Destination, data: Option<T>) -> io::Result<TcpStream>

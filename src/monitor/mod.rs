@@ -68,7 +68,8 @@ impl Monitor {
 
     fn resort(&self) {
         let mut rng = rand::thread_rng();
-        self.servers.lock().sort_by_key(move |server| {
+        let mut servers = self.servers.lock();
+        servers.sort_by_key(move |server| {
             server.score().unwrap_or(std::i32::MAX) - (rng.gen::<u8>() % 30) as i32
         });
         debug!("scores:{}", info_stats(&*self.servers.lock()));
@@ -155,15 +156,15 @@ async fn send_metrics(monitor: &Monitor, graphite: &mut Graphite) -> io::Result<
         .flat_map(|server| {
             let now = Some(SystemTime::now());
             let r = |path, value| Record::new(server.graphite_path(path), value, now);
-            let traffic = server.traffic();
+            let status = server.status_snapshot();
             vec![
-                server.delay().map(|t| r("delay", t.millis() as u64)),
-                server.score().map(|s| r("score", s as u64)),
-                Some(r("tx_bytes", traffic.tx_bytes as u64)),
-                Some(r("rx_bytes", traffic.rx_bytes as u64)),
-                Some(r("conns.total", server.conn_total() as u64)),
-                Some(r("conns.alive", server.conn_alive() as u64)),
-                Some(r("conns.error", server.conn_error() as u64)),
+                status.delay.map(|t| r("delay", t.millis() as u64)),
+                status.score.map(|s| r("score", s as u64)),
+                Some(r("tx_bytes", status.traffic.tx_bytes as u64)),
+                Some(r("rx_bytes", status.traffic.rx_bytes as u64)),
+                Some(r("conns.total", status.conn_total as u64)),
+                Some(r("conns.alive", status.conn_alive as u64)),
+                Some(r("conns.error", status.conn_error as u64)),
             ]
         })
         .filter_map(|v| v)

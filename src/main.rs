@@ -1,4 +1,4 @@
-use clap::{AppSettings, load_yaml};
+use clap::{load_yaml, AppSettings};
 use futures::stream::StreamExt;
 use ini::Ini;
 use log::{debug, error, info, LevelFilter};

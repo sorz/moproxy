@@ -2,6 +2,7 @@ pub mod copy;
 pub mod http;
 pub mod socks5;
 use log::debug;
+use parking_lot::Mutex;
 use serde_derive::Serialize;
 use std::{
     fmt,
@@ -10,7 +11,6 @@ use std::{
     net::{IpAddr, SocketAddr},
     ops::{Add, AddAssign},
     str::FromStr,
-    sync::{Mutex, MutexGuard},
     time::Duration,
 };
 use tokio::net::TcpStream;
@@ -57,15 +57,15 @@ pub struct ProxyServer {
 }
 
 #[derive(Debug, Serialize, Clone, Copy, Default)]
-struct ProxyServerStatus {
+pub struct ProxyServerStatus {
     #[serde(skip_serializing)]
     probe_at_least_once: bool,
-    delay: Option<Duration>,
-    score: Option<i32>,
-    traffic: Traffic,
-    conn_alive: u32,
-    conn_total: u32,
-    conn_error: u32,
+    pub delay: Option<Duration>,
+    pub score: Option<i32>,
+    pub traffic: Traffic,
+    pub conn_alive: u32,
+    pub conn_total: u32,
+    pub conn_error: u32,
 }
 
 impl Hash for ProxyServer {
@@ -204,7 +204,7 @@ impl ProxyServer {
     }
 
     pub fn replace_status(&self, from: &Self) {
-        *self.status() = *from.status();
+        *self.status.lock() = *from.status.lock();
     }
 
     pub async fn connect<T>(&self, addr: &Destination, data: Option<T>) -> io::Result<TcpStream>
@@ -228,32 +228,20 @@ impl ProxyServer {
         Ok(stream)
     }
 
-    fn status(&self) -> MutexGuard<ProxyServerStatus> {
-        self.status.lock().unwrap()
-    }
-
-    pub fn delay(&self) -> Option<Duration> {
-        self.status().delay
+    pub fn status_snapshot(&self) -> ProxyServerStatus {
+        *self.status.lock()
     }
 
     pub fn score(&self) -> Option<i32> {
-        self.status().score
+        self.status.lock().score
     }
 
-    pub fn conn_alive(&self) -> u32 {
-        self.status().conn_alive
-    }
-
-    pub fn conn_total(&self) -> u32 {
-        self.status().conn_total
-    }
-
-    pub fn conn_error(&self) -> u32 {
-        self.status().conn_error
+    pub fn traffic(&self) -> Traffic {
+        self.status.lock().traffic
     }
 
     pub fn update_delay(&self, delay: Option<Duration>) {
-        let mut status = self.status();
+        let mut status = self.status.lock();
         status.delay = delay;
         status.score = if !status.probe_at_least_once {
             // First update, just set it
@@ -279,23 +267,21 @@ impl ProxyServer {
     }
 
     pub fn add_traffic(&self, traffic: Traffic) {
-        self.status().traffic += traffic;
+        self.status.lock().traffic += traffic;
     }
 
     pub fn update_stats_conn_open(&self) {
-        self.status().conn_alive += 1;
-        self.status().conn_total += 1;
+        let mut status = self.status.lock();
+        status.conn_alive += 1;
+        status.conn_total += 1;
     }
 
     pub fn update_stats_conn_close(&self, has_error: bool) {
-        self.status().conn_alive -= 1;
+        let mut status = self.status.lock();
+        status.conn_alive -= 1;
         if has_error {
-            self.status().conn_error += 1;
+            status.conn_error += 1;
         }
-    }
-
-    pub fn traffic(&self) -> Traffic {
-        self.status().traffic
     }
 
     pub fn graphite_path(&self, suffix: &str) -> String {

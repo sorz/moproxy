@@ -103,27 +103,28 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> http::Result<Res
     table.set_format(*FORMAT_NO_LINESEP_WITH_TITLE);
 
     for ServerStatus { server, throughput } in status.servers {
+        let status = server.status_snapshot();
         let row = table.add_empty_row();
         // Server
         row.add_cell(cell!(l -> server.tag));
         // Score
-        if let Some(v) = server.score() {
+        if let Some(v) = status.score {
             row.add_cell(cell!(r -> v));
         } else {
             row.add_cell(cell!(r -> "-"));
         }
         // Delay
-        if let Some(v) = server.delay() {
+        if let Some(v) = status.delay {
             row.add_cell(cell!(r -> v.format_millis()));
         } else {
             row.add_cell(cell!(r -> "-"));
         }
         // CUR TTL
-        row.add_cell(cell!(r -> server.conn_alive()));
-        row.add_cell(cell!(r -> server.conn_total()));
+        row.add_cell(cell!(r -> status.conn_alive));
+        row.add_cell(cell!(r -> status.conn_total));
         // Up Down
-        row.add_cell(cell!(r -> to_human_bytes(server.traffic().tx_bytes)));
-        row.add_cell(cell!(r -> to_human_bytes(server.traffic().rx_bytes)));
+        row.add_cell(cell!(r -> to_human_bytes(status.traffic.tx_bytes)));
+        row.add_cell(cell!(r -> to_human_bytes(status.traffic.rx_bytes)));
         // ↑↓
         if let Some(tp) = throughput {
             let sum = tp.tx_bps + tp.rx_bps;

@@ -22,16 +22,17 @@ async fn try_connect(
     pending_data: Option<ArcBox<[u8]>>,
     wait_response: bool,
 ) -> io::Result<(Arc<ProxyServer>, TcpStream)> {
+    let max_wait = server.config_snapshot().max_wait;
     // waiting for proxy server connected
     let mut stream = server
         .connect(&dest, pending_data)
-        .timeout(server.max_wait)
+        .timeout(max_wait)
         .await??;
 
     // waiting for response data
     if wait_response {
         let mut buf = [0u8; 8];
-        let len = stream.peek(&mut buf).timeout(server.max_wait).await??;
+        let len = stream.peek(&mut buf).timeout(max_wait).await??;
         if len <= 0 {
             return Err(io::Error::new(ErrorKind::UnexpectedEof, "no response data"));
         }

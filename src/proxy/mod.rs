@@ -2,7 +2,7 @@ pub mod copy;
 pub mod http;
 pub mod socks5;
 use log::debug;
-use parking_lot::Mutex;
+use parking_lot::{RwLock, Mutex};
 use serde_derive::Serialize;
 use std::{
     fmt,
@@ -50,10 +50,15 @@ pub struct ProxyServer {
     pub addr: SocketAddr,
     pub proto: ProxyProto,
     pub tag: Box<str>,
+    config: RwLock<ProxyServerConfig>,
+    status: Mutex<ProxyServerStatus>,
+}
+
+#[derive(Debug, Serialize, Clone, Copy)]
+pub struct ProxyServerConfig {
     pub test_dns: SocketAddr,
     pub max_wait: Duration,
     score_base: i32,
-    status: Mutex<ProxyServerStatus>,
 }
 
 #[derive(Debug, Serialize, Clone, Copy, Default)]
@@ -73,9 +78,6 @@ impl Hash for ProxyServer {
         self.addr.hash(state);
         self.proto.hash(state);
         self.tag.hash(state);
-        self.test_dns.hash(state);
-        self.max_wait.hash(state);
-        self.score_base.hash(state);
     }
 }
 
@@ -84,9 +86,6 @@ impl PartialEq for ProxyServer {
         self.addr == other.addr
             && self.proto == other.proto
             && self.tag == other.tag
-            && self.test_dns == other.test_dns
-            && self.max_wait == self.max_wait
-            && self.score_base == self.score_base
     }
 }
 
@@ -167,6 +166,16 @@ impl ProxyProto {
     }
 }
 
+impl ProxyServerConfig {
+    fn new(test_dns: SocketAddr, score_base: Option<i32>) -> Self {
+        Self {
+            test_dns,
+            max_wait: Duration::from_millis(DEFAULT_MAX_WAIT_MILLILS),
+            score_base: score_base.unwrap_or(0),
+        }
+    }
+}
+
 impl ProxyServer {
     pub fn new(
         addr: SocketAddr,
@@ -178,7 +187,6 @@ impl ProxyServer {
         ProxyServer {
             addr,
             proto,
-            test_dns,
             tag: match tag {
                 None => format!("{}", addr.port()),
                 Some(s) => {
@@ -193,29 +201,24 @@ impl ProxyServer {
                 }
             }
             .into_boxed_str(),
-            max_wait: Duration::from_millis(DEFAULT_MAX_WAIT_MILLILS),
-            score_base: score_base.unwrap_or(0),
+            config: ProxyServerConfig::new(test_dns, score_base).into(),
             status: Default::default(),
         }
     }
 
     pub fn direct() -> Self {
+        let stub_addr = "0.0.0.0:0".parse().unwrap();
         Self {
-            addr: "0.0.0.0:0".parse().unwrap(),
+            addr: stub_addr,
             proto: ProxyProto::Direct,
-            test_dns: "0.0.0.0:0".parse().unwrap(),
             tag: "DIRECT".into(),
-            max_wait: Duration::from_millis(DEFAULT_MAX_WAIT_MILLILS),
-            score_base: Default::default(),
+            config: ProxyServerConfig::new(stub_addr, None).into(),
             status: Default::default(),
         }
     }
 
-    pub fn copy_status_from(&self, from: &Self) {
-        let mut status = self.status.lock();
-        *status = *from.status.lock();
-        // Do not copy alive connection counter since nobody will deduce it.
-        status.conn_alive = 0;
+    pub fn copy_config_from(&self, from: &Self) {
+        *self.config.write() = *from.config.read();
     }
 
     pub async fn connect<T>(&self, addr: &Destination, data: Option<T>) -> io::Result<TcpStream>
@@ -243,6 +246,10 @@ impl ProxyServer {
         *self.status.lock()
     }
 
+    pub fn config_snapshot(&self) -> ProxyServerConfig {
+        *self.config.read()
+    }
+
     pub fn score(&self) -> Option<i32> {
         self.status.lock().score
     }
@@ -253,19 +260,20 @@ impl ProxyServer {
 
     pub fn update_delay(&self, delay: Option<Duration>) {
         let mut status = self.status.lock();
+        let config = self.config_snapshot();
         status.delay = delay;
         status.score = if !status.probe_at_least_once {
             // First update, just set it
             status.probe_at_least_once = true;
-            delay.map(|t| t.millis() as i32 + self.score_base)
+            delay.map(|t| t.millis() as i32 + config.score_base)
         } else {
             // Moving average on delay and pently on failure
             delay
-                .map(|t| t.millis() as i32 + self.score_base)
+                .map(|t| t.millis() as i32 + config.score_base)
                 .map(|new| {
                     let old = status
                         .score
-                        .unwrap_or_else(|| self.max_wait.millis() as i32);
+                        .unwrap_or_else(|| config.max_wait.millis() as i32);
                     // give more weight to delays exceed the mean, to
                     // punish for network jitter.
                     if new < old {

@@ -55,22 +55,17 @@ impl Monitor {
         let newset = HashSet::from_iter(new_servers);
         let mut new_servers = Vec::with_capacity(newset.len());
 
-        // Use old server object if unchange
+        // Copy config from new server objects to old ones.
+        // That also ensure their `status` remain unchange.
         for server in oldset.intersection(&newset) {
-            new_servers.push(oldset.get(server).unwrap().clone());
+            let old = oldset.get(server).unwrap();
+            let new = newset.get(server).unwrap();
+            old.copy_config_from(new);
+            new_servers.push(old.clone());
         }
 
-        // Use new server object and try to copy status from old ones.
-        let oldmap: HashMap<_, _> = oldset
-            .difference(&newset)
-            .map(|s| ((&s.tag, &s.proto, &s.addr), s))
-            .collect();
-        for new in newset.difference(&oldset) {
-            if let Some(old) = oldmap.get(&(&new.tag, &new.proto, &new.addr)) {
-                new.copy_status_from(old);
-            }
-            new_servers.push(new.clone());
-        }
+        // Add brand new server objects
+        new_servers.extend(newset.difference(&oldset).cloned());
 
         // Create new meters
         let mut meters = self.meters.lock();
@@ -190,6 +185,7 @@ async fn send_metrics(monitor: &Monitor, graphite: &mut Graphite) -> io::Result<
 }
 
 async fn alive_test(server: &ProxyServer) -> io::Result<Duration> {
+    let config = server.config_snapshot();
     let request = [
         0,
         17, // length
@@ -216,13 +212,13 @@ async fn alive_test(server: &ProxyServer) -> io::Result<Duration> {
     let now = Instant::now();
 
     let mut buf = [0u8; 12];
-    let test_dns = server.test_dns.into();
+    let test_dns = config.test_dns.into();
     let result = async {
         let mut stream = server.connect(&test_dns, Some(request)).await?;
         stream.read_exact(&mut buf).await?;
         Ok(())
     }
-        .timeout(server.max_wait)
+        .timeout(config.max_wait)
         .await;
 
     match result {

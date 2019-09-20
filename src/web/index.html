@@ -17,6 +17,7 @@
     #servers td:nth-child(n+2) { text-align: right; }
     thead th:nth-child(n+2) { text-align: right; }
     #servers td:last-child, thead th:last-child { text-align: left; }
+    #total-alive-conn { margin-right: 1.5em; }
   </style>
 </head>
 <body>
@@ -29,7 +30,10 @@
   <label for="auto-refresh">auto</label>
 
   <h2>Proxy servers</h2>
-  <p id="throughput">Throughput:
+  <p>
+    Connections:
+    <span id="total-alive-conn">0</span>
+    Throughput:
     <span title="upload">↑</span>
     <span id="tx-speed">-</span>
     <span title="download">↓</span>
@@ -70,6 +74,8 @@
         $('#uptime').textContent = humanDuration(status.uptime);
         $('#tx-speed').textContent = humanBandwidth(status.throughput.tx_bps);
         $('#rx-speed').textContent = humanBandwidth(status.throughput.rx_bps);
+        const conns = status.servers.reduce((c, s) => c + s.server.status.conn_alive, 0);
+        $('#total-alive-conn').textContent = humanQuantity(conns);
       } catch (ex) {
         alert(`Fail to refresh: ${ex.message}`);
         refresh.checked = false;

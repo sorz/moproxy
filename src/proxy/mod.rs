@@ -2,7 +2,7 @@ pub mod copy;
 pub mod http;
 pub mod socks5;
 use log::debug;
-use parking_lot::{RwLock, Mutex};
+use parking_lot::{Mutex, RwLock};
 use serde_derive::Serialize;
 use std::{
     fmt,
@@ -83,9 +83,7 @@ impl Hash for ProxyServer {
 
 impl PartialEq for ProxyServer {
     fn eq(&self, other: &ProxyServer) -> bool {
-        self.addr == other.addr
-            && self.proto == other.proto
-            && self.tag == other.tag
+        self.addr == other.addr && self.proto == other.proto && self.tag == other.tag
     }
 }
 

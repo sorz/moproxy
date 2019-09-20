@@ -88,22 +88,15 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> http::Result<Res
     )
     .unwrap();
 
-    writeln!(
-        &mut buf,
-        "↑ {} ↓ {}",
-        to_human_bps(status.throughput.tx_bps),
-        to_human_bps(status.throughput.rx_bps),
-    )
-    .unwrap();
-
     let mut table = Table::new();
     table.add_row(row![
         "Server", "Score", "Delay", "CUR", "TTL", "Up", "Down", "↑↓"
     ]);
     table.set_format(*FORMAT_NO_LINESEP_WITH_TITLE);
-
+    let mut total_alive_conns = 0;
     for ServerStatus { server, throughput } in status.servers {
         let status = server.status_snapshot();
+        total_alive_conns += status.conn_alive;
         let row = table.add_empty_row();
         // Server
         row.add_cell(cell!(l -> server.tag));
@@ -133,7 +126,16 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> http::Result<Res
             }
         }
     }
-    write!(&mut buf, "{}", table).unwrap();
+
+    writeln!(
+        &mut buf,
+        "[{}] ↑ {} ↓ {}\n{}",
+        total_alive_conns,
+        to_human_bps(status.throughput.tx_bps),
+        to_human_bps(status.throughput.rx_bps),
+        table
+    )
+    .unwrap();
 
     Response::builder()
         .header("Content-Type", "text/plain; charset=utf-8")

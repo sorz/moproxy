@@ -61,14 +61,15 @@ impl Monitor {
         }
 
         // Use new server object and try to copy status from old ones.
-        let oldmap: HashMap<_, _> = oldset.difference(&newset)
+        let oldmap: HashMap<_, _> = oldset
+            .difference(&newset)
             .map(|s| ((&s.tag, &s.proto, &s.addr), s))
             .collect();
         for new in newset.difference(&oldset) {
             if let Some(old) = oldmap.get(&(&new.tag, &new.proto, &new.addr)) {
                 new.copy_status_from(old);
-                new_servers.push(new.clone());
             }
+            new_servers.push(new.clone());
         }
 
         // Create new meters

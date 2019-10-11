@@ -84,7 +84,7 @@ impl Monitor {
         servers.sort_by_key(move |server| {
             server.score().unwrap_or(std::i32::MAX) - (rng.gen::<u8>() % 30) as i32
         });
-        debug!("scores:{}", info_stats(&*self.servers.lock()));
+        debug!("scores:{}", info_stats(&servers));
     }
 
     /// Start monitoring delays.

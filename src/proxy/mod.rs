@@ -273,18 +273,18 @@ impl ProxyServer {
                     let old = status
                         .score
                         .unwrap_or_else(|| config.max_wait.millis() as i32);
-                    // give more weight to delays exceed the mean, to
-                    // punish for network jitter.
-                    let score = if new < old {
-                        (old * 9 + new) / 10
-                    } else {
-                        (old * 8 + new * 2) / 10
-                    };
                     // give penalty for continuous errors
                     let err_rate = status
                         .recent_error_rate(16)
                         .min(status.recent_error_rate(64));
-                    score + (score as f32 * err_rate * 10f32) as i32
+                    let new = new + (new as f32 * err_rate * 10f32).round() as i32;
+                    // give more weight to delays exceed the mean, to
+                    // punish for network jitter.
+                    if new < old {
+                        (old * 9 + new) / 10
+                    } else {
+                        (old * 8 + new * 2) / 10
+                    }
                 })
         };
         // Shift error history

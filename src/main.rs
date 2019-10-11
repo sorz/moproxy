@@ -129,7 +129,9 @@ async fn main() -> Result<(), &'static str> {
     };
 
     // Setup monitor
-    tokio::spawn(monitor.clone().monitor_delay(probe));
+    if probe > 0 {
+        tokio::spawn(monitor.clone().monitor_delay(probe));
+    }
 
     // Setup signal listener for reloading server list
     let monitor_ = monitor.clone();

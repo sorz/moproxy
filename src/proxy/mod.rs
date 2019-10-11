@@ -5,8 +5,7 @@ use log::debug;
 use parking_lot::{Mutex, RwLock};
 use serde_derive::Serialize;
 use std::{
-    cmp,
-    fmt,
+    cmp, fmt,
     hash::{Hash, Hasher},
     io,
     net::{IpAddr, SocketAddr},
@@ -276,12 +275,22 @@ impl ProxyServer {
                         .unwrap_or_else(|| config.max_wait.millis() as i32);
                     // give more weight to delays exceed the mean, to
                     // punish for network jitter.
-                    if new < old {
+                    let score = if new < old {
                         (old * 9 + new) / 10
                     } else {
                         (old * 8 + new * 2) / 10
-                    }
+                    };
+                    // give penalty for continuous errors
+                    let err_rate = status
+                        .recent_error_rate(16)
+                        .min(status.recent_error_rate(64));
+                    score + (score as f32 * err_rate * 10f32) as i32
                 })
+        };
+        // Shift error history
+        // This give the server with high error penalty a chance to recovery.
+        if delay.is_some() {
+            status.close_history <<= 1;
         }
     }
 

@@ -19,7 +19,7 @@ serde_json = "1.0"
 serde_derive = "1.0"
 rust-ini = "0.13"
 hyper = {version = "0.13.0-alpha.4", optional = true, default-features = false, features = ["unstable-stream"]}
-parking_lot = {version = "0.9", features = ["serde"]}
+parking_lot = {version = "0.9", features = ["serde", "deadlock_detection"]}
 http = "0.1"
 prettytable-rs = {version = "0.8", default-features = false}
 regex = "1"

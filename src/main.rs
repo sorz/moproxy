@@ -1,7 +1,8 @@
 use clap::{load_yaml, AppSettings};
 use futures::stream::StreamExt;
 use ini::Ini;
-use log::{debug, error, info, LevelFilter};
+use log::{debug, error, info, warn, LevelFilter};
+use parking_lot::deadlock;
 use std::{env, io, io::Write, net::SocketAddr, str::FromStr, sync::Arc};
 #[cfg(feature = "web_console")]
 use tokio::net::unix::UnixListener;
@@ -138,6 +139,20 @@ async fn main() -> Result<(), &'static str> {
     let mut signals = signal(SignalKind::hangup()).or(Err("cannot catch signal"))?;
     tokio::spawn(async move {
         while let Some(_) = signals.next().await {
+            // feature: check deadlocks on signal
+            let deadlocks = deadlock::check_deadlock();
+            if !deadlocks.is_empty() {
+                error!("{} deadlocks detected!", deadlocks.len());
+                for (i, threads) in deadlocks.iter().enumerate() {
+                    warn!("Deadlock #{}", i);
+                    for t in threads {
+                        warn!("Thread Id {:#?}", t.thread_id());
+                        info!("{:#?}", t.backtrace());
+                    }
+                }
+            }
+
+            // actual reload
             debug!("SIGHUP received, reload server list.");
             match servers_cfg.load() {
                 Ok(servers) => monitor_.update_servers(servers),

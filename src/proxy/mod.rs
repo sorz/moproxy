@@ -5,6 +5,7 @@ use log::debug;
 use parking_lot::{Mutex, RwLock};
 use serde_derive::Serialize;
 use std::{
+    cmp,
     fmt,
     hash::{Hash, Hasher},
     io,
@@ -71,6 +72,7 @@ pub struct ProxyServerStatus {
     pub conn_alive: u32,
     pub conn_total: u32,
     pub conn_error: u32,
+    pub close_history: u64,
 }
 
 impl Hash for ProxyServer {
@@ -296,8 +298,10 @@ impl ProxyServer {
     pub fn update_stats_conn_close(&self, has_error: bool) {
         let mut status = self.status.lock();
         status.conn_alive -= 1;
+        status.close_history <<= 1;
         if has_error {
             status.conn_error += 1;
+            status.close_history += 1;
         }
     }
 
@@ -308,6 +312,17 @@ impl ProxyServer {
             self.tag.replace('.', "_"),
             suffix
         )
+    }
+}
+
+impl ProxyServerStatus {
+    pub fn recent_error_count(&self, n: u8) -> u8 {
+        let n = 64 - cmp::min(n, 64);
+        (self.close_history << n).count_ones() as u8
+    }
+
+    pub fn recent_error_rate(&self, n: u8) -> f32 {
+        self.recent_error_count(n) as f32 / (cmp::min(n, 64) as f32)
     }
 }
 

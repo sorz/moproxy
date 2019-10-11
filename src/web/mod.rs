@@ -90,7 +90,7 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> http::Result<Res
 
     let mut table = Table::new();
     table.add_row(row![
-        "Server", "Score", "Delay", "CUR", "TTL", "Up", "Down", "↑↓"
+        "Server", "Score", "Delay", "CUR", "TTL", "E16", "E64", "Up", "Down", "↑↓"
     ]);
     table.set_format(*FORMAT_NO_LINESEP_WITH_TITLE);
     let mut total_alive_conns = 0;
@@ -115,6 +115,10 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> http::Result<Res
         // CUR TTL
         row.add_cell(cell!(r -> status.conn_alive));
         row.add_cell(cell!(r -> status.conn_total));
+        // Error rate
+        // TODO: document the two columns
+        row.add_cell(cell!(r -> status.recent_error_count(16)));
+        row.add_cell(cell!(r -> status.recent_error_count(64)));
         // Up Down
         row.add_cell(cell!(r -> to_human_bytes(status.traffic.tx_bytes)));
         row.add_cell(cell!(r -> to_human_bytes(status.traffic.rx_bytes)));

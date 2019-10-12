@@ -1,4 +1,4 @@
-use log::trace;
+use log::{debug, trace};
 use std::{
     cell::RefCell,
     fmt,
@@ -196,7 +196,10 @@ impl BiPipe {
             // flush and does half close if seen eof
             if reader.read_eof {
                 try_poll!(Pin::new(&mut writer.stream).poll_flush(cx));
-                drop(writer.stream.shutdown(Shutdown::Write));
+                if let Err(err) = writer.stream.shutdown(Shutdown::Write) {
+                    debug!("fail to shutdown: {}", err);
+                    return Poll::Ready(Err(err));
+                }
                 reader.all_done = true;
                 return Poll::Ready(Ok(()));
             }

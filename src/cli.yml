@@ -90,3 +90,8 @@ args:
         help: Level of verbosity
         possible_values: [off, error, warn, info, debug, trace]
         default_value: info
+    - score-script:
+        long: score-script
+        value_name: LUA-SCRIPT
+        takes_value: true
+        help: Custom Lua script caculating score.

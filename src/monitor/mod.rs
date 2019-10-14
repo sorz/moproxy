@@ -1,4 +1,6 @@
 mod graphite;
+#[cfg(feature = "score_script")]
+use rlua::prelude::*;
 mod traffic;
 use futures::future::join_all;
 use log::{debug, warn};
@@ -13,6 +15,11 @@ use std::{
     sync::Arc,
     time::{Duration, Instant, SystemTime},
 };
+#[cfg(feature = "score_script")]
+use std::{
+    fs::File,
+    io::Read,
+};
 use tokio::{future::FutureExt, io::AsyncReadExt, timer::Interval};
 
 use self::graphite::{Graphite, Record};
@@ -24,11 +31,13 @@ static THROUGHPUT_INTERVAL_SECS: u64 = 1;
 
 pub type ServerList = Vec<Arc<ProxyServer>>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Monitor {
     servers: Arc<Mutex<ServerList>>,
     meters: Arc<Mutex<HashMap<Arc<ProxyServer>, Meter>>>,
     graphite: Option<SocketAddr>,
+    #[cfg(feature = "score_script")]    
+    lua: Option<Arc<Mutex<Lua>>>,
 }
 
 impl Monitor {
@@ -41,7 +50,30 @@ impl Monitor {
             servers: Arc::new(Mutex::new(servers)),
             meters: Arc::new(Mutex::new(meters)),
             graphite,
+            #[cfg(feature = "score_script")]
+            lua: None,
         }
+    }
+
+    #[cfg(feature = "score_script")]
+    pub fn load_score_script(&mut self, path: &str) -> io::Result<()> {
+        let mut buf = Vec::new();
+        File::open(path)?.take(2u64.pow(26)).read_to_end(&mut buf)?;
+
+        let lua = Lua::new();
+        lua.context(|ctx| -> LuaResult<()>  {
+            let globals = ctx.globals();
+            ctx.load(&buf).exec()?;
+            if !globals.contains_key("calc_score")? {
+                panic!("calc_score() not found in Lua globals");
+            }
+            let _: LuaFunction = globals.get("calc_score")?;
+            Ok(())
+        }).expect("fail to parse lua script");
+        // TODO: handle error on paring lua script
+
+        self.lua.replace(Arc::new(Mutex::new(lua)));
+        Ok(())
     }
 
     /// Return an ordered list of servers.
@@ -151,7 +183,25 @@ async fn test_all(monitor: &Monitor) {
         .into_iter()
         .map(move |server| {
             Box::pin(async move {
-                server.update_delay(alive_test(&server).await.ok());
+                let delay = alive_test(&server).await.ok();
+
+                #[cfg(feature = "score_script")]
+                {
+                    let mut caculated = false;
+                    if let Some(lua) = &monitor.lua {
+                        match lua.lock().context(|ctx|
+                            server.update_delay_with_lua(delay, ctx)
+                        ) {
+                            Ok(()) => caculated = true,
+                            Err(err) => warn!("fail to update score w/ Lua script: {}", err),
+                        }
+                    }
+                    if !caculated {
+                        server.update_delay(delay);
+                    }
+                }
+                #[cfg(not(feature = "score_script"))]
+                server.update_delay(delay);
             })
         })
         .collect();

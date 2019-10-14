@@ -1,5 +1,7 @@
 pub mod copy;
 pub mod http;
+#[cfg(feature = "score_script")]
+use rlua::prelude::*;
 pub mod socks5;
 use log::debug;
 use parking_lot::{Mutex, RwLock};
@@ -61,6 +63,17 @@ pub struct ProxyServerConfig {
     score_base: i32,
 }
 
+#[cfg(feature = "score_script")]
+impl ToLua<'_> for ProxyServerConfig {
+    fn to_lua(self, ctx: LuaContext<'_>) -> LuaResult<LuaValue<'_>> {
+        let table = ctx.create_table()?;
+        table.set("test_dns", self.test_dns.to_string())?;
+        table.set("max_wait", self.max_wait.as_secs_f32())?;
+        table.set("score_base", self.score_base)?;
+        table.to_lua(ctx)
+    }
+}
+
 #[derive(Debug, Serialize, Clone, Copy)]
 pub enum Delay {
     Unknown,
@@ -87,6 +100,23 @@ impl Delay {
     }
 }
 
+impl From<Option<Duration>> for Delay {
+    fn from(d: Option<Duration>) -> Self {
+        d.map(|d| Self::Some(d)).unwrap_or(Self::TimedOut)
+    }
+}
+
+#[cfg(feature = "score_script")]
+impl ToLua<'_> for Delay {
+    fn to_lua(self, ctx: LuaContext<'_>) -> LuaResult<LuaValue<'_>> {
+        match self {
+            Delay::Some(d) => Some(d.as_secs_f32()),
+            Delay::TimedOut => Some(-1f32),
+            Delay::Unknown => None,
+        }.to_lua(ctx)
+    }
+}
+
 #[derive(Debug, Serialize, Clone, Copy, Default)]
 pub struct ProxyServerStatus {
     pub delay: Delay,
@@ -96,6 +126,21 @@ pub struct ProxyServerStatus {
     pub conn_total: u32,
     pub conn_error: u32,
     pub close_history: u64,
+}
+
+#[cfg(feature = "score_script")]
+impl ToLua<'_> for ProxyServerStatus {
+    fn to_lua(self, ctx: LuaContext<'_>) -> LuaResult<LuaValue<'_>> {
+        let status = ctx.create_table()?;
+        status.set("delay", self.delay)?;
+        status.set("score", self.score)?;
+        status.set("score", self.traffic)?;
+        status.set("conn_alive", self.conn_alive)?;
+        status.set("conn_total", self.conn_total)?;
+        status.set("conn_error", self.conn_error)?;
+        status.set("close_history", self.close_history)?;
+        status.to_lua(ctx)
+    }
 }
 
 impl Hash for ProxyServer {
@@ -113,6 +158,19 @@ impl PartialEq for ProxyServer {
 }
 
 impl Eq for ProxyServer {}
+
+#[cfg(feature = "score_script")]
+impl ToLua<'_> for &ProxyServer {
+    fn to_lua(self, ctx: LuaContext<'_>) -> LuaResult<LuaValue<'_>> {
+        let table = ctx.create_table()?;
+        table.set("addr", self.addr.to_string())?;
+        table.set("proto", self.proto.to_string())?;
+        table.set("tag", self.tag.to_string())?;
+        table.set("config", *self.config.read())?;
+        table.set("status", *self.status.lock())?;
+        table.to_lua(ctx)
+    }
+}
 
 #[derive(Hash, Clone, Debug)]
 pub enum Address {
@@ -174,6 +232,16 @@ impl Add for Traffic {
 impl AddAssign for Traffic {
     fn add_assign(&mut self, other: Traffic) {
         *self = *self + other;
+    }
+}
+
+#[cfg(feature = "score_script")]
+impl ToLua<'_> for Traffic {
+    fn to_lua(self, ctx: LuaContext<'_>) -> LuaResult<LuaValue<'_>> {
+        let table = ctx.create_table()?;
+        table.set("tx_bytes", self.tx_bytes)?;
+        table.set("rx_bytes", self.rx_bytes)?;
+        table.to_lua(ctx)
     }
 }
 
@@ -320,6 +388,18 @@ impl ProxyServer {
             status.delay = Delay::TimedOut;
             status.score = None;
         };
+    }
+
+    #[cfg(feature = "score_script")]
+    pub fn update_delay_with_lua(&self, delay: Option<Duration>, ctx: LuaContext) -> LuaResult<()> {
+        let func: LuaFunction = ctx.globals().get("calc_score")?;
+        let delay_secs = delay.map(|t| t.as_secs_f32());
+        let score: Option<i32> = func.call((self, delay_secs))?;
+
+        let mut status = self.status.lock();
+        status.score = score;
+        status.delay = delay.into();
+        Ok(())
     }
 
     pub fn add_traffic(&self, traffic: Traffic) {

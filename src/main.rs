@@ -95,9 +95,25 @@ async fn main() -> Result<(), &'static str> {
         .parse()
         .or(Err("not a valid address"))?;
     let servers_cfg = ServerListCfg::new(&args)?;
-
     let servers = servers_cfg.load()?;
+
+    #[cfg(feature = "score_script")]
+    let mut monitor = Monitor::new(servers, graphite);
+    #[cfg(not(feature = "score_script"))]
     let monitor = Monitor::new(servers, graphite);
+
+    // Setup score script
+    if !cfg!(feature = "score_script") && args.is_present("score-script") {
+        return Err("score script has been disabled during compiling");
+    };
+    #[cfg(feature = "score_script")]
+    {
+        if let Some(path) = args.value_of("score-script") {
+            monitor
+                .load_score_script(path)
+                .or(Err("fail to load Lua script"))?;
+        }
+    }
 
     // Setup web server
     if !cfg!(feature = "web_console") && args.is_present("web-bind") {
@@ -158,6 +174,7 @@ async fn main() -> Result<(), &'static str> {
                 Ok(servers) => monitor_.update_servers(servers),
                 Err(err) => error!("fail to reload servers: {}", err),
             }
+            // TODO: reload lua script?
         }
     });
 

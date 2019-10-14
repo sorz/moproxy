@@ -26,7 +26,7 @@ use tokio::{
 
 use crate::{
     monitor::{Monitor, Throughput},
-    proxy::ProxyServer,
+    proxy::{Delay, ProxyServer},
 };
 
 #[derive(Debug, Serialize)]
@@ -107,7 +107,7 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> http::Result<Res
             row.add_cell(cell!(r -> "-"));
         }
         // Delay
-        if let Some(v) = status.delay {
+        if let Delay::Some(v) = status.delay {
             row.add_cell(cell!(r -> v.format_millis()));
         } else {
             row.add_cell(cell!(r -> "-"));

@@ -61,11 +61,35 @@ pub struct ProxyServerConfig {
     score_base: i32,
 }
 
+#[derive(Debug, Serialize, Clone, Copy)]
+pub enum Delay {
+    Unknown,
+    Some(Duration),
+    TimedOut,
+}
+
+impl Default for Delay {
+    fn default() -> Self {
+        Delay::Unknown
+    }
+}
+
+impl Delay {
+    pub fn map<T, F>(self, func: F) -> Option<T>
+    where
+        F: FnOnce(Duration) -> T,
+    {
+        if let Delay::Some(d) = self {
+            Some(func(d))
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Clone, Copy, Default)]
 pub struct ProxyServerStatus {
-    #[serde(skip_serializing)]
-    probe_at_least_once: bool,
-    pub delay: Option<Duration>,
+    pub delay: Delay,
     pub score: Option<i32>,
     pub traffic: Traffic,
     pub conn_alive: u32,
@@ -260,38 +284,42 @@ impl ProxyServer {
     pub fn update_delay(&self, delay: Option<Duration>) {
         let mut status = self.status.lock();
         let config = self.config_snapshot();
-        status.delay = delay;
-        status.score = if !status.probe_at_least_once {
-            // First update, just set it
-            status.probe_at_least_once = true;
-            delay.map(|t| t.millis() as i32 + config.score_base)
-        } else {
-            // Moving average on delay and pently on failure
-            delay
-                .map(|t| t.millis() as i32 + config.score_base)
-                .map(|new| {
-                    let old = status
-                        .score
-                        .unwrap_or_else(|| config.max_wait.millis() as i32);
-                    // give penalty for continuous errors
-                    let err_rate = status
-                        .recent_error_rate(16)
-                        .min(status.recent_error_rate(64));
-                    let new = new + (new as f32 * err_rate * 10f32).round() as i32;
-                    // give more weight to delays exceed the mean, to
-                    // punish for network jitter.
-                    if new < old {
-                        (old * 9 + new) / 10
-                    } else {
-                        (old * 8 + new * 2) / 10
-                    }
-                })
-        };
-        // Shift error history
-        // This give the server with high error penalty a chance to recovery.
-        if delay.is_some() {
+
+        if let Some(delay) = delay {
+            let last_score = status.score.unwrap_or_else(|| {
+                match status.delay {
+                    Delay::Some(d) => d,
+                    Delay::Unknown => delay,
+                    Delay::TimedOut => config.max_wait,
+                }
+                .as_millis() as i32
+                    + config.score_base
+            });
+            let err_rate = status
+                .recent_error_rate(16)
+                .min(status.recent_error_rate(64));
+
+            let score = delay.millis() as i32 + config.score_base;
+            // give penalty for continuous errors
+            let score = score + (score as f32 * err_rate * 10f32).round() as i32;
+            // moving average on score
+            // give more weight to delays exceed the mean for network jitter penalty
+            let score = if score < last_score {
+                (last_score * 9 + score) / 10
+            } else {
+                (last_score * 8 + score * 2) / 10
+            };
+            status.score = Some(score);
+            status.delay = Delay::Some(delay);
+
+            // Shift error history
+            // This give the server with high error penalty a chance to recovery.
             status.close_history <<= 1;
-        }
+        } else {
+            // Timed out
+            status.delay = Delay::TimedOut;
+            status.score = None;
+        };
     }
 
     pub fn add_traffic(&self, traffic: Traffic) {

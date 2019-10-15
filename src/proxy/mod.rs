@@ -17,8 +17,6 @@ use std::{
 };
 use tokio::net::TcpStream;
 
-use crate::ToMillis;
-
 const DEFAULT_MAX_WAIT_MILLILS: u64 = 4_000;
 const GRAPHITE_PATH_PREFIX: &str = "moproxy.proxy_servers";
 
@@ -113,7 +111,8 @@ impl ToLua<'_> for Delay {
             Delay::Some(d) => Some(d.as_secs_f32()),
             Delay::TimedOut => Some(-1f32),
             Delay::Unknown => None,
-        }.to_lua(ctx)
+        }
+        .to_lua(ctx)
     }
 }
 
@@ -367,7 +366,7 @@ impl ProxyServer {
                 .recent_error_rate(16)
                 .min(status.recent_error_rate(64));
 
-            let score = delay.millis() as i32 + config.score_base;
+            let score = delay.as_millis() as i32 + config.score_base;
             // give penalty for continuous errors
             let score = score + (score as f32 * err_rate * 10f32).round() as i32;
             // moving average on score

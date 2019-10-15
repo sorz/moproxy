@@ -22,7 +22,7 @@ use tokio::{future::FutureExt, io::AsyncReadExt, timer::Interval};
 use self::graphite::{Graphite, Record};
 use self::traffic::Meter;
 pub use self::traffic::Throughput;
-use crate::{proxy::ProxyServer, ToMillis};
+use crate::proxy::ProxyServer;
 
 static THROUGHPUT_INTERVAL_SECS: u64 = 1;
 
@@ -65,8 +65,9 @@ impl Monitor {
                 return Ok(Err("calc_score() not found in Lua globals"));
             }
             let _: LuaFunction = match globals.get("calc_score") {
-                Err(LuaError::FromLuaConversionError { .. }) =>
-                    return Ok(Err("calc_score is not a function")),
+                Err(LuaError::FromLuaConversionError { .. }) => {
+                    return Ok(Err("calc_score is not a function"))
+                }
                 other => other,
             }?;
             Ok(Ok(()))
@@ -221,7 +222,7 @@ async fn send_metrics(monitor: &Monitor, graphite: &mut Graphite) -> io::Result<
             let r = |path, value| Record::new(server.graphite_path(path), value, now);
             let status = server.status_snapshot();
             vec![
-                status.delay.map(|t| r("delay", t.millis() as u64)),
+                status.delay.map(|t| r("delay", t.as_millis() as u64)),
                 status.score.map(|s| r("score", s as u64)),
                 Some(r("tx_bytes", status.traffic.tx_bytes as u64)),
                 Some(r("rx_bytes", status.traffic.rx_bytes as u64)),
@@ -280,7 +281,7 @@ async fn alive_test(server: &ProxyServer) -> io::Result<Duration> {
 
     if req_tid == tid(&buf) {
         let t = now.elapsed();
-        debug!("[{}] delay {}ms", server.tag, t.millis());
+        debug!("[{}] delay {}ms", server.tag, t.as_millis());
         Ok(t)
     } else {
         Err(io::Error::new(io::ErrorKind::Other, "unknown response"))

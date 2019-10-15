@@ -111,7 +111,7 @@ async fn main() -> Result<(), &'static str> {
         if let Some(path) = args.value_of("score-script") {
             monitor
                 .load_score_script(path)
-                .or(Err("fail to load Lua script"))?;
+                .expect("fail to load Lua script");
         }
     }
 

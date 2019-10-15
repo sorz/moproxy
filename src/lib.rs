@@ -5,16 +5,6 @@ pub mod tcp;
 #[cfg(feature = "web_console")]
 pub mod web;
 
-pub trait ToMillis {
-    fn millis(&self) -> u32;
-}
-
-impl ToMillis for std::time::Duration {
-    fn millis(&self) -> u32 {
-        self.as_secs() as u32 * 1000 + self.subsec_nanos() / 1_000_000
-    }
-}
-
 #[derive(Debug)]
 pub struct ArcBox<T: ?Sized> {
     item: std::sync::Arc<Box<T>>,

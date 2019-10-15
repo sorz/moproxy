@@ -38,7 +38,7 @@ where
 }
 
 #[tokio::main]
-async fn main() -> Result<(), &'static str> {
+async fn main() {
     let yaml = load_yaml!("cli.yml");
     let args = clap::App::from_yaml(yaml)
         .version(env!("CARGO_PKG_VERSION"))
@@ -54,7 +54,7 @@ async fn main() -> Result<(), &'static str> {
         .value_of("log-level")
         .unwrap_or("info")
         .parse()
-        .map_err(|_| "unknown log level")?;
+        .expect("unknown log level");
     logger
         .filter(None, log_level)
         .filter_module("tokio_executor", LevelFilter::Warn)
@@ -68,34 +68,36 @@ async fn main() -> Result<(), &'static str> {
 
     let host = args
         .value_of("host")
-        .ok_or("missing host")?
+        .expect("missing host")
         .parse()
-        .or(Err("invalid address"))?;
+        .expect("invalid address");
     let port = args
         .value_of("port")
-        .ok_or("missing port number")?
+        .expect("missing port number")
         .parse()
-        .or(Err("invalid port number"))?;
+        .expect("invalid port number");
     let bind_addr = SocketAddr::new(host, port);
     let probe = args
         .value_of("probe-secs")
-        .ok_or("missing probe secs")?
+        .expect("missing probe secs")
         .parse()
-        .or(Err("not a vaild probe secs"))?;
+        .expect("not a vaild probe secs");
     let remote_dns = args.is_present("remote-dns");
     let n_parallel = args
         .value_of("n-parallel")
         .parse()
-        .or(Err("not a valid number"))?
+        .expect("not a valid number")
         .unwrap_or(0 as usize);
     let cong_local = args.value_of("cong-local");
     let allow_direct = args.is_present("allow-direct");
     let graphite = args
         .value_of("graphite")
         .parse()
-        .or(Err("not a valid address"))?;
-    let servers_cfg = ServerListCfg::new(&args)?;
-    let servers = servers_cfg.load()?;
+        .expect("not a valid address");
+    let servers_cfg = ServerListCfg::new(&args)
+        .expect("invalid server address");
+    let servers = servers_cfg.load()
+        .expect("fail to load servers from file");
 
     #[cfg(feature = "score_script")]
     let mut monitor = Monitor::new(servers, graphite);
@@ -104,7 +106,7 @@ async fn main() -> Result<(), &'static str> {
 
     // Setup score script
     if !cfg!(feature = "score_script") && args.is_present("score-script") {
-        return Err("score script has been disabled during compiling");
+        panic!("score script has been disabled during compiling");
     };
     #[cfg(feature = "score_script")]
     {
@@ -117,7 +119,7 @@ async fn main() -> Result<(), &'static str> {
 
     // Setup web server
     if !cfg!(feature = "web_console") && args.is_present("web-bind") {
-        return Err("web console has been disabled during compiling");
+        panic!("web console has been disabled during compiling");
     };
     #[cfg(feature = "web_console")]
     let sock_file = {
@@ -126,7 +128,7 @@ async fn main() -> Result<(), &'static str> {
             if http_addr.starts_with('/') {
                 let sock = web::AutoRemoveFile::new(&http_addr);
                 let incoming = UnixListener::bind(&sock)
-                    .or(Err("fail to bind web server"))?
+                    .expect("fail to bind web server")
                     .incoming();
                 let serv = web::run_server(incoming, monitor.clone());
                 tokio::spawn(serv);
@@ -134,7 +136,7 @@ async fn main() -> Result<(), &'static str> {
             } else {
                 let incoming = TcpListener::bind(&http_addr)
                     .await
-                    .or(Err("fail to bind web server"))?
+                    .expect("fail to bind web server")
                     .incoming();
                 let serv = web::run_server(incoming, monitor.clone());
                 tokio::spawn(serv);
@@ -152,7 +154,7 @@ async fn main() -> Result<(), &'static str> {
 
     // Setup signal listener for reloading server list
     let monitor_ = monitor.clone();
-    let mut signals = signal(SignalKind::hangup()).or(Err("cannot catch signal"))?;
+    let mut signals = signal(SignalKind::hangup()).expect("cannot catch signal");
     tokio::spawn(async move {
         while let Some(_) = signals.next().await {
             // feature: check deadlocks on signal
@@ -188,12 +190,12 @@ async fn main() -> Result<(), &'static str> {
     // Setup proxy server
     let listener = TcpListener::bind(&bind_addr)
         .await
-        .or(Err("cannot bind to port"))?;
+        .expect("cannot bind to port");
     info!("listen on {}", bind_addr);
     if let Some(alg) = cong_local {
         info!("set {} on {}", alg, bind_addr);
-        set_congestion(&listener, alg).or(Err("fail to set tcp congestion algorithm. \
-                                                check tcp_allowed_congestion_control?"))?;
+        set_congestion(&listener, alg).expect("fail to set tcp congestion algorithm. \
+                                                check tcp_allowed_congestion_control?");
     }
     let mut clients = listener.incoming();
     while let Some(sock) = clients.next().await {
@@ -216,7 +218,6 @@ async fn main() -> Result<(), &'static str> {
     // unnecessary drop() but make complier happy about unused var.
     #[cfg(feature = "web_console")]
     drop(sock_file);
-    Ok(())
 }
 
 async fn handle_client(

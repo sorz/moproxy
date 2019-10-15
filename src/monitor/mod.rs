@@ -16,10 +16,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 #[cfg(feature = "score_script")]
-use std::{
-    fs::File,
-    io::Read,
-};
+use std::{error::Error, fs::File, io::Read};
 use tokio::{future::FutureExt, io::AsyncReadExt, timer::Interval};
 
 use self::graphite::{Graphite, Record};
@@ -36,7 +33,7 @@ pub struct Monitor {
     servers: Arc<Mutex<ServerList>>,
     meters: Arc<Mutex<HashMap<Arc<ProxyServer>, Meter>>>,
     graphite: Option<SocketAddr>,
-    #[cfg(feature = "score_script")]    
+    #[cfg(feature = "score_script")]
     lua: Option<Arc<Mutex<Lua>>>,
 }
 
@@ -56,21 +53,24 @@ impl Monitor {
     }
 
     #[cfg(feature = "score_script")]
-    pub fn load_score_script(&mut self, path: &str) -> io::Result<()> {
+    pub fn load_score_script(&mut self, path: &str) -> Result<(), Box<dyn Error>> {
         let mut buf = Vec::new();
         File::open(path)?.take(2u64.pow(26)).read_to_end(&mut buf)?;
 
         let lua = Lua::new();
-        lua.context(|ctx| -> LuaResult<()>  {
+        lua.context(|ctx| -> LuaResult<Result<(), &'static str>> {
             let globals = ctx.globals();
             ctx.load(&buf).exec()?;
             if !globals.contains_key("calc_score")? {
-                panic!("calc_score() not found in Lua globals");
+                return Ok(Err("calc_score() not found in Lua globals"));
             }
-            let _: LuaFunction = globals.get("calc_score")?;
-            Ok(())
-        }).expect("fail to parse lua script");
-        // TODO: handle error on paring lua script
+            let _: LuaFunction = match globals.get("calc_score") {
+                Err(LuaError::FromLuaConversionError { .. }) =>
+                    return Ok(Err("calc_score is not a function")),
+                other => other,
+            }?;
+            Ok(Ok(()))
+        })??;
 
         self.lua.replace(Arc::new(Mutex::new(lua)));
         Ok(())
@@ -189,9 +189,10 @@ async fn test_all(monitor: &Monitor) {
                 {
                     let mut caculated = false;
                     if let Some(lua) = &monitor.lua {
-                        match lua.lock().context(|ctx|
-                            server.update_delay_with_lua(delay, ctx)
-                        ) {
+                        match lua
+                            .lock()
+                            .context(|ctx| server.update_delay_with_lua(delay, ctx))
+                        {
                             Ok(()) => caculated = true,
                             Err(err) => warn!("fail to update score w/ Lua script: {}", err),
                         }

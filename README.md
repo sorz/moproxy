@@ -14,7 +14,7 @@ Features:
    first response)
  * Optional status web page (latency, traffic, etc. w/ curl-friendly output)
  * Optional [Graphite](https://graphite.readthedocs.io/) support
-   (to build fancy dashborad with [Grafana](https://grafana.com/) for example)
+   (to build fancy dashboard with [Grafana](https://grafana.com/) for example)
 
 ```
 +------+  TCP  +----------+       SOCKSv5   +---------+
@@ -59,7 +59,7 @@ nft add rule nat prerouting tcp dport {80, 443} redirect to 2080
 ```
 
 ### Server list file
-You may list all proxy servers in a text file to avoid a messy CLI arguments.
+You may list all proxy servers in a text file to avoid messy CLI arguments.
 
 ```ini
 [server-1]
@@ -77,17 +77,17 @@ score base=5000 ;add 5k to pull away from preferred server.
 
 Pass the file path to `moproxy` via `--list` argument.
 
-Signal `SIGHUP` will tigger the program to reload the list.
+Signal `SIGHUP` will trigger the program to reload the list.
 
 ## Install
 
-You may download the binray executable file on
+You may download the binary executable file on
 [releases page](https://github.com/sorz/moproxy/releases).
 
 Arch Linux user can install it from
 [AUR/moproxy](https://aur.archlinux.org/packages/moproxy/).
 
-Or complie it manually:
+Or compile it manually:
 
 ```bash
 # Install Rust

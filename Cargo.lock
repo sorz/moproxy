@@ -562,7 +562,7 @@ dependencies = [
 
 [[package]]
 name = "moproxy"
-version = "0.3.0-alpha.1"
+version = "0.3.0"
 dependencies = [
  "clap 2.33.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "env_logger 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)",

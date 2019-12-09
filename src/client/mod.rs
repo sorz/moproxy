@@ -1,7 +1,15 @@
 mod connect;
 mod tls;
 use log::{debug, info, warn};
-use std::{cmp, future::Future, io, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    cmp,
+    future::Future,
+    io,
+    net::SocketAddr,
+    pin::Pin,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::{
     future::FutureExt,
     io::{AsyncReadExt, AsyncWriteExt},
@@ -39,6 +47,7 @@ pub struct ConnectedClient {
     right: TcpStream,
     dest: Destination,
     server: Arc<ProxyServer>,
+    connected_at: Instant,
 }
 
 #[derive(Debug)]
@@ -139,6 +148,7 @@ impl NewClient {
                 right,
                 dest,
                 server,
+                connected_at: Instant::now(),
             })
         } else {
             warn!("{} => {} no avaiable proxy", src, dest);
@@ -192,7 +202,7 @@ impl FailedClient {
             right.write_all(&data).await?;
         }
 
-        info!(
+        debug!(
             "{} => {} via {}",
             left.peer_addr()?,
             dest,
@@ -203,6 +213,7 @@ impl FailedClient {
             right,
             dest: dest.into(),
             server: pseudo_server,
+            connected_at: Instant::now(),
         })
     }
 }
@@ -214,6 +225,7 @@ impl ConnectedClient {
             right,
             dest,
             server,
+            connected_at,
         } = self;
         // TODO: make keepalive configurable
         let timeout = Some(Duration::from_secs(180));
@@ -223,13 +235,15 @@ impl ConnectedClient {
         {
             warn!("fail to set keepalive: {}", e);
         }
+        let left_addr = left.peer_addr()?;
         server.update_stats_conn_open();
         match pipe(left, right, server.clone()).await {
             Ok(amt) => {
                 server.update_stats_conn_close(false);
-                debug!(
-                    "tx {}, rx {} bytes ({} => {})",
-                    amt.tx_bytes, amt.rx_bytes, server, dest
+                let secs = connected_at.elapsed().as_secs();
+                info!(
+                    "{} => {} => {} closed, tx {}, rx {} bytes, {} secs",
+                    left_addr, server, dest, amt.tx_bytes, amt.rx_bytes, secs,
                 );
                 Ok(())
             }

@@ -8,8 +8,8 @@ edition = "2018"
 libc = "0.2"
 nix = "0.15"
 rand = "0.7"
-tokio = "0.2.0-alpha.6"
-tokio-net = { version = "0.2.0-alpha.5", features = ["signal"] }
+tokio = "=0.2.0-alpha.6"
+tokio-net = { version = "=0.2.0-alpha.6", features = ["signal"] }
 net2 = "0.2"
 clap = {version = "2.33", features = ["yaml", "color"]}
 log = "0.4"

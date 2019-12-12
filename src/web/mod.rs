@@ -20,7 +20,7 @@ use std::{
 };
 use tokio::{
     self,
-    executor::DefaultExecutor,
+    runtime::Runtime,
     io::{AsyncRead, AsyncWrite},
 };
 
@@ -186,7 +186,7 @@ where
         }
     });
     let accept = from_stream(incoming);
-    let http = Http::new().with_executor(DefaultExecutor::current());
+    let http = Http::new().with_executor(Runtime::new());
     let server = hyper::server::Builder::new(accept, http).serve(make_svc);
     if let Err(e) = server.await {
         warn!("web server error: {}", e);

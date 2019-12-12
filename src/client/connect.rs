@@ -9,7 +9,10 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::{future::FutureExt, net::TcpStream};
+use tokio::{
+    time::timeout,
+    net::TcpStream,
+};
 
 use crate::{
     proxy::{Destination, ProxyServer},
@@ -24,15 +27,12 @@ async fn try_connect(
 ) -> io::Result<(Arc<ProxyServer>, TcpStream)> {
     let max_wait = server.config_snapshot().max_wait;
     // waiting for proxy server connected
-    let mut stream = server
-        .connect(&dest, pending_data)
-        .timeout(max_wait)
-        .await??;
+    let mut stream = timeout(max_wait, server.connect(&dest, pending_data)).await??;
 
     // waiting for response data
     if wait_response {
         let mut buf = [0u8; 8];
-        let len = stream.peek(&mut buf).timeout(max_wait).await??;
+        let len = timeout(max_wait, stream.peek(&mut buf)).await??;
         if len <= 0 {
             return Err(io::Error::new(ErrorKind::UnexpectedEof, "no response data"));
         }

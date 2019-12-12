@@ -1,19 +1,11 @@
 mod connect;
 mod tls;
 use log::{debug, info, warn};
-use std::{
-    cmp,
-    future::Future,
-    io,
-    net::SocketAddr,
-    pin::Pin,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{cmp, future::Future, io, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
 use tokio::{
-    future::FutureExt,
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
+    time::timeout,
 };
 
 use crate::{
@@ -47,7 +39,6 @@ pub struct ConnectedClient {
     right: TcpStream,
     dest: Destination,
     server: Arc<ProxyServer>,
-    connected_at: Instant,
 }
 
 #[derive(Debug)]
@@ -95,7 +86,7 @@ impl NewClient {
         let mut has_full_tls_hello = false;
         let mut pending_data = None;
         let mut buf = vec![0u8; 2048];
-        if let Ok(len) = left.read(&mut buf).timeout(wait).await {
+        if let Ok(len) = timeout(wait, left.read(&mut buf)).await {
             buf.truncate(len?);
             // only TLS is safe to duplicate requests.
             match parse_client_hello(&buf) {
@@ -148,7 +139,6 @@ impl NewClient {
                 right,
                 dest,
                 server,
-                connected_at: Instant::now(),
             })
         } else {
             warn!("{} => {} no avaiable proxy", src, dest);
@@ -202,7 +192,7 @@ impl FailedClient {
             right.write_all(&data).await?;
         }
 
-        debug!(
+        info!(
             "{} => {} via {}",
             left.peer_addr()?,
             dest,
@@ -213,7 +203,6 @@ impl FailedClient {
             right,
             dest: dest.into(),
             server: pseudo_server,
-            connected_at: Instant::now(),
         })
     }
 }
@@ -225,7 +214,6 @@ impl ConnectedClient {
             right,
             dest,
             server,
-            connected_at,
         } = self;
         // TODO: make keepalive configurable
         let timeout = Some(Duration::from_secs(180));
@@ -235,15 +223,13 @@ impl ConnectedClient {
         {
             warn!("fail to set keepalive: {}", e);
         }
-        let left_addr = left.peer_addr()?;
         server.update_stats_conn_open();
         match pipe(left, right, server.clone()).await {
             Ok(amt) => {
                 server.update_stats_conn_close(false);
-                let secs = connected_at.elapsed().as_secs();
-                info!(
-                    "{} => {} => {} closed, tx {}, rx {} bytes, {} secs",
-                    left_addr, server, dest, amt.tx_bytes, amt.rx_bytes, secs,
+                debug!(
+                    "tx {}, rx {} bytes ({} => {})",
+                    amt.tx_bytes, amt.rx_bytes, server, dest
                 );
                 Ok(())
             }

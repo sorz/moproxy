@@ -1,13 +1,16 @@
 use clap::{load_yaml, AppSettings};
-use futures::stream::StreamExt;
+use futures::StreamExt;
 use ini::Ini;
 use log::{debug, error, info, warn, LevelFilter};
 use parking_lot::deadlock;
 use std::{env, io, io::Write, net::SocketAddr, str::FromStr, sync::Arc};
 #[cfg(feature = "web_console")]
-use tokio::net::unix::UnixListener;
-use tokio::{self, net::tcp::TcpListener};
-use tokio_net::signal::unix::{signal, SignalKind};
+use tokio::net::UnixListener;
+use tokio::{
+    self,
+    net::TcpListener,
+    signal::unix::{signal, SignalKind},
+};
 
 #[cfg(feature = "web_console")]
 use moproxy::web;
@@ -188,7 +191,7 @@ async fn main() {
     };
 
     // Setup proxy server
-    let listener = TcpListener::bind(&bind_addr)
+    let mut listener = TcpListener::bind(&bind_addr)
         .await
         .expect("cannot bind to port");
     info!("listen on {}", bind_addr);

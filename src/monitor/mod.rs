@@ -13,11 +13,14 @@ use std::{
     iter::FromIterator,
     net::SocketAddr,
     sync::Arc,
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, SystemTime},
 };
 #[cfg(feature = "score_script")]
 use std::{error::Error, fs::File, io::Read};
-use tokio::{future::FutureExt, io::AsyncReadExt, timer::Interval};
+use tokio::{
+    io::AsyncReadExt,
+    time::{interval_at, Instant, timeout}
+};
 
 use self::graphite::{Graphite, Record};
 use self::traffic::Meter;
@@ -128,9 +131,9 @@ impl Monitor {
 
         test_all(&self).await;
 
-        let mut interval = Interval::new_interval(interval);
+        let mut interval = interval_at(Instant::now() + interval, interval);
         loop {
-            interval.next().await;
+            interval.tick().await;
             test_all(&self).await;
             if let Some(ref mut graphite) = graphite {
                 match send_metrics(&self, graphite).await {
@@ -145,9 +148,9 @@ impl Monitor {
     /// Returned Future won't return unless error on timer.
     pub async fn monitor_throughput(self) {
         let interval = Duration::from_secs(THROUGHPUT_INTERVAL_SECS);
-        let mut interval = Interval::new_interval(interval);
+        let mut interval = interval_at(Instant::now() + interval, interval);
         loop {
-            interval.next().await;
+            interval.tick().await;
             for (server, meter) in self.meters.lock().iter_mut() {
                 meter.add_sample(server.traffic());
             }
@@ -265,12 +268,11 @@ async fn alive_test(server: &ProxyServer) -> io::Result<Duration> {
 
     let mut buf = [0u8; 12];
     let test_dns = config.test_dns.into();
-    let result = async {
+    let result = timeout(config.max_wait, async {
         let mut stream = server.connect(&test_dns, Some(request)).await?;
         stream.read_exact(&mut buf).await?;
         Ok(())
-    }
-        .timeout(config.max_wait)
+    })
         .await;
 
     match result {

@@ -4,7 +4,11 @@ use std::{
     net::SocketAddr,
     time::{Duration, SystemTime},
 };
-use tokio::{future::FutureExt, io::AsyncWriteExt, net::TcpStream};
+use tokio::{
+    io::AsyncWriteExt,
+    net::TcpStream,
+    time::timeout,
+};
 
 static GRAPHITE_TIMEOUT_SECS: u64 = 5;
 
@@ -47,8 +51,8 @@ impl Graphite {
             record.write_paintext(&mut buf).unwrap();
         }
 
-        let timeout = Duration::from_secs(GRAPHITE_TIMEOUT_SECS);
-        match stream.write_all(&buf).timeout(timeout).await {
+        let max_wait = Duration::from_secs(GRAPHITE_TIMEOUT_SECS);
+        match timeout(max_wait, stream.write_all(&buf)).await {
             Err(_) => Err(io::Error::from(io::ErrorKind::TimedOut)),
             Ok(Err(err)) => {
                 warn!("fail to send metrics: {}", err);

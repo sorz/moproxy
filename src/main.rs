@@ -13,7 +13,7 @@ use tokio::{
 };
 
 #[cfg(feature = "web_console")]
-use moproxy::web;
+use moproxy::web::{self, TcpAccept, UnixAccept};
 use moproxy::{
     client::{Connectable, NewClient},
     monitor::Monitor,
@@ -128,16 +128,17 @@ async fn main() {
             info!("http run on {}", http_addr);
             if http_addr.starts_with('/') {
                 let sock = web::AutoRemoveFile::new(&http_addr);
-                let listener = UnixListener::bind(&sock).expect("fail to bind web server");
-                let accept = web::UnixAccept::new(listener);
+                let accept: UnixAccept = UnixListener::bind(&sock)
+                    .expect("fail to bind web server")
+                    .into();
                 let serv = web::run_server(accept, monitor.clone());
                 tokio::spawn(serv);
                 Some(sock)
             } else {
-                let listener = TcpListener::bind(&http_addr)
+                let accept: TcpAccept = TcpListener::bind(&http_addr)
                     .await
-                    .expect("fail to bind web server");
-                let accept = web::TcpAccept::new(listener);
+                    .expect("fail to bind web server")
+                    .into();
                 let serv = web::run_server(accept, monitor.clone());
                 tokio::spawn(serv);
                 None

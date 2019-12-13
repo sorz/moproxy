@@ -1,6 +1,6 @@
 mod helpers;
 
-use futures::pin_mut;
+use futures::{pin_mut, ready};
 use helpers::{DurationExt, RequestExt};
 use http;
 use hyper::{
@@ -97,7 +97,15 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> http::Result<Res
 
     let mut table = Table::new();
     table.add_row(row![
-        "Server", "Score", "Delay", "CUR", "TTL", "E16", "E64", "Up", "Down", "↑↓ bps"
+        "Server",
+        "Score",
+        "Delay",
+        "CUR",
+        "TTL",
+        "E16:64",
+        "Up",
+        "Down",
+        "↑↓ bps"
     ]);
     table.set_format(*FORMAT_NO_LINESEP_WITH_TITLE);
     let mut total_alive_conns = 0;
@@ -124,8 +132,12 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> http::Result<Res
         row.add_cell(cell!(r -> status.conn_total));
         // Error rate
         // TODO: document the two columns
-        row.add_cell(cell!(r -> status.recent_error_count(16)));
-        row.add_cell(cell!(r -> status.recent_error_count(64)));
+        row.add_cell(cell!(r ->
+            format!("{:02}:{:02}",
+                status.recent_error_count( 16),
+                status.recent_error_count(64),
+            )
+        ));
         // Up Down
         row.add_cell(cell!(r -> helpers::to_human_bytes(status.traffic.tx_bytes)));
         row.add_cell(cell!(r -> helpers::to_human_bytes(status.traffic.rx_bytes)));
@@ -228,14 +240,14 @@ impl<'a> AsRef<Path> for &'a AutoRemoveFile<'a> {
 pub struct TcpAccept(TcpListener);
 pub struct UnixAccept(UnixListener);
 
-impl TcpAccept {
-    pub fn new(listener: TcpListener) -> Self {
+impl From<TcpListener> for TcpAccept {
+    fn from(listener: TcpListener) -> Self {
         Self(listener)
     }
 }
 
-impl UnixAccept {
-    pub fn new(listener: UnixListener) -> Self {
+impl From<UnixListener> for UnixAccept {
+    fn from(listener: UnixListener) -> Self {
         Self(listener)
     }
 }
@@ -250,10 +262,8 @@ impl Accept for TcpAccept {
     ) -> Poll<Option<Result<Self::Conn, Self::Error>>> {
         let accept = self.get_mut().0.accept();
         pin_mut!(accept);
-        match accept.poll(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(result) => Poll::Ready(Some(result.map(|(stream, _)| stream))),
-        }
+        let result = ready!(accept.poll(cx)).map(|(stream, _)| stream);
+        Poll::Ready(Some(result))
     }
 }
 
@@ -267,9 +277,7 @@ impl Accept for UnixAccept {
     ) -> Poll<Option<Result<Self::Conn, Self::Error>>> {
         let accept = self.get_mut().0.accept();
         pin_mut!(accept);
-        match accept.poll(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(result) => Poll::Ready(Some(result.map(|(stream, _)| stream))),
-        }
+        let result = ready!(accept.poll(cx)).map(|(stream, _)| stream);
+        Poll::Ready(Some(result))
     }
 }

@@ -1,7 +1,7 @@
 mod helpers;
 
 use futures::pin_mut;
-use helpers::{to_human_bps, to_human_bytes, DurationExt, RequestExt};
+use helpers::{DurationExt, RequestExt};
 use http;
 use hyper::{
     server::{accept::Accept, conn::Http},
@@ -97,7 +97,7 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> http::Result<Res
 
     let mut table = Table::new();
     table.add_row(row![
-        "Server", "Score", "Delay", "CUR", "TTL", "E16", "E64", "Up", "Down", "↑↓"
+        "Server", "Score", "Delay", "CUR", "TTL", "E16", "E64", "Up", "Down", "↑↓ bps"
     ]);
     table.set_format(*FORMAT_NO_LINESEP_WITH_TITLE);
     let mut total_alive_conns = 0;
@@ -127,13 +127,13 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> http::Result<Res
         row.add_cell(cell!(r -> status.recent_error_count(16)));
         row.add_cell(cell!(r -> status.recent_error_count(64)));
         // Up Down
-        row.add_cell(cell!(r -> to_human_bytes(status.traffic.tx_bytes)));
-        row.add_cell(cell!(r -> to_human_bytes(status.traffic.rx_bytes)));
+        row.add_cell(cell!(r -> helpers::to_human_bytes(status.traffic.tx_bytes)));
+        row.add_cell(cell!(r -> helpers::to_human_bytes(status.traffic.rx_bytes)));
         // ↑↓
         if let Some(tp) = throughput {
             let sum = tp.tx_bps + tp.rx_bps;
             if sum > 0 {
-                row.add_cell(cell!(r -> to_human_bps(sum)));
+                row.add_cell(cell!(r -> helpers::to_human_bps_prefix_only(sum)));
             }
         }
     }
@@ -142,8 +142,8 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> http::Result<Res
         &mut buf,
         "[{}] ↑ {} ↓ {}\n{}",
         total_alive_conns,
-        to_human_bps(status.throughput.tx_bps),
-        to_human_bps(status.throughput.rx_bps),
+        helpers::to_human_bps(status.throughput.tx_bps),
+        helpers::to_human_bps(status.throughput.rx_bps),
         table
     )
     .unwrap();
@@ -248,7 +248,9 @@ impl Accept for TcpAccept {
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Self::Conn, Self::Error>>> {
-        match self.get_mut().0.poll_accept(cx) {
+        let accept = self.get_mut().0.accept();
+        pin_mut!(accept);
+        match accept.poll(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(result) => Poll::Ready(Some(result.map(|(stream, _)| stream))),
         }

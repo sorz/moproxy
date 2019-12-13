@@ -78,3 +78,10 @@ pub fn to_human_bps(n: usize) -> String {
         Prefixed(prefix, n) => format!("{:.0} {}bps", n, prefix),
     }
 }
+
+pub fn to_human_bps_prefix_only(n: usize) -> String {
+    match NumberPrefix::decimal(n as f64) {
+        Standalone(n) => format!("{} ", n),
+        Prefixed(prefix, n) => format!("{:.0}{}", n, prefix),
+    }
+}

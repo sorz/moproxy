@@ -97,10 +97,8 @@ async fn main() {
         .value_of("graphite")
         .parse()
         .expect("not a valid address");
-    let servers_cfg = ServerListCfg::new(&args)
-        .expect("invalid server address");
-    let servers = servers_cfg.load()
-        .expect("fail to load servers from file");
+    let servers_cfg = ServerListCfg::new(&args).expect("invalid server address");
+    let servers = servers_cfg.load().expect("fail to load servers from file");
 
     #[cfg(feature = "score_script")]
     let mut monitor = Monitor::new(servers, graphite);
@@ -130,18 +128,17 @@ async fn main() {
             info!("http run on {}", http_addr);
             if http_addr.starts_with('/') {
                 let sock = web::AutoRemoveFile::new(&http_addr);
-                let incoming = UnixListener::bind(&sock)
-                    .expect("fail to bind web server")
-                    .incoming();
-                let serv = web::run_server(incoming, monitor.clone());
+                let listener = UnixListener::bind(&sock).expect("fail to bind web server");
+                let accept = web::UnixAccept::new(listener);
+                let serv = web::run_server(accept, monitor.clone());
                 tokio::spawn(serv);
                 Some(sock)
             } else {
-                let incoming = TcpListener::bind(&http_addr)
+                let listener = TcpListener::bind(&http_addr)
                     .await
-                    .expect("fail to bind web server")
-                    .incoming();
-                let serv = web::run_server(incoming, monitor.clone());
+                    .expect("fail to bind web server");
+                let accept = web::TcpAccept::new(listener);
+                let serv = web::run_server(accept, monitor.clone());
                 tokio::spawn(serv);
                 None
             }
@@ -197,8 +194,10 @@ async fn main() {
     info!("listen on {}", bind_addr);
     if let Some(alg) = cong_local {
         info!("set {} on {}", alg, bind_addr);
-        set_congestion(&listener, alg).expect("fail to set tcp congestion algorithm. \
-                                                check tcp_allowed_congestion_control?");
+        set_congestion(&listener, alg).expect(
+            "fail to set tcp congestion algorithm. \
+             check tcp_allowed_congestion_control?",
+        );
     }
     let mut clients = listener.incoming();
     while let Some(sock) = clients.next().await {

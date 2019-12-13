@@ -1,10 +1,10 @@
 mod helpers;
 
-use futures::Stream;
+use futures::pin_mut;
 use helpers::{to_human_bps, to_human_bytes, DurationExt, RequestExt};
 use http;
 use hyper::{
-    server::{accept::from_stream, conn::Http},
+    server::{accept::Accept, conn::Http},
     service::{make_service_fn, service_fn},
     Body, Method, Request, Response, StatusCode,
 };
@@ -12,22 +12,29 @@ use log::warn;
 use prettytable::{cell, format::consts::FORMAT_NO_LINESEP_WITH_TITLE, row, Table};
 use serde_derive::Serialize;
 use std::{
+    error::Error,
     fmt::Write,
-    fs, io,
+    fs,
+    future::Future,
+    io,
     path::Path,
+    pin::Pin,
     sync::Arc,
+    task::{Context, Poll},
     time::{Duration, Instant},
 };
 use tokio::{
     self,
-    runtime::Runtime,
     io::{AsyncRead, AsyncWrite},
+    net::{TcpListener, TcpStream, UnixListener, UnixStream},
 };
 
 use crate::{
     monitor::{Monitor, Throughput},
     proxy::{Delay, ProxyServer},
 };
+
+pub use hyper::server::accept::from_stream;
 
 #[derive(Debug, Serialize)]
 struct ServerStatus {
@@ -168,10 +175,11 @@ fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Res
     .unwrap()
 }
 
-pub async fn run_server<I, S>(incoming: I, monitor: Monitor)
+pub async fn run_server<A>(accept: A, monitor: Monitor)
 where
-    I: Stream<Item = io::Result<S>> + 'static,
-    S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+    A: Accept,
+    A::Error: Into<Box<dyn Error + Send + Sync>>,
+    A::Conn: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     tokio::spawn(monitor.clone().monitor_throughput());
     let start_time = Instant::now();
@@ -185,8 +193,7 @@ where
             }))
         }
     });
-    let accept = from_stream(incoming);
-    let http = Http::new().with_executor(Runtime::new());
+    let http = Http::new();
     let server = hyper::server::Builder::new(accept, http).serve(make_svc);
     if let Err(e) = server.await {
         warn!("web server error: {}", e);
@@ -215,5 +222,52 @@ impl<'a> Drop for AutoRemoveFile<'a> {
 impl<'a> AsRef<Path> for &'a AutoRemoveFile<'a> {
     fn as_ref(&self) -> &Path {
         self.path.as_ref()
+    }
+}
+
+pub struct TcpAccept(TcpListener);
+pub struct UnixAccept(UnixListener);
+
+impl TcpAccept {
+    pub fn new(listener: TcpListener) -> Self {
+        Self(listener)
+    }
+}
+
+impl UnixAccept {
+    pub fn new(listener: UnixListener) -> Self {
+        Self(listener)
+    }
+}
+
+impl Accept for TcpAccept {
+    type Conn = TcpStream;
+    type Error = io::Error;
+
+    fn poll_accept(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Self::Conn, Self::Error>>> {
+        match self.get_mut().0.poll_accept(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(result) => Poll::Ready(Some(result.map(|(stream, _)| stream))),
+        }
+    }
+}
+
+impl Accept for UnixAccept {
+    type Conn = UnixStream;
+    type Error = io::Error;
+
+    fn poll_accept(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Self::Conn, Self::Error>>> {
+        let accept = self.get_mut().0.accept();
+        pin_mut!(accept);
+        match accept.poll(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(result) => Poll::Ready(Some(result.map(|(stream, _)| stream))),
+        }
     }
 }

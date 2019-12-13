@@ -19,7 +19,7 @@ use std::{
 use std::{error::Error, fs::File, io::Read};
 use tokio::{
     io::AsyncReadExt,
-    time::{interval_at, Instant, timeout}
+    time::{interval_at, timeout, Instant},
 };
 
 use self::graphite::{Graphite, Record};
@@ -273,7 +273,7 @@ async fn alive_test(server: &ProxyServer) -> io::Result<Duration> {
         stream.read_exact(&mut buf).await?;
         Ok(())
     })
-        .await;
+    .await;
 
     match result {
         Err(_) => return Err(io::Error::new(io::ErrorKind::TimedOut, "test timeout")),

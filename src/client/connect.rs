@@ -9,10 +9,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use tokio::{
-    time::timeout,
-    net::TcpStream,
-};
+use tokio::{net::TcpStream, time::timeout};
 
 use crate::{
     proxy::{Destination, ProxyServer},

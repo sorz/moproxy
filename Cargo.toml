@@ -17,9 +17,9 @@ serde = {version = "1.0", features = ["rc"]}
 serde_json = "1.0"
 serde_derive = "1.0"
 rust-ini = "0.13"
-hyper = {version = "0.13.0", optional = true, default-features = false}
+hyper = {version = "0.13.0", optional = true, default-features = false, features = ["stream"]}
 parking_lot = {version = "0.9", features = ["serde", "deadlock_detection"]}
-http = "0.1"
+http = "0.2"
 prettytable-rs = {version = "0.8", default-features = false}
 regex = "1"
 lazy_static = "1.4"

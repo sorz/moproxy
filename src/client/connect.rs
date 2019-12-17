@@ -1,4 +1,4 @@
-use log::info;
+use log::debug;
 use std::{
     cmp,
     collections::VecDeque,
@@ -21,7 +21,7 @@ async fn try_connect(
     server: Arc<ProxyServer>,
     pending_data: Option<ArcBox<[u8]>>,
     wait_response: bool,
-) -> io::Result<(Arc<ProxyServer>, TcpStream)> {
+) -> io::Result<TcpStream> {
     let max_wait = server.config_snapshot().max_wait;
     // waiting for proxy server connected
     let mut stream = timeout(max_wait, server.connect(&dest, pending_data)).await??;
@@ -34,8 +34,10 @@ async fn try_connect(
             return Err(io::Error::new(ErrorKind::UnexpectedEof, "no response data"));
         }
     }
-    Ok((server, stream))
+    Ok(stream)
 }
+
+type PinnedConnectFuture = Pin<Box<dyn Future<Output = io::Result<TcpStream>> + Send>>;
 
 /// Try to connect one of the proxy servers.
 /// Pick `parallel_n` servers from `queue` to `connecting` and wait for
@@ -48,8 +50,7 @@ pub struct TryConnectAll<'a> {
     parallel_n: usize,
     wait_response: bool,
     standby: VecDeque<Arc<ProxyServer>>,
-    connects:
-        VecDeque<Pin<Box<dyn Future<Output = io::Result<(Arc<ProxyServer>, TcpStream)>> + Send>>>,
+    connects: VecDeque<(Arc<ProxyServer>, PinnedConnectFuture)>,
 }
 
 pub fn try_connect_all(
@@ -79,29 +80,30 @@ impl<'a> Future for TryConnectAll<'a> {
         cx: &mut Context,
     ) -> Poll<Option<(Arc<ProxyServer>, TcpStream)>> {
         loop {
+            let dest = self.dest.clone();
             // if current connections less than parallel_n,
             // pick servers from queue to connect.
             while !self.standby.is_empty() && self.connects.len() < self.parallel_n {
                 let server = self.standby.pop_front().unwrap();
                 let data = self.pending_data.clone();
-                let conn = try_connect(self.dest.clone(), server, data, self.wait_response);
-                self.connects.push_back(Box::pin(conn));
+                let conn = try_connect(dest.clone(), server.clone(), data, self.wait_response);
+                self.connects.push_back((server, Box::pin(conn)));
             }
 
             // poll all connects
             let mut i = 0;
             while i < self.connects.len() {
-                let conn = &mut self.connects[i];
+                let (server, conn) = &mut self.connects[i];
                 match conn.as_mut().poll(cx) {
                     // error, stop trying, drop it.
                     Poll::Ready(Err(e)) => {
-                        info!("connect proxy error: {}", e);
+                        debug!("connect {} via {} error: {}", dest, server, e);
                         drop(self.connects.remove(i));
                     }
                     // not ready, keep here, poll next one.
                     Poll::Pending => i += 1,
                     // ready, return it.
-                    Poll::Ready(Ok(item)) => return Poll::Ready(Some(item)),
+                    Poll::Ready(Ok(conn)) => return Poll::Ready(Some((server.clone(), conn))),
                 }
             }
 

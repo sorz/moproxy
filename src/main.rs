@@ -8,7 +8,7 @@ use std::{env, io, io::Write, net::SocketAddr, str::FromStr, sync::Arc};
 use tokio::net::UnixListener;
 use tokio::{
     self,
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     signal::unix::{signal, SignalKind},
 };
 
@@ -16,7 +16,7 @@ use tokio::{
 use moproxy::web::{self, TcpAccept, UnixAccept};
 use moproxy::{
     client::{Connectable, NewClient},
-    monitor::Monitor,
+    monitor::{Monitor, ServerList},
     proxy::{ProxyProto, ProxyServer},
     tcp::set_congestion,
 };
@@ -202,12 +202,12 @@ async fn main() {
     }
     let mut clients = listener.incoming();
     while let Some(sock) = clients.next().await {
-        let client = sock.and_then(|sock| NewClient::from_socket(sock, monitor.servers()));
         let direct = direct_server.clone();
-        match client {
-            Ok(client) => {
+        let servers = monitor.servers();
+        match sock {
+            Ok(sock) => {
                 tokio::spawn(async move {
-                    let result = handle_client(client, remote_dns, n_parallel, direct).await;
+                    let result = handle_client(sock, servers, remote_dns, n_parallel, direct).await;
                     if let Err(e) = result {
                         info!("error on hanle client: {}", e);
                     }
@@ -224,11 +224,13 @@ async fn main() {
 }
 
 async fn handle_client(
-    client: NewClient,
+    sock: TcpStream,
+    servers: ServerList,
     remote_dns: bool,
     n_parallel: usize,
     direct_server: Option<Arc<ProxyServer>>,
 ) -> io::Result<()> {
+    let client = NewClient::from_socket(sock, servers).await?;
     let client = if remote_dns && client.dest.port == 443 {
         client
             .retrive_dest()

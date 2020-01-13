@@ -1,7 +1,9 @@
 mod connect;
 mod tls;
 use log::{debug, info, warn};
-use std::{cmp, future::Future, io, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    borrow::Cow, cmp, future::Future, io, net::SocketAddr, pin::Pin, sync::Arc, time::Duration,
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -13,7 +15,7 @@ use crate::{
     client::tls::parse_client_hello,
     monitor::ServerList,
     proxy::copy::pipe,
-    proxy::{Destination, ProxyServer},
+    proxy::{Address, Destination, ProxyServer},
     tcp::{get_original_dest, get_original_dest6},
     ArcBox,
 };
@@ -53,14 +55,88 @@ pub trait Connectable {
     fn connect_server(self, n_parallel: usize) -> ConnectServer;
 }
 
+fn error_invalid_input<T>(msg: &'static str) -> io::Result<T> {
+    Err(io::Error::new(io::ErrorKind::InvalidInput, msg))
+}
+
+fn normalize_socket_addr(socket: &SocketAddr) -> Cow<SocketAddr> {
+    match socket {
+        SocketAddr::V4(sock) => {
+            let addr = sock.ip().to_ipv6_mapped();
+            let sock = SocketAddr::new(addr.into(), sock.port());
+            Cow::Owned(sock)
+        }
+        _ => Cow::Borrowed(socket),
+    }
+}
+
 impl NewClient {
-    pub fn from_socket(left: TcpStream, list: ServerList) -> io::Result<Self> {
+    pub async fn from_socket(mut left: TcpStream, list: ServerList) -> io::Result<Self> {
         let src = left.peer_addr()?;
         // TODO: call either v6 or v4 according to our socket
         let dest = get_original_dest(&left)
             .map(SocketAddr::V4)
-            .or_else(|_| get_original_dest6(&left).map(SocketAddr::V6))?
-            .into();
+            .or_else(|_| get_original_dest6(&left).map(SocketAddr::V6))?;
+
+        let is_nated = normalize_socket_addr(&dest) != normalize_socket_addr(&left.local_addr()?);
+        debug!("local {} dest {}", left.local_addr()?, dest);
+        let dest = if is_nated {
+            dest.into()
+        } else {
+            // Not a NATed connection, treated as SOCKSv5
+            // Parse version
+            // TODO: add timeout
+            // TODO: use buffered reader
+            let ver = left.read_u8().await?;
+            if ver != 0x05 {
+                return error_invalid_input("Neither a NATed or SOCKSv5 connection");
+            }
+            // Parse auth methods
+            let n_methods = left.read_u8().await?;
+            let mut buf = vec![0u8; n_methods as usize];
+            left.read_exact(&mut buf).await?;
+            if buf.iter().find(|&&m| m == 0).is_none() {
+                return error_invalid_input("SOCKSv5: No auth is required");
+            }
+            // Select no auth
+            left.write_all(&[0x05, 0x00]).await?;
+            // Parse request
+            buf.resize(4, 0);
+            left.read_exact(&mut buf).await?;
+            if &buf[0..2] != [0x05, 0x01] {
+                return error_invalid_input("SOCKSv5: CONNECT is required");
+            }
+            let addr: Address = match buf[3] {
+                0x01 => {
+                    // IPv4
+                    let mut buf = [0u8; 4];
+                    left.read_exact(&mut buf).await?;
+                    buf.into()
+                }
+                0x03 => {
+                    // Domain name
+                    let len = left.read_u8().await? as usize;
+                    buf.resize(len, 0);
+                    left.read_exact(&mut buf).await?;
+                    let domain = String::from_utf8(buf).map_err(|_| {
+                        io::Error::new(io::ErrorKind::InvalidInput, "SOCKSv5: Invalid domain name")
+                    })?;
+                    domain.into()
+                }
+                0x04 => {
+                    // IPv6
+                    let mut buf = [0u8; 16];
+                    left.read_exact(&mut buf).await?;
+                    buf.into()
+                }
+                _ => return error_invalid_input("SOCKSv5: unknown address type"),
+            };
+            let port = left.read_u16().await?;
+            // Send response
+            left.write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0]).await?;
+
+            (addr, port).into()
+        };
         debug!("dest {:?}", dest);
         Ok(NewClient {
             left,

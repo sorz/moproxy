@@ -10,7 +10,7 @@ use std::{
     cmp, fmt,
     hash::{Hash, Hasher},
     io,
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::{Add, AddAssign},
     str::FromStr,
     time::Duration,
@@ -177,6 +177,24 @@ pub enum Address {
     Domain(Box<str>),
 }
 
+impl From<[u8; 4]> for Address {
+    fn from(buf: [u8; 4]) -> Self {
+        Address::Ip(IpAddr::V4(Ipv4Addr::from(buf)))
+    }
+}
+
+impl From<[u8; 16]> for Address {
+    fn from(buf: [u8; 16]) -> Self {
+        Address::Ip(IpAddr::V6(Ipv6Addr::from(buf)))
+    }
+}
+
+impl From<String> for Address {
+    fn from(s: String) -> Self {
+        Address::Domain(s.into_boxed_str())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Destination {
     pub host: Address,
@@ -198,6 +216,15 @@ impl<'a> From<(&'a str, u16)> for Destination {
         Destination {
             host: Address::Domain(host),
             port: addr.1,
+        }
+    }
+}
+
+impl From<(Address, u16)> for Destination {
+    fn from(addr_port: (Address, u16)) -> Self {
+        Destination {
+            host: addr_port.0,
+            port: addr_port.1,
         }
     }
 }

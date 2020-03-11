@@ -301,13 +301,7 @@ impl ServerListCfg {
         if let Some(path) = &self.path {
             let ini = Ini::load_from_file(path).or(Err("cannot read server list file"))?;
             for (tag, props) in ini.iter() {
-                let tag = if let Some(s) = props.get("tag") {
-                    Some(s.as_str())
-                } else if let Some(ref s) = *tag {
-                    Some(s.as_str())
-                } else {
-                    None
-                };
+                let tag = props.get("tag").or(tag);
                 let addr: SocketAddr = props
                     .get("address")
                     .ok_or("address not specified")?

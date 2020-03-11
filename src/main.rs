@@ -213,7 +213,7 @@ async fn main() {
     #[cfg(feature = "systemd")]
     {
         if let Some(timeout) = systemd::watchdog_timeout() {
-            tokio::spawn(systemd::watchdog_loop(timeout));
+            tokio::spawn(systemd::watchdog_loop(timeout / 2));
         }
     }
 

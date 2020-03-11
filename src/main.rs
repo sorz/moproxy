@@ -12,6 +12,8 @@ use tokio::{
     signal::unix::{signal, SignalKind},
 };
 
+#[cfg(feature = "systemd")]
+use moproxy::systemd;
 #[cfg(feature = "web_console")]
 use moproxy::web::{self, TcpAccept, UnixAccept};
 use moproxy::{
@@ -158,6 +160,9 @@ async fn main() {
     let mut signals = signal(SignalKind::hangup()).expect("cannot catch signal");
     tokio::spawn(async move {
         while let Some(_) = signals.next().await {
+            #[cfg(feature = "systemd")]
+            systemd::notify_realoding();
+
             // feature: check deadlocks on signal
             let deadlocks = deadlock::check_deadlock();
             if !deadlocks.is_empty() {
@@ -178,6 +183,9 @@ async fn main() {
                 Err(err) => error!("fail to reload servers: {}", err),
             }
             // TODO: reload lua script?
+
+            #[cfg(feature = "systemd")]
+            systemd::notify_ready();
         }
     });
 
@@ -200,6 +208,20 @@ async fn main() {
              check tcp_allowed_congestion_control?",
         );
     }
+
+    // Watchdog
+    #[cfg(feature = "systemd")]
+    {
+        if let Some(timeout) = systemd::watchdog_timeout() {
+            tokio::spawn(systemd::watchdog_loop(timeout));
+        }
+    }
+
+    // Notify systemd
+    #[cfg(feature = "systemd")]
+    systemd::notify_ready(); // TODO: ready after first probe?
+
+    // The proxy server
     let mut clients = listener.incoming();
     while let Some(sock) = clients.next().await {
         let direct = direct_server.clone();

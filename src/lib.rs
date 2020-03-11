@@ -1,6 +1,8 @@
 pub mod client;
 pub mod monitor;
 pub mod proxy;
+#[cfg(feature = "systemd")]
+pub mod systemd;
 pub mod tcp;
 #[cfg(feature = "web_console")]
 pub mod web;

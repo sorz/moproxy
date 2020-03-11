@@ -27,8 +27,10 @@ number_prefix = "0.3"
 futures = { version = "0.3", default-features = false, features = ["compat"] }
 httparse = "1.3"
 rlua = { version = "0.17", optional = true }
+sd-notify = { version = "0.1.1", optional = true }
 
 [features]
-default = ["web_console", "score_script"]
+default = ["web_console", "score_script", "systemd"]
 web_console = ["hyper"]
 score_script = ["rlua"]
+systemd = ["sd-notify"]

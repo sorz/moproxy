@@ -335,7 +335,9 @@ impl ProxyServer {
     }
 
     pub fn copy_config_from(&self, from: &Self) {
-        *self.config.write() = *from.config.read();
+        if !std::ptr::eq(&from.config, &self.config) {
+            *self.config.write() = *from.config.read();
+        }
     }
 
     pub async fn connect<T>(&self, addr: &Destination, data: Option<T>) -> io::Result<TcpStream>

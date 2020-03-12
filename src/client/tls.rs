@@ -138,22 +138,18 @@ fn test_parse_without_server_name() {
         0x02, 0x03, 0x03, 0x02, 0x01, 0x02, 0x02, 0x02, 0x03, 0x01, 0x01, 0x00, 0x0f, 0x00, 0x01,
         0x01,
     ];
-    if let Ok(TlsRecord {
+    let TlsRecord {
         content_type: &content_type,
         version_major: &version_major,
         version_minor: &version_minor,
         fragment,
-    }) = parse_tls_record(&data)
-    {
-        assert_eq!(22, content_type);
-        assert_eq!(3, version_major);
-        assert_eq!(1, version_minor);
-        assert_eq!(161, fragment.len());
-        assert_eq!(1, fragment[0]);
-        assert_eq!(Some(&1), fragment.last());
-    } else {
-        assert!(false);
-    };
+    } = parse_tls_record(&data).unwrap();
+    assert_eq!(22, content_type);
+    assert_eq!(3, version_major);
+    assert_eq!(1, version_minor);
+    assert_eq!(161, fragment.len());
+    assert_eq!(1, fragment[0]);
+    assert_eq!(Some(&1), fragment.last());
 
     let TlsClientHello { server_name, .. } = parse_client_hello(&data).unwrap();
     assert_eq!(None, server_name);

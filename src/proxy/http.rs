@@ -53,7 +53,7 @@ where
         bytes_read += peek_len;
         trace!("bytes peek: {}", bytes_read);
 
-        match response.parse(&mut buf[..bytes_read]) {
+        match response.parse(&buf[..bytes_read]) {
             Err(e) => return Err(io::Error::new(ErrorKind::Other, e)),
             Ok(Status::Partial) => {
                 debug!("partial http reponse read; wait for more data");

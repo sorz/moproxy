@@ -100,7 +100,7 @@ impl Delay {
 
 impl From<Option<Duration>> for Delay {
     fn from(d: Option<Duration>) -> Self {
-        d.map(|d| Self::Some(d)).unwrap_or(Self::TimedOut)
+        d.map(Self::Some).unwrap_or(Self::TimedOut)
     }
 }
 

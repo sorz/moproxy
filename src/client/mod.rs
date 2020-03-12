@@ -103,7 +103,7 @@ impl NewClient {
             // Parse request
             buf.resize(4, 0);
             left.read_exact(&mut buf).await?;
-            if &buf[0..2] != [0x05, 0x01] {
+            if buf[0..2] != [0x05, 0x01] {
                 return error_invalid_input("SOCKSv5: CONNECT is required");
             }
             let addr: Address = match buf[3] {
@@ -257,8 +257,7 @@ impl FailedClient {
         // TODO: call either v6 or v4 according to our socket
         let dest: SocketAddr = get_original_dest(&left)
             .map(SocketAddr::V4)
-            .or_else(|_| get_original_dest6(&left).map(SocketAddr::V6))?
-            .into();
+            .or_else(|_| get_original_dest6(&left).map(SocketAddr::V6))?;
 
         let mut right = TcpStream::connect(&dest).await?;
         debug!("connected with {:?}", right.peer_addr());

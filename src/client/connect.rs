@@ -30,7 +30,7 @@ async fn try_connect(
     if wait_response {
         let mut buf = [0u8; 8];
         let len = timeout(max_wait, stream.peek(&mut buf)).await??;
-        if len <= 0 {
+        if len == 0 {
             return Err(io::Error::new(ErrorKind::UnexpectedEof, "no response data"));
         }
     }

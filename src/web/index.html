@@ -100,7 +100,7 @@
          <td><span title="based on average delay"
              >${server.status.score || '-'}</span></td>
          <td><span title="TCP handshake included"
-             >${durationToMills(server.status.delay.Some) || '-'}</span></td>
+             >${delayToMills(server.status.delay) || '-'}</span></td>
          <td><span title="# current connections"
              >${humanQuantity(server.status.conn_alive)}</span> /
              <span title="# total connections"
@@ -118,8 +118,8 @@
     }
 
     function durationToMills(t) {
-      if (t == null || t == undefined) return null;
-      let ms = Math.round(t.secs * 1000 + t.nanos / 1e6);
+      if (t.usec == null || t.usec == undefined) return null;
+      let ms = Math.round(t.usec / 1000);
       return `${numberWithCommas(ms)} ms`;
     }
 

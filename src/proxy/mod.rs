@@ -13,6 +13,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::{Add, AddAssign},
     str::FromStr,
+    sync::atomic::{AtomicI32, Ordering},
     time::Duration,
 };
 use tokio::net::TcpStream;
@@ -72,51 +73,78 @@ impl ToLua<'_> for ProxyServerConfig {
     }
 }
 
-#[derive(Debug, Serialize, Clone, Copy)]
-pub enum Delay {
-    Unknown,
-    Some(Duration),
-    TimedOut,
+#[derive(Debug, Serialize, Default)]
+pub struct Delay {
+    usec: AtomicI32,
 }
-
-impl Default for Delay {
-    fn default() -> Self {
-        Delay::Unknown
-    }
-}
+const DELAY_UNKNOWN: i32 = 0;
+const DELAY_TIMED_OUT: i32 = -1;
 
 impl Delay {
+    fn raw_value(&self) -> i32 {
+        self.usec.load(Ordering::Relaxed)
+    }
+
+    fn set_duration(&self, t: Duration) {
+        self.usec.store(t.as_micros() as i32, Ordering::Relaxed);
+    }
+
+    fn set_timed_out(&self) {
+        self.usec.store(DELAY_TIMED_OUT, Ordering::Relaxed);
+    }
+
+    pub fn duration(&self) -> Option<Duration> {
+        let usec = self.raw_value();
+        if usec > 0 {
+            Some(Duration::from_micros(usec as u64))
+        } else {
+            None
+        }
+    }
+
     pub fn map<T, F>(self, func: F) -> Option<T>
     where
         F: FnOnce(Duration) -> T,
     {
-        if let Delay::Some(d) = self {
-            Some(func(d))
+        let usec = self.raw_value();
+        if usec > 0 {
+            Some(func(Duration::from_micros(usec as u64)))
         } else {
             None
         }
     }
 }
 
+impl Clone for Delay {
+    fn clone(&self) -> Self {
+        Self {
+            usec: AtomicI32::new(self.raw_value()),
+        }
+    }
+}
+
 impl From<Option<Duration>> for Delay {
     fn from(d: Option<Duration>) -> Self {
-        d.map(Self::Some).unwrap_or(Self::TimedOut)
+        let usec = d.map(|d| d.as_micros() as i32).unwrap_or(DELAY_TIMED_OUT);
+        Delay {
+            usec: AtomicI32::new(usec),
+        }
     }
 }
 
 #[cfg(feature = "score_script")]
 impl ToLua<'_> for Delay {
     fn to_lua(self, ctx: LuaContext<'_>) -> LuaResult<LuaValue<'_>> {
-        match self {
-            Delay::Some(d) => Some(d.as_secs_f32()),
-            Delay::TimedOut => Some(-1f32),
-            Delay::Unknown => None,
+        match self.raw_value() {
+            DELAY_TIMED_OUT => Some(-1f32),
+            DELAY_UNKNOWN => None,
+            usec => Some(usec as f32 / 1_000_000.0), // convert to seconds
         }
         .to_lua(ctx)
     }
 }
 
-#[derive(Debug, Serialize, Clone, Copy, Default)]
+#[derive(Debug, Serialize, Clone, Default)]
 pub struct ProxyServerStatus {
     pub delay: Delay,
     pub score: Option<i32>,
@@ -166,7 +194,7 @@ impl ToLua<'_> for &ProxyServer {
         table.set("proto", self.proto.to_string())?;
         table.set("tag", self.tag.to_string())?;
         table.set("config", *self.config.read())?;
-        table.set("status", *self.status.lock())?;
+        table.set("status", self.status.lock().clone())?;
         table.to_lua(ctx)
     }
 }
@@ -362,7 +390,7 @@ impl ProxyServer {
     }
 
     pub fn status_snapshot(&self) -> ProxyServerStatus {
-        *self.status.lock()
+        self.status.lock().clone()
     }
 
     pub fn config_snapshot(&self) -> ProxyServerConfig {
@@ -383,10 +411,10 @@ impl ProxyServer {
 
         if let Some(delay) = delay {
             let last_score = status.score.unwrap_or_else(|| {
-                match status.delay {
-                    Delay::Some(d) => d,
-                    Delay::Unknown => delay,
-                    Delay::TimedOut => config.max_wait,
+                match status.delay.raw_value() {
+                    DELAY_TIMED_OUT => config.max_wait,
+                    DELAY_UNKNOWN => delay,
+                    usec => Duration::from_micros(usec as u64),
                 }
                 .as_millis() as i32
                     + config.score_base
@@ -406,14 +434,14 @@ impl ProxyServer {
                 (last_score * 8 + score * 2) / 10
             };
             status.score = Some(score);
-            status.delay = Delay::Some(delay);
+            status.delay.set_duration(delay);
 
             // Shift error history
             // This give the server with high error penalty a chance to recovery.
             status.close_history <<= 1;
         } else {
             // Timed out
-            status.delay = Delay::TimedOut;
+            status.delay.set_timed_out();
             status.score = None;
         };
     }

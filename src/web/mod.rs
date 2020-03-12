@@ -31,7 +31,7 @@ use tokio::{
 
 use crate::{
     monitor::{Monitor, Throughput},
-    proxy::{Delay, ProxyServer},
+    proxy::ProxyServer,
 };
 
 pub use hyper::server::accept::from_stream;
@@ -122,8 +122,8 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> http::Result<Res
             row.add_cell(cell!(r -> "-"));
         }
         // Delay
-        if let Delay::Some(v) = status.delay {
-            row.add_cell(cell!(r -> v.format_millis()));
+        if let Some(d) = status.delay.duration() {
+            row.add_cell(cell!(r -> d.format_millis()));
         } else {
             row.add_cell(cell!(r -> "-"));
         }

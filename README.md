@@ -15,6 +15,8 @@ Features:
  * Optional status web page (latency, traffic, etc. w/ curl-friendly output)
  * Optional [Graphite](https://graphite.readthedocs.io/) support
    (to build fancy dashboard with [Grafana](https://grafana.com/) for example)
+ * Customizable proxy selection algorithm with Lua script (see
+   `conf/simple_scroe.lua`).
 
 ```
 +------+  TCP  +----------+       SOCKSv5   +---------+
@@ -100,5 +102,11 @@ cd moproxy
 # Build
 cargo build --release
 target/release/moproxy --help
+
+# If you are in Debian
+cargo install cargo-deb
+cargo deb
+sudo dpkg -i target/debian/*.deb
+moproxy --help
 ```
 

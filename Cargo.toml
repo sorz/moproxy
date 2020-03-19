@@ -3,6 +3,12 @@ name = "moproxy"
 version = "0.3.1"
 authors = ["sorz <me@sorz.org>"]
 edition = "2018"
+description = "Transparent TCP to SOCKSv5/HTTP proxy on Linux written in Rust"
+readme = "README.md"
+repository = "https://github.com/sorz/moproxy"
+license = "MIT"
+keywords = ["proxy", "socksv5"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 libc = "0.2"
@@ -34,3 +40,16 @@ default = ["web_console", "score_script", "systemd"]
 web_console = ["hyper"]
 score_script = ["rlua"]
 systemd = ["sd-notify"]
+
+[package.metadata.deb]
+section = "net"
+priority = "optional"
+assets = [
+    ["target/release/moproxy", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/moproxy/README", "644"],
+    ["conf/moproxy.service", "usr/lib/systemd/system/", "644"],
+    ["conf/config.env", "etc/moproxy/", "644"],
+    ["conf/proxy.ini", "etc/moproxy/", "644"],
+    ["conf/simple_score.lua", "etc/moproxy/", "644"],
+]
+

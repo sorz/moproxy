@@ -9,7 +9,9 @@ Features:
  * SOCKS/HTTP-layer alive & latency probe
  * Prioritize backend servers according to latency
  * Full IPv6 support
- * Optional remote DNS resolving for TLS with SNI
+ * Multiple listen ports, each for a subset of proxy servers
+ * Remote DNS resolving for TLS with SNI (extract domain name from TLS
+   handshaking)
  * Optional try-in-parallel for TLS (try multiple proxies and choose the one
    first response)
  * Optional status web page (latency, traffic, etc. w/ curl-friendly output)
@@ -65,12 +67,23 @@ You may list all proxy servers in a text file to avoid messy CLI arguments.
 
 ```ini
 [server-1]
-address=127.0.0.1:2001
-protocol=socks5
+address=127.0.0.1:2001 ;required
+protocol=socks5 ;required
+
 [server-2]
 address=127.0.0.1:2002
 protocol=http
-test dns=127.0.0.53:53 ;use other dns server to caculate delay
+test dns=127.0.0.53:53 ;use remote's local dns server to caculate delay
+listen ports=8001
+
+[server-3]
+address=127.0.0.1:2003
+protocol=http
+; server-3 serves for port 8001 & 8002, while server-2 is only for
+; port 8001. server-1 accepts connections coming from any ports specified
+; by CLI argument --port.
+listen ports=8001,8002
+
 [backup]
 address=127.0.0.1:2002
 protocol=socks5
@@ -110,3 +123,4 @@ sudo dpkg -i target/debian/*.deb
 moproxy --help
 ```
 
+Refer to `conf/` for config & systemd service files. 

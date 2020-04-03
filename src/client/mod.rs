@@ -26,6 +26,7 @@ pub struct NewClient {
     src: SocketAddr,
     pub dest: Destination,
     list: ServerList,
+    from_port: u16,
 }
 
 #[derive(Debug)]
@@ -77,6 +78,7 @@ impl NewClient {
         let dest = get_original_dest(&left)
             .map(SocketAddr::V4)
             .or_else(|_| get_original_dest6(&left).map(SocketAddr::V6))?;
+        let from_port = left.local_addr()?.port();
 
         let is_nated = normalize_socket_addr(&dest) != normalize_socket_addr(&left.local_addr()?);
         debug!("local {} dest {}", left.local_addr()?, dest);
@@ -143,6 +145,7 @@ impl NewClient {
             src,
             dest,
             list,
+            from_port,
         })
     }
 }
@@ -154,6 +157,7 @@ impl NewClient {
             src,
             mut dest,
             list,
+            from_port,
         } = self;
         let wait = Duration::from_millis(500);
         // try to read TLS ClientHello for
@@ -188,6 +192,7 @@ impl NewClient {
                 src,
                 dest,
                 list,
+                from_port,
             },
             has_full_tls_hello,
             pending_data,
@@ -205,11 +210,17 @@ impl NewClient {
             src,
             dest,
             list,
+            from_port,
         } = self;
         let pending_data = pending_data.map(ArcBox::new);
+        let list = list
+            .iter()
+            .filter(|s| s.serve_port(from_port))
+            .cloned()
+            .collect();
         let result = try_connect_all(&dest, list, n_parallel, wait_response, pending_data).await;
         if let Some((server, right)) = result {
-            info!("{} => {} via {}", src, dest, server.tag);
+            info!("[:{}] {} => {} via {}", from_port, src, dest, server.tag);
             Ok(ConnectedClient {
                 left,
                 right,
@@ -217,7 +228,7 @@ impl NewClient {
                 server,
             })
         } else {
-            warn!("{} => {} no avaiable proxy", src, dest);
+            warn!("[:{}] {} => {} no avaiable proxy", from_port, src, dest);
             Err(FailedClient {
                 left,
                 pending_data: None,

@@ -1,9 +1,9 @@
 use clap::{load_yaml, AppSettings};
-use futures::StreamExt;
+use futures::{stream, StreamExt};
 use ini::Ini;
 use log::{debug, error, info, warn, LevelFilter};
 use parking_lot::deadlock;
-use std::{env, io, io::Write, net::SocketAddr, str::FromStr, sync::Arc};
+use std::{collections::HashSet, env, io, io::Write, net::SocketAddr, str::FromStr, sync::Arc};
 #[cfg(feature = "web_console")]
 use tokio::net::UnixListener;
 use tokio::{
@@ -76,12 +76,11 @@ async fn main() {
         .expect("missing host")
         .parse()
         .expect("invalid address");
-    let port = args
-        .value_of("port")
+    let ports: HashSet<u16> = args
+        .values_of("port")
         .expect("missing port number")
-        .parse()
-        .expect("invalid port number");
-    let bind_addr = SocketAddr::new(host, port);
+        .map(|p| p.parse().expect("invalid port number"))
+        .collect();
     let probe = args
         .value_of("probe-secs")
         .expect("missing probe secs")
@@ -99,7 +98,7 @@ async fn main() {
         .value_of("graphite")
         .parse()
         .expect("not a valid address");
-    let servers_cfg = ServerListCfg::new(&args).expect("invalid server address");
+    let servers_cfg = ServerListCfg::new(&args);
     let servers = servers_cfg.load().expect("fail to load servers from file");
 
     #[cfg(feature = "score_script")]
@@ -197,16 +196,19 @@ async fn main() {
     };
 
     // Setup proxy server
-    let mut listener = TcpListener::bind(&bind_addr)
-        .await
-        .expect("cannot bind to port");
-    info!("listen on {}", bind_addr);
-    if let Some(alg) = cong_local {
-        info!("set {} on {}", alg, bind_addr);
-        set_congestion(&listener, alg).expect(
-            "fail to set tcp congestion algorithm. \
-             check tcp_allowed_congestion_control?",
-        );
+    let mut listeners = Vec::with_capacity(ports.len());
+    for port in ports {
+        let addr = SocketAddr::new(host, port);
+        let listener = TcpListener::bind(&addr).await.expect("cannot bind to port");
+        info!("listen on {}", addr);
+        if let Some(alg) = cong_local {
+            info!("set {} on {}", alg, addr);
+            set_congestion(&listener, alg).expect(
+                "fail to set tcp congestion algorithm. \
+                check tcp_allowed_congestion_control?",
+            );
+        }
+        listeners.push(listener);
     }
 
     // Watchdog
@@ -222,7 +224,7 @@ async fn main() {
     systemd::notify_ready(); // TODO: ready after first probe?
 
     // The proxy server
-    let mut clients = listener.incoming();
+    let mut clients = stream::select_all(listeners.iter_mut().map(|l| l.incoming()));
     while let Some(sock) = clients.next().await {
         let direct = direct_server.clone();
         let servers = monitor.servers();
@@ -277,22 +279,24 @@ struct ServerListCfg {
     default_test_dns: SocketAddr,
     cli_servers: Vec<Arc<ProxyServer>>,
     path: Option<String>,
+    listen_ports: HashSet<u16>,
 }
 
 impl ServerListCfg {
-    fn new(args: &clap::ArgMatches) -> Result<Self, &'static str> {
+    fn new(args: &clap::ArgMatches) -> Self {
         let default_test_dns = args
             .value_of("test-dns")
             .unwrap()
             .parse()
-            .or(Err("not a valid socket address"))?;
+            .expect("not a valid socket address");
         let mut cli_servers = vec![];
         if let Some(s) = args.values_of("socks5-servers") {
             for s in s.map(parse_server) {
                 cli_servers.push(Arc::new(ProxyServer::new(
-                    s?,
+                    s.expect("not a valid SOCKSv5 server"),
                     ProxyProto::socks5(false),
                     default_test_dns,
+                    None,
                     None,
                     None,
                 )));
@@ -301,21 +305,28 @@ impl ServerListCfg {
         if let Some(s) = args.values_of("http-servers") {
             for s in s.map(parse_server) {
                 cli_servers.push(Arc::new(ProxyServer::new(
-                    s?,
+                    s.expect("not a valid HTTP server"),
                     ProxyProto::http(false),
                     default_test_dns,
+                    None,
                     None,
                     None,
                 )));
             }
         }
         let path = args.value_of("server-list").map(|s| s.to_string());
+        let listen_ports = args
+            .values_of("port")
+            .expect("missing port number")
+            .map(|p| p.parse().expect("invalid port number"))
+            .collect();
 
-        Ok(ServerListCfg {
+        ServerListCfg {
             default_test_dns,
             cli_servers,
             path,
-        })
+            listen_ports,
+        }
     }
 
     fn load(&self) -> Result<Vec<Arc<ProxyServer>>, &'static str> {
@@ -338,6 +349,23 @@ impl ServerListCfg {
                     .parse()
                     .or(Err("not a valid socket address"))?
                     .unwrap_or(self.default_test_dns);
+                let listen_ports = if let Some(ports) = props.get("listen ports") {
+                    let ports = ports
+                        .split(|c| c == ' ' || c == ',')
+                        .filter(|s| !s.is_empty());
+                    let mut port_set = HashSet::new();
+                    for port in ports {
+                        let port = port.parse().or(Err("not a valid port number"))?;
+                        port_set.insert(port);
+                    }
+                    let surplus_ports: Vec<_> = port_set.difference(&self.listen_ports).collect();
+                    if !surplus_ports.is_empty() {
+                        warn!("{:?}: Surplus listen ports {:?}", addr, surplus_ports);
+                    }
+                    Some(port_set)
+                } else {
+                    None
+                };
                 let proto = match props
                     .get("protocol")
                     .ok_or("protocol not specified")?
@@ -362,7 +390,7 @@ impl ServerListCfg {
                     }
                     _ => return Err("unknown proxy protocol"),
                 };
-                let server = ProxyServer::new(addr, proto, test_dns, tag, base);
+                let server = ProxyServer::new(addr, proto, test_dns, listen_ports, tag, base);
                 servers.push(Arc::new(server));
             }
         }

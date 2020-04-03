@@ -7,7 +7,9 @@ use log::debug;
 use parking_lot::{Mutex, RwLock};
 use serde_derive::Serialize;
 use std::{
-    cmp, fmt,
+    cmp,
+    collections::HashSet,
+    fmt,
     hash::{Hash, Hasher},
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -50,6 +52,7 @@ pub struct ProxyServer {
     pub addr: SocketAddr,
     pub proto: ProxyProto,
     pub tag: Box<str>,
+    listen_ports: HashSet<u16>,
     config: RwLock<ProxyServerConfig>,
     status: Mutex<ProxyServerStatus>,
 }
@@ -298,12 +301,14 @@ impl ProxyServer {
         addr: SocketAddr,
         proto: ProxyProto,
         test_dns: SocketAddr,
+        listen_ports: Option<HashSet<u16>>,
         tag: Option<&str>,
         score_base: Option<i32>,
     ) -> ProxyServer {
         ProxyServer {
             addr,
             proto,
+            listen_ports: listen_ports.unwrap_or_default(),
             tag: match tag {
                 None => format!("{}", addr.port()),
                 Some(s) => {
@@ -328,8 +333,9 @@ impl ProxyServer {
         Self {
             addr: stub_addr,
             proto: ProxyProto::Direct,
-            tag: "DIRECT".into(),
+            tag: "__DIRECT__".into(),
             config: ProxyServerConfig::new(stub_addr, None).into(),
+            listen_ports: Default::default(),
             status: Default::default(),
         }
     }
@@ -338,6 +344,10 @@ impl ProxyServer {
         if !std::ptr::eq(&from.config, &self.config) {
             *self.config.write() = *from.config.read();
         }
+    }
+
+    pub fn serve_port(&self, port: u16) -> bool {
+        self.listen_ports.is_empty() || self.listen_ports.contains(&port)
     }
 
     pub async fn connect<T>(&self, addr: &Destination, data: Option<T>) -> io::Result<TcpStream>

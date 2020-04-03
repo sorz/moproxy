@@ -13,9 +13,12 @@ args:
         short: p
         long: port
         value_name: PORT
-        help: Port number to bind on
+        help: >
+          Port number to bind on. Multiple ports may be given (will selected
+          accroding to the SERVER-LIST ini config).
         takes_value: true
         required: true
+        multiple: true
     - socks5-servers:
         short: s
         long: socks5

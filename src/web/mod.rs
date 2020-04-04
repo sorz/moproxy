@@ -1,4 +1,5 @@
 mod helpers;
+mod prometheus;
 
 use futures::{pin_mut, ready};
 use helpers::{DurationExt, RequestExt};
@@ -179,6 +180,7 @@ fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Res
                 .header("Content-Type", "application/json")
                 .body(json.into())
         }
+        (&Method::GET, "/exporter") => prometheus::exporter(start_time, monitor),
         _ => Response::builder()
             .status(StatusCode::NOT_FOUND)
             .header("Content-Type", "text/plain")

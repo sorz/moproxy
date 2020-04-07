@@ -180,7 +180,7 @@ fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Res
                 .header("Content-Type", "application/json")
                 .body(json.into())
         }
-        (&Method::GET, "/exporter") => prometheus::exporter(start_time, monitor),
+        (&Method::GET, "/metrics") => prometheus::exporter(start_time, monitor),
         _ => Response::builder()
             .status(StatusCode::NOT_FOUND)
             .header("Content-Type", "text/plain")

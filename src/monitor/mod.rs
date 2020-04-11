@@ -168,7 +168,7 @@ impl Monitor {
     }
 }
 
-fn info_stats(infos: &ServerList) -> String {
+fn info_stats(infos: &[Arc<ProxyServer>]) -> String {
     let mut stats = String::new();
     for info in infos.iter().take(5) {
         stats += &match info.score() {

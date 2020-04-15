@@ -94,6 +94,46 @@ Pass the file path to `moproxy` via `--list` argument.
 
 Signal `SIGHUP` will trigger the program to reload the list.
 
+### Custom proxy selection
+Proxy servers are sorted by their *score*, which is re-calculated after each
+round of alive/latency probing. Server with lower score is prioritized.
+
+The current scoring algorithm is a kind of weighted moving average of latency
+with penalty for recent connection errors. This can be replaced with your own
+algorithm written in Lua. See [conf/simple_score.lua](conf/simple_score.lua)
+for details.
+
+### Monitoring
+Metrics (latency, traffic, number of connections, etc.) are useful for
+diagnosis and customing your own proxy selection. You can access these
+metrics with variety of methods, from a simple web page, curl, to specialized
+tools like Graphite or Prometheus.
+
+`--stats-bind [::1]:8080` turn on the internal stats page, via HTTP, on the
+given IP address and port number. It returns a HTML page for web browser,
+or a ASCII table for `curl`.
+
+The stats page only provide current metrics and a few aggregation. Graphite
+(via `--graphite`) or Prometheus (via `--stats-bind` then `\metrics`) should
+be use if you want the full history.
+
+Some examples of Prometheus query (Grafana variant):
+
+```
+Inbound bandwith:
+rate(moproxy_proxy_server_bytes_rx_total[$__range])
+
+Total outbound traffic:
+sum(increase(moproxy_proxy_server_bytes_tx_total[$__range]))
+
+No. of connection errors per minute:
+sum(increase(moproxy_proxy_server_connections_error[1m]))
+
+Average delay for each proxy server:
+avg_over_time(moproxy_proxy_server_dns_delay_seconds[$__interval])
+```
+
+
 ## Install
 
 You may download the binary executable file on

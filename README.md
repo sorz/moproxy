@@ -15,7 +15,8 @@ Features:
  * Optional try-in-parallel for TLS (try multiple proxies and choose the one
    first response)
  * Optional status web page (latency, traffic, etc. w/ curl-friendly output)
- * Optional [Graphite](https://graphite.readthedocs.io/) support
+ * Optional [Graphite](https://graphite.readthedocs.io/) and
+   [Prometheus](https://prometheus.io/) support
    (to build fancy dashboard with [Grafana](https://grafana.com/) for example)
  * Customizable proxy selection algorithm with Lua script (see
    `conf/simple_scroe.lua`).

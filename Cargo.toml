@@ -11,8 +11,6 @@ keywords = ["proxy", "socksv5"]
 categories = ["command-line-utilities"]
 
 [dependencies]
-libc = "0.2"
-nix = "0.17"
 rand = "0.7"
 tokio = { version = "0.2", features = ["full"] }
 net2 = "0.2"
@@ -33,6 +31,10 @@ number_prefix = "0.3"
 futures = { version = "0.3", default-features = false, features = ["compat"] }
 httparse = "1.3"
 rlua = { version = "0.17", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+nix = "0.17"
 sd-notify = { version = "0.1.1", optional = true }
 
 [features]

@@ -10,13 +10,14 @@ use tokio::{
     time::timeout,
 };
 
+#[cfg(target_os = "linux")]
+use crate::tcp::{get_original_dest, get_original_dest6};
 use crate::{
     client::connect::try_connect_all,
     client::tls::parse_client_hello,
     monitor::ServerList,
     proxy::copy::pipe,
     proxy::{Address, Destination, ProxyServer},
-    tcp::{get_original_dest, get_original_dest6},
     ArcBox,
 };
 
@@ -74,15 +75,21 @@ fn normalize_socket_addr(socket: &SocketAddr) -> Cow<SocketAddr> {
 impl NewClient {
     pub async fn from_socket(mut left: TcpStream, list: ServerList) -> io::Result<Self> {
         let src = left.peer_addr()?;
-        // TODO: call either v6 or v4 according to our socket
+        let from_port = left.local_addr()?.port();
+
+        // Try to get original destination before NAT
+        #[cfg(target_os = "linux")]
         let dest = get_original_dest(&left)
             .map(SocketAddr::V4)
             .or_else(|_| get_original_dest6(&left).map(SocketAddr::V6))?;
-        let from_port = left.local_addr()?.port();
+
+        // No NAT supported, always be our local address
+        #[cfg(not(target_os = "linux"))]
+        let dest = left.local_addr()?;
 
         let is_nated = normalize_socket_addr(&dest) != normalize_socket_addr(&left.local_addr()?);
         debug!("local {} dest {}", left.local_addr()?, dest);
-        let dest = if is_nated {
+        let dest = if cfg!(target_os = "linux") && is_nated {
             dest.into()
         } else {
             // Not a NATed connection, treated as SOCKSv5
@@ -265,10 +272,12 @@ impl FailedClient {
         pseudo_server: Arc<ProxyServer>,
     ) -> io::Result<ConnectedClient> {
         let Self { left, pending_data } = self;
-        // TODO: call either v6 or v4 according to our socket
+        #[cfg(target_os = "linux")]
         let dest: SocketAddr = get_original_dest(&left)
             .map(SocketAddr::V4)
             .or_else(|_| get_original_dest6(&left).map(SocketAddr::V6))?;
+        #[cfg(not(target_os = "linux"))]
+        let dest: SocketAddr = todo!("handle SOCKSv5 connection");
 
         let mut right = TcpStream::connect(&dest).await?;
         debug!("connected with {:?}", right.peer_addr());

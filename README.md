@@ -63,6 +63,11 @@ nft add rule nat output tcp dport {80, 443} redirect to 2080
 nft add rule nat prerouting tcp dport {80, 443} redirect to 2080
 ```
 
+SOCKSv5 server is also launched alongs with transparent proxy on the same port:
+```bash
+http_proxy=socks5h://localhost:2080 curl ifconfig.co
+```
+
 ### Server list file
 You may list all proxy servers in a text file to avoid messy CLI arguments.
 

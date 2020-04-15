@@ -1,11 +1,11 @@
 use hyper::{Body, Response};
-use std::{fmt::{Display, Write}, time::Instant};
+use std::{
+    fmt::{Display, Write},
+    time::Instant,
+};
 
 use super::{ServerStatus, Status};
-use crate::{
-    monitor::Monitor,
-    proxy::Delay,
-};
+use crate::{monitor::Monitor, proxy::Delay};
 
 fn new_metric(buf: &mut String, name: &str, metric_type: &str, help: &str) {
     writeln!(buf, "# HELP moproxy_{} {}", name, help).unwrap();
@@ -22,9 +22,7 @@ where
             writeln!(
                 buf,
                 "moproxy_{}{{server=\"{}\"}} {}",
-                name,
-                s.server.tag,
-                value
+                name, s.server.tag, value
             )
             .unwrap();
         }
@@ -73,7 +71,7 @@ pub fn exporter(start_time: &Instant, monitor: &Monitor) -> http::Result<Respons
         "Total seconds for the last DNS query test",
         |s| match s.server.status_snapshot().delay {
             Delay::Some(d) => Some(d.as_secs() as f32 + d.subsec_millis() as f32 / 1000.0),
-            _ => None
+            _ => None,
         }
     );
     server_gauge!(

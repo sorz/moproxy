@@ -4,23 +4,25 @@ use ini::Ini;
 use log::{debug, error, info, warn, LevelFilter};
 use parking_lot::deadlock;
 use std::{collections::HashSet, env, io, io::Write, net::SocketAddr, str::FromStr, sync::Arc};
-#[cfg(feature = "web_console")]
+#[cfg(all(feature = "web_console", unix))]
 use tokio::net::UnixListener;
+#[cfg(unix)]
+use tokio::signal::unix::{signal, SignalKind};
 use tokio::{
     self,
     net::{TcpListener, TcpStream},
-    signal::unix::{signal, SignalKind},
 };
 
-#[cfg(feature = "systemd")]
+#[cfg(all(feature = "systemd", target_os = "linux"))]
 use moproxy::systemd;
+#[cfg(target_os = "linux")]
+use moproxy::tcp::set_congestion;
 #[cfg(feature = "web_console")]
-use moproxy::web::{self, TcpAccept, UnixAccept};
+use moproxy::web;
 use moproxy::{
     client::{Connectable, NewClient},
     monitor::{Monitor, ServerList},
     proxy::{ProxyProto, ProxyServer},
-    tcp::set_congestion,
 };
 
 trait FromOptionStr<E, T: FromStr<Err = E>> {
@@ -123,31 +125,34 @@ async fn main() {
     if !cfg!(feature = "web_console") && args.is_present("web-bind") {
         panic!("web console has been disabled during compiling");
     };
+    #[cfg(all(feature = "web_console", unix))]
+    let mut sock_file = None;
     #[cfg(feature = "web_console")]
-    let sock_file = {
+    {
         if let Some(http_addr) = args.value_of("web-bind") {
             info!("http run on {}", http_addr);
-            if http_addr.starts_with('/') {
-                let sock = web::AutoRemoveFile::new(&http_addr);
-                let accept: UnixAccept = UnixListener::bind(&sock)
-                    .expect("fail to bind web server")
-                    .into();
-                let serv = web::run_server(accept, monitor.clone());
-                tokio::spawn(serv);
-                Some(sock)
-            } else {
-                let accept: TcpAccept = TcpListener::bind(&http_addr)
+            #[cfg(unix)]
+            {
+                if http_addr.starts_with('/') {
+                    let sock = web::AutoRemoveFile::new(&http_addr);
+                    let accept: web::UnixAccept = UnixListener::bind(&sock)
+                        .expect("fail to bind web server")
+                        .into();
+                    let serv = web::run_server(accept, monitor.clone());
+                    tokio::spawn(serv);
+                    sock_file = Some(sock);
+                }
+            }
+            if !http_addr.starts_with('/') || cfg!(not(unix)) {
+                let accept: web::TcpAccept = TcpListener::bind(&http_addr)
                     .await
                     .expect("fail to bind web server")
                     .into();
                 let serv = web::run_server(accept, monitor.clone());
                 tokio::spawn(serv);
-                None
             }
-        } else {
-            None
         }
-    };
+    }
 
     // Setup monitor
     if probe > 0 {
@@ -155,11 +160,14 @@ async fn main() {
     }
 
     // Setup signal listener for reloading server list
+    #[cfg(unix)]
     let monitor_ = monitor.clone();
+    #[cfg(unix)]
     let mut signals = signal(SignalKind::hangup()).expect("cannot catch signal");
+    #[cfg(unix)]
     tokio::spawn(async move {
         while let Some(_) = signals.next().await {
-            #[cfg(feature = "systemd")]
+            #[cfg(all(feature = "systemd", target_os = "linux"))]
             systemd::notify_realoding();
 
             // feature: check deadlocks on signal
@@ -183,7 +191,7 @@ async fn main() {
             }
             // TODO: reload lua script?
 
-            #[cfg(feature = "systemd")]
+            #[cfg(all(feature = "systemd", target_os = "linux"))]
             systemd::notify_ready();
         }
     });
@@ -197,12 +205,16 @@ async fn main() {
 
     // Setup proxy server
     let mut listeners = Vec::with_capacity(ports.len());
+    if cong_local.is_some() && cfg!(not(target_os = "linux")) {
+        panic!("--cong-local can only be used on Linux");
+    }
     for port in ports {
         let addr = SocketAddr::new(host, port);
         let listener = TcpListener::bind(&addr).await.expect("cannot bind to port");
         info!("listen on {}", addr);
         if let Some(alg) = cong_local {
             info!("set {} on {}", alg, addr);
+            #[cfg(target_os = "linux")]
             set_congestion(&listener, alg).expect(
                 "fail to set tcp congestion algorithm. \
                 check tcp_allowed_congestion_control?",
@@ -212,7 +224,7 @@ async fn main() {
     }
 
     // Watchdog
-    #[cfg(feature = "systemd")]
+    #[cfg(all(feature = "systemd", target_os = "linux"))]
     {
         if let Some(timeout) = systemd::watchdog_timeout() {
             tokio::spawn(systemd::watchdog_loop(timeout / 2));
@@ -220,7 +232,7 @@ async fn main() {
     }
 
     // Notify systemd
-    #[cfg(feature = "systemd")]
+    #[cfg(all(feature = "systemd", target_os = "linux"))]
     systemd::notify_ready(); // TODO: ready after first probe?
 
     // The proxy server
@@ -243,7 +255,7 @@ async fn main() {
 
     // make sure socket file will be deleted on exit.
     // unnecessary drop() but make complier happy about unused var.
-    #[cfg(feature = "web_console")]
+    #[cfg(all(feature = "web_console", unix))]
     drop(sock_file);
 }
 

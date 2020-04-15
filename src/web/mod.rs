@@ -24,10 +24,12 @@ use std::{
     task::{Context, Poll},
     time::{Duration, Instant},
 };
+#[cfg(unix)]
+use tokio::net::{UnixListener, UnixStream};
 use tokio::{
     self,
     io::{AsyncRead, AsyncWrite},
-    net::{TcpListener, TcpStream, UnixListener, UnixStream},
+    net::{TcpListener, TcpStream},
 };
 
 use crate::{
@@ -240,6 +242,7 @@ impl<'a> AsRef<Path> for &'a AutoRemoveFile<'a> {
 }
 
 pub struct TcpAccept(TcpListener);
+#[cfg(unix)]
 pub struct UnixAccept(UnixListener);
 
 impl From<TcpListener> for TcpAccept {
@@ -248,6 +251,7 @@ impl From<TcpListener> for TcpAccept {
     }
 }
 
+#[cfg(unix)]
 impl From<UnixListener> for UnixAccept {
     fn from(listener: UnixListener) -> Self {
         Self(listener)
@@ -269,6 +273,7 @@ impl Accept for TcpAccept {
     }
 }
 
+#[cfg(unix)]
 impl Accept for UnixAccept {
     type Conn = UnixStream;
     type Error = io::Error;

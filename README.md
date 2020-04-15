@@ -103,6 +103,11 @@ with penalty for recent connection errors. This can be replaced with your own
 algorithm written in Lua. See [conf/simple_score.lua](conf/simple_score.lua)
 for details.
 
+Source/destination address–based proxy selection is not directly supported.
+One workaround is let moproxy bind multiple ports, delegates each port to
+different proxy servers with `listen ports` in your config, then doing
+address-based selection on the firewall.
+
 ### Monitoring
 Metrics (latency, traffic, number of connections, etc.) are useful for
 diagnosis and customing your own proxy selection. You can access these
@@ -132,7 +137,6 @@ sum(increase(moproxy_proxy_server_connections_error[1m]))
 Average delay for each proxy server:
 avg_over_time(moproxy_proxy_server_dns_delay_seconds[$__interval])
 ```
-
 
 ## Install
 

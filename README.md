@@ -4,10 +4,10 @@ A transparent TCP to SOCKSv5/HTTP proxy on *Linux* written in Rust.
 
 Features:
 
- * Transparent TCP proxy with `iptables -j REDIRECT`
- * Support multiple SOCKSv5/HTTP backend proxy servers
+ * Transparent TCP proxy with `iptables -j REDIRECT` or `nft redirect to`
+ * Support multiple SOCKSv5/HTTP upstream proxy servers
  * SOCKS/HTTP-layer alive & latency probe
- * Prioritize backend servers according to latency
+ * Prioritize upstream proxy servers according to latency
  * Full IPv6 support
  * Multiple listen ports, each for a subset of proxy servers
  * Remote DNS resolving for TLS with SNI (extract domain name from TLS
@@ -19,7 +19,7 @@ Features:
    [Prometheus](https://prometheus.io/) support
    (to build fancy dashboard with [Grafana](https://grafana.com/) for example)
  * Customizable proxy selection algorithm with Lua script (see
-   `conf/simple_scroe.lua`).
+   [conf/simple_scroe.lua](conf/simple_scroe.lua).
 
 ```
 +------+  TCP  +----------+       SOCKSv5   +---------+
@@ -107,21 +107,21 @@ for details.
 Source/destination address–based proxy selection is not directly supported.
 One workaround is let moproxy bind multiple ports, delegates each port to
 different proxy servers with `listen ports` in your config, then doing
-address-based selection on the firewall.
+address-based selection on your firewall.
 
 ### Monitoring
 Metrics (latency, traffic, number of connections, etc.) are useful for
 diagnosis and customing your own proxy selection. You can access these
-metrics with variety of methods, from a simple web page, curl, to specialized
+metrics with various methods, from a simple web page, curl, to specialized
 tools like Graphite or Prometheus.
 
-`--stats-bind [::1]:8080` turn on the internal stats page, via HTTP, on the
+`--stats-bind [::1]:8080` turns on the internal stats page, via HTTP, on the
 given IP address and port number. It returns a HTML page for web browser,
 or a ASCII table for `curl`.
 
-The stats page only provide current metrics and a few aggregation. Graphite
+The stats page only provides current metrics and a few aggregations. Graphite
 (via `--graphite`) or Prometheus (via `--stats-bind` then `\metrics`) should
-be use if you want the full history.
+be used if you want a full history.
 
 Some examples of Prometheus query (Grafana variant):
 

@@ -19,7 +19,7 @@ Features:
    [Prometheus](https://prometheus.io/) support
    (to build fancy dashboard with [Grafana](https://grafana.com/) for example)
  * Customizable proxy selection algorithm with Lua script (see
-   [conf/simple_scroe.lua](conf/simple_scroe.lua).
+   [conf/simple_scroe.lua](conf/simple_score.lua)).
 
 ```
 +------+  TCP  +----------+       SOCKSv5   +---------+
@@ -168,4 +168,4 @@ sudo dpkg -i target/debian/*.deb
 moproxy --help
 ```
 
-Refer to `conf/` for config & systemd service files. 
+Refer to [conf/](conf/) for config & systemd service files. 

@@ -47,8 +47,9 @@ pub struct ConnectedClient {
 
 #[derive(Debug)]
 pub struct FailedClient {
-    pub left: TcpStream,
-    pub pending_data: Option<Box<[u8]>>,
+    left: TcpStream,
+    dest: Destination,
+    pending_data: Option<Box<[u8]>>,
 }
 
 type ConnectServer = Pin<Box<dyn Future<Output = Result<ConnectedClient, FailedClient>> + Send>>;
@@ -238,6 +239,7 @@ impl NewClient {
             warn!("[:{}] {} => {} no avaiable proxy", from_port, src, dest);
             Err(FailedClient {
                 left,
+                dest,
                 pending_data: None,
             })
         }
@@ -271,15 +273,15 @@ impl FailedClient {
         self,
         pseudo_server: Arc<ProxyServer>,
     ) -> io::Result<ConnectedClient> {
-        let Self { left, pending_data } = self;
-        #[cfg(target_os = "linux")]
-        let dest: SocketAddr = get_original_dest(&left)
-            .map(SocketAddr::V4)
-            .or_else(|_| get_original_dest6(&left).map(SocketAddr::V6))?;
-        #[cfg(not(target_os = "linux"))]
-        let dest: SocketAddr = todo!("handle SOCKSv5 connection");
-
-        let mut right = TcpStream::connect(&dest).await?;
+        let Self {
+            left,
+            dest,
+            pending_data,
+        } = self;
+        let mut right = match dest.host {
+            Address::Ip(addr) => TcpStream::connect((addr, dest.port)).await?,
+            Address::Domain(ref name) => TcpStream::connect((name.as_ref(), dest.port)).await?,
+        };
         debug!("connected with {:?}", right.peer_addr());
         right.set_nodelay(true)?;
 

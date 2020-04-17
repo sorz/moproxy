@@ -1,0 +1,23 @@
+name: build-package
+
+on: release
+
+jobs:
+  build-unix:
+    name: Build and upload binaries and pre-build packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/install@v0.1
+        with:
+          crate: cargo-deb
+          use-tool-cache: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: deb
+          args: -- --all-features
+      - run: xz -kS "-${{ github.ref }}-x86_64.bin.xz" target/release/moproxy 
+      - uses: ncipollo/release-action@v1
+        with:
+          artifact: target/debian/*.deb,target/release/*.bin.xz
+          token: ${{ secrets.GITHUB_TOKEN }}

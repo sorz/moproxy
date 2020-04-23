@@ -3,7 +3,6 @@ mod prometheus;
 
 use futures::{pin_mut, ready};
 use helpers::{DurationExt, RequestExt};
-use http;
 use hyper::{
     server::{accept::Accept, conn::Http},
     service::{make_service_fn, service_fn},

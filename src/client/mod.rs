@@ -298,7 +298,7 @@ impl FailedClient {
         Ok(ConnectedClient {
             left,
             right,
-            dest: dest.into(),
+            dest,
             server: pseudo_server,
         })
     }

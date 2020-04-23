@@ -19,7 +19,7 @@ jobs:
         with:
           command: deb
           args: -- --all-features
-      - run: xz -kfS "_${GITHUB_REF#*/v}_amd64.bin.xz" target/release/moproxy 
+      - run: xz -kfS "_${GITHUB_REF#*/v}_linux_amd64.bin.xz" target/release/moproxy 
       - uses: ncipollo/release-action@v1
         with:
           artifacts: target/debian/*.deb,target/release/*.bin.xz

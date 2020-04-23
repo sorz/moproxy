@@ -198,7 +198,6 @@ impl BiPipe {
                 try_poll!(Pin::new(&mut writer.stream).poll_flush(cx));
                 if let Err(err) = writer.stream.shutdown(Shutdown::Write) {
                     debug!("fail to shutdown: {}", err);
-                    return Poll::Ready(Err(err));
                 }
                 reader.all_done = true;
                 return Poll::Ready(Ok(()));

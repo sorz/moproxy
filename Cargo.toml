@@ -27,7 +27,7 @@ http = "0.2"
 prettytable-rs = {version = "0.8", default-features = false}
 regex = "1"
 lazy_static = "1.4"
-number_prefix = "0.3"
+number_prefix = "0.4"
 futures = { version = "0.3", default-features = false, features = ["compat"] }
 httparse = "1.3"
 rlua = { version = "0.17", optional = true }

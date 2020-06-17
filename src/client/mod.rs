@@ -1,5 +1,6 @@
 mod connect;
 mod tls;
+use bytes::{Bytes, BytesMut};
 use log::{debug, info, warn};
 use std::{
     borrow::Cow, cmp, future::Future, io, net::SocketAddr, pin::Pin, sync::Arc, time::Duration,
@@ -18,7 +19,6 @@ use crate::{
     monitor::ServerList,
     proxy::copy::pipe,
     proxy::{Address, Destination, ProxyServer},
-    ArcBox,
 };
 
 #[derive(Debug)]
@@ -33,7 +33,7 @@ pub struct NewClient {
 #[derive(Debug)]
 pub struct NewClientWithData {
     client: NewClient,
-    pending_data: Option<Box<[u8]>>,
+    pending_data: Option<Bytes>,
     has_full_tls_hello: bool,
 }
 
@@ -49,7 +49,7 @@ pub struct ConnectedClient {
 pub struct FailedClient {
     left: TcpStream,
     dest: Destination,
-    pending_data: Option<Box<[u8]>>,
+    pending_data: Option<Bytes>,
 }
 
 type ConnectServer = Pin<Box<dyn Future<Output = Result<ConnectedClient, FailedClient>> + Send>>;
@@ -173,7 +173,7 @@ impl NewClient {
         //   2. --n-parallel: need the whole request to be forwarded
         let mut has_full_tls_hello = false;
         let mut pending_data = None;
-        let mut buf = vec![0u8; 2048];
+        let mut buf = BytesMut::with_capacity(2048);
         if let Ok(len) = timeout(wait, left.read(&mut buf)).await {
             buf.truncate(len?);
             // only TLS is safe to duplicate requests.
@@ -190,7 +190,7 @@ impl NewClient {
                     }
                 }
             }
-            pending_data = Some(buf.into_boxed_slice());
+            pending_data = Some(buf.freeze());
         } else {
             info!("no tls request received before timeout");
         }
@@ -211,7 +211,7 @@ impl NewClient {
         self,
         n_parallel: usize,
         wait_response: bool,
-        pending_data: Option<Box<[u8]>>,
+        pending_data: Option<Bytes>,
     ) -> Result<ConnectedClient, FailedClient> {
         let NewClient {
             left,
@@ -220,7 +220,6 @@ impl NewClient {
             list,
             from_port,
         } = self;
-        let pending_data = pending_data.map(ArcBox::new);
         let list = list
             .iter()
             .filter(|s| s.serve_port(from_port))

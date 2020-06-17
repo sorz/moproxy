@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use log::debug;
 use std::{
     cmp,
@@ -11,15 +12,12 @@ use std::{
 };
 use tokio::{net::TcpStream, time::timeout};
 
-use crate::{
-    proxy::{Destination, ProxyServer},
-    ArcBox,
-};
+use crate::proxy::{Destination, ProxyServer};
 
 async fn try_connect(
     dest: Destination,
     server: Arc<ProxyServer>,
-    pending_data: Option<ArcBox<[u8]>>,
+    pending_data: Option<Bytes>,
     wait_response: bool,
 ) -> io::Result<TcpStream> {
     let max_wait = server.config_snapshot().max_wait;
@@ -46,7 +44,7 @@ type PinnedConnectFuture = Pin<Box<dyn Future<Output = io::Result<TcpStream>> + 
 /// others.
 pub struct TryConnectAll<'a> {
     dest: &'a Destination,
-    pending_data: Option<ArcBox<[u8]>>,
+    pending_data: Option<Bytes>,
     parallel_n: usize,
     wait_response: bool,
     standby: VecDeque<Arc<ProxyServer>>,
@@ -58,7 +56,7 @@ pub fn try_connect_all(
     servers: Vec<Arc<ProxyServer>>,
     parallel_n: usize,
     wait_response: bool,
-    pending_data: Option<ArcBox<[u8]>>,
+    pending_data: Option<Bytes>,
 ) -> TryConnectAll {
     let parallel_n = cmp::max(1, parallel_n);
     let servers = VecDeque::from_iter(servers.into_iter());

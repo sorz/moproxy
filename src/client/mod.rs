@@ -174,6 +174,7 @@ impl NewClient {
         let mut has_full_tls_hello = false;
         let mut pending_data = None;
         let mut buf = BytesMut::with_capacity(2048);
+        buf.resize(buf.capacity(), 0);
         if let Ok(len) = timeout(wait, left.read(&mut buf)).await {
             buf.truncate(len?);
             // only TLS is safe to duplicate requests.

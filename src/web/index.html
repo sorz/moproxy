@@ -106,9 +106,9 @@
              <span title="# total connections"
              >${humanQuantity(server.status.conn_total)}</span></td>
          <td><span title="total sent"
-             >${humanFileSize(server.status.traffic.tx_bytes)}</span> /
+             >${humanFileSize(server.traffic.tx_bytes)}</span> /
              <span title="total received"
-             >${humanFileSize(server.status.traffic.rx_bytes)}</span>
+             >${humanFileSize(server.traffic.rx_bytes)}</span>
          <td><span title="throughput"
              >${throughput}</span></td>
          </tr>`;

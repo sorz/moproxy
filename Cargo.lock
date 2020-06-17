@@ -525,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "moproxy"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "bytes 0.5.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "clap 2.33.1 (registry+https://github.com/rust-lang/crates.io-index)",

@@ -5,6 +5,7 @@ use rlua::prelude::*;
 pub mod socks5;
 use log::debug;
 use parking_lot::{Mutex, RwLock};
+use serde::{Serialize, Serializer};
 use serde_derive::Serialize;
 use std::{
     cmp,
@@ -15,6 +16,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::{Add, AddAssign},
     str::FromStr,
+    sync::atomic::{AtomicUsize, Ordering},
     time::Duration,
 };
 use tokio::net::TcpStream;
@@ -55,6 +57,7 @@ pub struct ProxyServer {
     listen_ports: HashSet<u16>,
     config: RwLock<ProxyServerConfig>,
     status: Mutex<ProxyServerStatus>,
+    traffic: AtomicTraffic,
 }
 
 #[derive(Debug, Serialize, Clone, Copy)]
@@ -123,7 +126,6 @@ impl ToLua<'_> for Delay {
 pub struct ProxyServerStatus {
     pub delay: Delay,
     pub score: Option<i32>,
-    pub traffic: Traffic,
     pub conn_alive: u32,
     pub conn_total: u32,
     pub conn_error: u32,
@@ -136,7 +138,6 @@ impl ToLua<'_> for ProxyServerStatus {
         let status = ctx.create_table()?;
         status.set("delay", self.delay)?;
         status.set("score", self.score)?;
-        status.set("score", self.traffic)?;
         status.set("conn_alive", self.conn_alive)?;
         status.set("conn_total", self.conn_total)?;
         status.set("conn_error", self.conn_error)?;
@@ -170,6 +171,7 @@ impl ToLua<'_> for &ProxyServer {
         table.set("tag", self.tag.to_string())?;
         table.set("config", *self.config.read())?;
         table.set("status", *self.status.lock())?;
+        table.set("traffic", self.traffic())?;
         table.to_lua(ctx)
     }
 }
@@ -229,6 +231,44 @@ impl From<(Address, u16)> for Destination {
             host: addr_port.0,
             port: addr_port.1,
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct AtomicTraffic {
+    tx_bytes: AtomicUsize,
+    rx_bytes: AtomicUsize,
+}
+
+impl Default for AtomicTraffic {
+    fn default() -> Self {
+        Self {
+            tx_bytes: AtomicUsize::new(0),
+            rx_bytes: AtomicUsize::new(0),
+        }
+    }
+}
+
+impl AtomicTraffic {
+    pub fn add_tx(&self, bytes: usize) {
+        self.tx_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn add_rx(&self, bytes: usize) {
+        self.rx_bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn read_traffic(&self) -> Traffic {
+        Traffic {
+            tx_bytes: self.tx_bytes.load(Ordering::Relaxed),
+            rx_bytes: self.rx_bytes.load(Ordering::Relaxed),
+        }
+    }
+}
+
+impl Serialize for AtomicTraffic {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.read_traffic().serialize(serializer)
     }
 }
 
@@ -325,6 +365,7 @@ impl ProxyServer {
             .into_boxed_str(),
             config: ProxyServerConfig::new(test_dns, score_base).into(),
             status: Default::default(),
+            traffic: Default::default(),
         }
     }
 
@@ -337,6 +378,7 @@ impl ProxyServer {
             config: ProxyServerConfig::new(stub_addr, None).into(),
             listen_ports: Default::default(),
             status: Default::default(),
+            traffic: Default::default(),
         }
     }
 
@@ -384,7 +426,7 @@ impl ProxyServer {
     }
 
     pub fn traffic(&self) -> Traffic {
-        self.status.lock().traffic
+        self.traffic.read_traffic()
     }
 
     pub fn update_delay(&self, delay: Option<Duration>) {
@@ -441,7 +483,8 @@ impl ProxyServer {
     }
 
     pub fn add_traffic(&self, traffic: Traffic) {
-        self.status.lock().traffic += traffic;
+        self.traffic.add_rx(traffic.rx_bytes);
+        self.traffic.add_tx(traffic.tx_bytes);
     }
 
     pub fn update_stats_conn_open(&self) {

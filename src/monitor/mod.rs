@@ -224,11 +224,12 @@ async fn send_metrics(monitor: &Monitor, graphite: &mut Graphite) -> io::Result<
             let now = Some(SystemTime::now());
             let r = |path, value| Record::new(server.graphite_path(path), value, now);
             let status = server.status_snapshot();
+            let traffic = server.traffic();
             vec![
                 status.delay.map(|t| r("delay", t.as_millis() as u64)),
                 status.score.map(|s| r("score", s as u64)),
-                Some(r("tx_bytes", status.traffic.tx_bytes as u64)),
-                Some(r("rx_bytes", status.traffic.rx_bytes as u64)),
+                Some(r("tx_bytes", traffic.tx_bytes as u64)),
+                Some(r("rx_bytes", traffic.rx_bytes as u64)),
                 Some(r("conns.total", status.conn_total as u64)),
                 Some(r("conns.alive", status.conn_alive as u64)),
                 Some(r("conns.error", status.conn_error as u64)),

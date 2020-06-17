@@ -44,12 +44,12 @@ pub fn exporter(start_time: &Instant, monitor: &Monitor) -> http::Result<Respons
     server_gauge!(
         "proxy_server_bytes_tx_total",
         "Current total of outgoing bytes",
-        |s| Some(s.server.status_snapshot().traffic.tx_bytes)
+        |s| Some(s.server.traffic().tx_bytes)
     );
     server_gauge!(
         "proxy_server_bytes_rx_total",
         "Current total of incoming bytes",
-        |s| Some(s.server.status_snapshot().traffic.rx_bytes)
+        |s| Some(s.server.traffic().rx_bytes)
     );
     server_gauge!(
         "proxy_server_connections_alive",

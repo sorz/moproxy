@@ -113,6 +113,7 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> http::Result<Res
     let mut total_alive_conns = 0;
     for ServerStatus { server, throughput } in status.servers {
         let status = server.status_snapshot();
+        let traffic = server.traffic();
         total_alive_conns += status.conn_alive;
         let row = table.add_empty_row();
         // Server
@@ -141,8 +142,8 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> http::Result<Res
             )
         ));
         // Up Down
-        row.add_cell(cell!(r -> helpers::to_human_bytes(status.traffic.tx_bytes)));
-        row.add_cell(cell!(r -> helpers::to_human_bytes(status.traffic.rx_bytes)));
+        row.add_cell(cell!(r -> helpers::to_human_bytes(traffic.tx_bytes)));
+        row.add_cell(cell!(r -> helpers::to_human_bytes(traffic.rx_bytes)));
         // ↑↓
         if let Some(tp) = throughput {
             let sum = tp.tx_bps + tp.rx_bps;

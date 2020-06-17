@@ -1,6 +1,6 @@
 use hyper::Request;
 use lazy_static::lazy_static;
-use number_prefix::NumberPrefix::{self, Standalone, Prefixed};
+use number_prefix::NumberPrefix::{self, Prefixed, Standalone};
 use regex::Regex;
 use std::{fmt::Write, time::Duration};
 

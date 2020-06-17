@@ -166,7 +166,7 @@ async fn main() {
     let mut signals = signal(SignalKind::hangup()).expect("cannot catch signal");
     #[cfg(unix)]
     tokio::spawn(async move {
-        while let Some(_) = signals.next().await {
+        while signals.next().await.is_some() {
             #[cfg(all(feature = "systemd", target_os = "linux"))]
             systemd::notify_realoding();
 

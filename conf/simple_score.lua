@@ -11,11 +11,13 @@ function calc_score(proxy, delay)
   -- proxy.config:
   --   Proxy's configs, 
   --   includes test_dns, max_wait, and score_base.
+  -- proxy.traffic:
+  --   tx_bytes: total amount of traffics, upload to proxy server
+  --   rx_bytes: download from proxy server
   -- proxy.status:
   --   delay: the delay before this update, in secs in float.
   --          nil = initial value; -1 = timed out.
   --   score: the score before this update, may be nil.
-  --   traffic.tx_bytes, traffic.rx_bytes: total traffics
   --   conn_alive, conn_total, conn_error: connection counters
   --   close_history:
   --     History of the 64 most recent closed connections, stored as

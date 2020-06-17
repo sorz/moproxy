@@ -250,15 +250,12 @@ impl Default for AtomicTraffic {
 }
 
 impl AtomicTraffic {
-    pub fn add_tx(&self, bytes: usize) {
-        self.tx_bytes.fetch_add(bytes, Ordering::Relaxed);
+    pub fn add(&self, amt: Traffic) {
+        self.rx_bytes.fetch_add(amt.rx_bytes, Ordering::Relaxed);
+        self.tx_bytes.fetch_add(amt.tx_bytes, Ordering::Relaxed);
     }
 
-    pub fn add_rx(&self, bytes: usize) {
-        self.rx_bytes.fetch_add(bytes, Ordering::Relaxed);
-    }
-
-    pub fn read_traffic(&self) -> Traffic {
+    pub fn read(&self) -> Traffic {
         Traffic {
             tx_bytes: self.tx_bytes.load(Ordering::Relaxed),
             rx_bytes: self.rx_bytes.load(Ordering::Relaxed),
@@ -268,7 +265,7 @@ impl AtomicTraffic {
 
 impl Serialize for AtomicTraffic {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.read_traffic().serialize(serializer)
+        self.read().serialize(serializer)
     }
 }
 
@@ -426,7 +423,7 @@ impl ProxyServer {
     }
 
     pub fn traffic(&self) -> Traffic {
-        self.traffic.read_traffic()
+        self.traffic.read()
     }
 
     pub fn update_delay(&self, delay: Option<Duration>) {
@@ -483,8 +480,7 @@ impl ProxyServer {
     }
 
     pub fn add_traffic(&self, traffic: Traffic) {
-        self.traffic.add_rx(traffic.rx_bytes);
-        self.traffic.add_tx(traffic.tx_bytes);
+        self.traffic.add(traffic);
     }
 
     pub fn update_stats_conn_open(&self) {

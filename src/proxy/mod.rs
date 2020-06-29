@@ -54,16 +54,16 @@ pub struct ProxyServer {
     pub addr: SocketAddr,
     pub proto: ProxyProto,
     pub tag: Box<str>,
-    listen_ports: HashSet<u16>,
     config: RwLock<ProxyServerConfig>,
     status: Mutex<ProxyServerStatus>,
     traffic: AtomicTraffic,
 }
 
-#[derive(Debug, Serialize, Clone, Copy)]
+#[derive(Debug, Serialize, Clone)]
 pub struct ProxyServerConfig {
     pub test_dns: SocketAddr,
     pub max_wait: Duration,
+    listen_ports: HashSet<u16>,
     score_base: i32,
 }
 
@@ -169,7 +169,7 @@ impl ToLua<'_> for &ProxyServer {
         table.set("addr", self.addr.to_string())?;
         table.set("proto", self.proto.to_string())?;
         table.set("tag", self.tag.to_string())?;
-        table.set("config", *self.config.read())?;
+        table.set("config", self.config.read().clone())?;
         table.set("status", *self.status.lock())?;
         table.set("traffic", self.traffic())?;
         table.to_lua(ctx)
@@ -324,9 +324,14 @@ impl ProxyProto {
 }
 
 impl ProxyServerConfig {
-    fn new(test_dns: SocketAddr, score_base: Option<i32>) -> Self {
+    fn new(
+        test_dns: SocketAddr,
+        score_base: Option<i32>,
+        listen_ports: Option<HashSet<u16>>,
+    ) -> Self {
         Self {
             test_dns,
+            listen_ports: listen_ports.unwrap_or_default(),
             max_wait: Duration::from_millis(DEFAULT_MAX_WAIT_MILLILS),
             score_base: score_base.unwrap_or(0),
         }
@@ -345,7 +350,6 @@ impl ProxyServer {
         ProxyServer {
             addr,
             proto,
-            listen_ports: listen_ports.unwrap_or_default(),
             tag: match tag {
                 None => format!("{}", addr.port()),
                 Some(s) => {
@@ -360,7 +364,7 @@ impl ProxyServer {
                 }
             }
             .into_boxed_str(),
-            config: ProxyServerConfig::new(test_dns, score_base).into(),
+            config: ProxyServerConfig::new(test_dns, score_base, listen_ports).into(),
             status: Default::default(),
             traffic: Default::default(),
         }
@@ -372,8 +376,7 @@ impl ProxyServer {
             addr: stub_addr,
             proto: ProxyProto::Direct,
             tag: "__DIRECT__".into(),
-            config: ProxyServerConfig::new(stub_addr, None).into(),
-            listen_ports: Default::default(),
+            config: ProxyServerConfig::new(stub_addr, None, None).into(),
             status: Default::default(),
             traffic: Default::default(),
         }
@@ -381,12 +384,13 @@ impl ProxyServer {
 
     pub fn copy_config_from(&self, from: &Self) {
         if !std::ptr::eq(&from.config, &self.config) {
-            *self.config.write() = *from.config.read();
+            *self.config.write() = from.config.read().clone();
         }
     }
 
     pub fn serve_port(&self, port: u16) -> bool {
-        self.listen_ports.is_empty() || self.listen_ports.contains(&port)
+        let listen_ports = &self.config.read().listen_ports;
+        listen_ports.is_empty() || listen_ports.contains(&port)
     }
 
     pub async fn connect<T>(&self, addr: &Destination, data: Option<T>) -> io::Result<TcpStream>
@@ -414,10 +418,6 @@ impl ProxyServer {
         *self.status.lock()
     }
 
-    pub fn config_snapshot(&self) -> ProxyServerConfig {
-        *self.config.read()
-    }
-
     pub fn score(&self) -> Option<i32> {
         self.status.lock().score
     }
@@ -426,9 +426,17 @@ impl ProxyServer {
         self.traffic.read()
     }
 
+    pub fn max_wait(&self) -> Duration {
+        self.config.read().max_wait
+    }
+
+    pub fn test_dns(&self) -> SocketAddr {
+        self.config.read().test_dns
+    }
+
     pub fn update_delay(&self, delay: Option<Duration>) {
         let mut status = self.status.lock();
-        let config = self.config_snapshot();
+        let config = self.config.read();
 
         if let Some(delay) = delay {
             let last_score = status.score.unwrap_or_else(|| {

@@ -241,7 +241,6 @@ async fn send_metrics(monitor: &Monitor, graphite: &mut Graphite) -> io::Result<
 }
 
 async fn alive_test(server: &ProxyServer) -> io::Result<Duration> {
-    let config = server.config_snapshot();
     let request = [
         0,
         17, // length
@@ -268,8 +267,8 @@ async fn alive_test(server: &ProxyServer) -> io::Result<Duration> {
     let now = Instant::now();
 
     let mut buf = [0u8; 12];
-    let test_dns = config.test_dns.into();
-    let result = timeout(config.max_wait, async {
+    let test_dns = server.test_dns().into();
+    let result = timeout(server.max_wait(), async {
         let mut stream = server.connect(&test_dns, Some(request)).await?;
         stream.read_exact(&mut buf).await?;
         stream.shutdown(Shutdown::Both)

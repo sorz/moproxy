@@ -20,7 +20,7 @@ async fn try_connect(
     pending_data: Option<Bytes>,
     wait_response: bool,
 ) -> io::Result<TcpStream> {
-    let max_wait = server.config_snapshot().max_wait;
+    let max_wait = server.max_wait();
     // waiting for proxy server connected
     let mut stream = timeout(max_wait, server.connect(&dest, pending_data)).await??;
 

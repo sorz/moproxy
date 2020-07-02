@@ -41,7 +41,7 @@ nix = "0.17"
 sd-notify = { version = "0.1.1", optional = true }
 
 [features]
-default = ["web_console", "score_script", "systemd"]
+default = ["web_console", "score_script", "systemd", "rich_web"]
 web_console = ["hyper"]
 rich_web = ["web_console", "zip"]
 score_script = ["rlua"]

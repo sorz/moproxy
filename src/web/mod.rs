@@ -9,6 +9,8 @@ use hyper::{
     service::{make_service_fn, service_fn},
     Body, Method, Request, Response, StatusCode,
 };
+#[cfg(feature = "rich_web")]
+use lazy_static::lazy_static;
 use log::warn;
 use prettytable::{cell, format::consts::FORMAT_NO_LINESEP_WITH_TITLE, row, Table};
 use serde_derive::Serialize;
@@ -72,21 +74,20 @@ impl Status {
     }
 }
 
-fn home_page(
-    req: &Request<Body>,
-    start_time: &Instant,
-    monitor: &Monitor,
-) -> http::Result<Response<Body>> {
+fn home_page(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Response<Body> {
     if req.accept_html() {
-        Response::builder()
-            .header("Content-Type", "text/html")
-            .body(include_str!("index.html").into())
+        get_response_from_bundle("/index.html").unwrap_or_else(|| {
+            Response::builder()
+                .header("Content-Type", "text/html")
+                .body(include_str!("index.html").into())
+                .unwrap()
+        })
     } else {
         plaintext_status(start_time, monitor)
     }
 }
 
-fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> http::Result<Response<Body>> {
+fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> Response<Body> {
     let status = Status::from(start_time, monitor);
     let mut buf = String::new();
 
@@ -167,29 +168,55 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> http::Result<Res
     Response::builder()
         .header("Content-Type", "text/plain; charset=utf-8")
         .body(buf.into())
+        .unwrap()
 }
 
 fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Response<Body> {
-    match (req.method(), req.uri().path()) {
-        (&Method::GET, "/") => home_page(req, start_time, monitor),
-        (&Method::GET, "/plain") => plaintext_status(start_time, monitor),
-        (&Method::GET, "/version") => Response::builder()
+    if req.method() != Method::GET {
+        return Response::builder()
+            .status(StatusCode::METHOD_NOT_ALLOWED)
+            .header("Allow", "GET")
             .header("Content-Type", "text/plain")
-            .body(env!("CARGO_PKG_VERSION").into()),
-        (&Method::GET, "/status") => {
+            .body("only GET is allowed".into())
+            .unwrap();
+    }
+
+    match req.uri().path() {
+        "/" => home_page(req, start_time, monitor),
+        "/plain" => plaintext_status(start_time, monitor),
+        "/version" => Response::builder()
+            .header("Content-Type", "text/plain")
+            .body(env!("CARGO_PKG_VERSION").into())
+            .unwrap(),
+        "/status" => {
             let json = serde_json::to_string(&Status::from(start_time, monitor))
                 .expect("fail to serialize servers to json");
             Response::builder()
                 .header("Content-Type", "application/json")
                 .body(json.into())
+                .unwrap()
         }
-        (&Method::GET, "/metrics") => prometheus::exporter(start_time, monitor),
-        _ => Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .header("Content-Type", "text/plain")
-            .body("page not found".into()),
+        "/metrics" => prometheus::exporter(start_time, monitor),
+        path => get_response_from_bundle(path).unwrap_or_else(|| {
+            Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .header("Content-Type", "text/plain")
+                .body("page not found".into())
+                .unwrap()
+        }),
     }
-    .unwrap()
+}
+
+fn get_response_from_bundle(path: &str) -> Option<Response<Body>> {
+    #[cfg(feature = "rich_web")]
+    {
+        lazy_static! {
+            static ref BUNDLE: rich::ResourceBundle = rich::ResourceBundle::new();
+        }
+        BUNDLE.get(path)
+    }
+    #[cfg(not(feature = "rich_web"))]
+    None
 }
 
 pub async fn run_server<A>(accept: A, monitor: Monitor)

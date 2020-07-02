@@ -29,7 +29,7 @@ where
     }
 }
 
-pub fn exporter(start_time: &Instant, monitor: &Monitor) -> http::Result<Response<Body>> {
+pub fn exporter(start_time: &Instant, monitor: &Monitor) -> Response<Body> {
     let status = Status::from(start_time, monitor);
     let mut buf = String::new();
 
@@ -83,4 +83,5 @@ pub fn exporter(start_time: &Instant, monitor: &Monitor) -> http::Result<Respons
     Response::builder()
         .header("Content-Type", "text/plain; charset=utf-8")
         .body(buf.into())
+        .unwrap()
 }

@@ -1,13 +1,11 @@
-use reqwest;
 use std::{
     env,
     fs::File,
     path::{Path, PathBuf},
 };
 
-const ZIP_URL: &'static str =
-    "https://github.com/sorz/moproxy-web/releases/download/{VERSION}/build.zip";
-const VERSION: &'static str = "v0.1.1";
+const ZIP_URL: &str = "https://github.com/sorz/moproxy-web/releases/download/{VERSION}/build.zip";
+const VERSION: &str = "v0.1.1";
 
 fn main() {
     if env::var("CARGO_FEATURE_RICH_WEB").is_err() {
@@ -18,7 +16,10 @@ fn main() {
     if !zip_path.exists() {
         download_zip(&zip_path);
     }
-    println!("cargo:rustc-env=MOPROXY_WEB_BUNDLE={}", zip_path.into_os_string().into_string().unwrap());
+    println!(
+        "cargo:rustc-env=MOPROXY_WEB_BUNDLE={}",
+        zip_path.into_os_string().into_string().unwrap()
+    );
 }
 
 fn download_zip(path: &Path) {

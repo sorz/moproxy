@@ -41,6 +41,11 @@ use crate::{
 
 pub use hyper::server::accept::from_stream;
 
+#[cfg(feature = "rich_web")]
+lazy_static! {
+    static ref BUNDLE: rich::ResourceBundle = rich::ResourceBundle::new();
+}
+
 #[derive(Debug, Serialize)]
 struct ServerStatus {
     server: Arc<ProxyServer>,
@@ -76,18 +81,30 @@ impl Status {
 
 fn home_page(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Response<Body> {
     if req.accept_html() {
-        get_response_from_bundle("/index.html").unwrap_or_else(|| {
+        #[cfg(feature = "rich_web")]
+        let resp = BUNDLE.get("/index.html").map(|(mime, content)| {
+            let content = String::from_utf8(content).unwrap();
+            let status = plaintext_status(start_time, monitor);
+            let content = content.replace("REPLACED ON RUNTIME", &status);
+            Response::builder()
+                .header("Content-Type", mime)
+                .body(content.into())
+                .unwrap()
+        });
+        #[cfg(not(feature = "rich_web"))]
+        let resp = None;
+        resp.unwrap_or_else(|| {
             Response::builder()
                 .header("Content-Type", "text/html")
                 .body(include_str!("index.html").into())
                 .unwrap()
         })
     } else {
-        plaintext_status(start_time, monitor)
+        plaintext_status_response(start_time, monitor)
     }
 }
 
-fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> Response<Body> {
+fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> String {
     let status = Status::from(start_time, monitor);
     let mut buf = String::new();
 
@@ -164,10 +181,13 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> Response<Body> {
         table
     )
     .unwrap();
+    buf
+}
 
+fn plaintext_status_response(start_time: &Instant, monitor: &Monitor) -> Response<Body> {
     Response::builder()
         .header("Content-Type", "text/plain; charset=utf-8")
-        .body(buf.into())
+        .body(plaintext_status(start_time, monitor).into())
         .unwrap()
 }
 
@@ -182,8 +202,8 @@ fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Res
     }
 
     match req.uri().path() {
-        "/" => home_page(req, start_time, monitor),
-        "/plain" => plaintext_status(start_time, monitor),
+        "/" | "/index.html" => home_page(req, start_time, monitor),
+        "/plain" => plaintext_status_response(start_time, monitor),
         "/version" => Response::builder()
             .header("Content-Type", "text/plain")
             .body(env!("CARGO_PKG_VERSION").into())
@@ -197,26 +217,25 @@ fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Res
                 .unwrap()
         }
         "/metrics" => prometheus::exporter(start_time, monitor),
-        path => get_response_from_bundle(path).unwrap_or_else(|| {
-            Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .header("Content-Type", "text/plain")
-                .body("page not found".into())
-                .unwrap()
-        }),
-    }
-}
-
-fn get_response_from_bundle(path: &str) -> Option<Response<Body>> {
-    #[cfg(feature = "rich_web")]
-    {
-        lazy_static! {
-            static ref BUNDLE: rich::ResourceBundle = rich::ResourceBundle::new();
+        path => {
+            #[cfg(feature = "rich_web")]
+            let resp = BUNDLE.get(path).map(|(mime, body)| {
+                Response::builder()
+                    .header("Content-Type", mime)
+                    .body(body.into())
+                    .unwrap()
+            });
+            #[cfg(not(feature = "rich_web"))]
+            let resp = None;
+            resp.unwrap_or_else(|| {
+                Response::builder()
+                    .status(StatusCode::NOT_FOUND)
+                    .header("Content-Type", "text/plain")
+                    .body("page not found".into())
+                    .unwrap()
+            })
         }
-        BUNDLE.get(path)
     }
-    #[cfg(not(feature = "rich_web"))]
-    None
 }
 
 pub async fn run_server<A>(accept: A, monitor: Monitor)

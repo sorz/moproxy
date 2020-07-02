@@ -1,5 +1,4 @@
 use bytes::Bytes;
-use hyper::{Body, Response};
 use parking_lot::Mutex;
 use std::io::{Cursor, Read};
 use zip::read::ZipArchive;
@@ -17,7 +16,7 @@ impl ResourceBundle {
         ResourceBundle { zip }
     }
 
-    pub fn get(&self, path: &str) -> Option<Response<Body>> {
+    pub fn get(&self, path: &str) -> Option<(&'static str, Vec<u8>)> {
         let name = if path.starts_with('/') {
             &path[1..]
         } else {
@@ -43,10 +42,6 @@ impl ResourceBundle {
             _ => "application/octet-stream",
         };
 
-        Response::builder()
-            .header("Content-Type", mime)
-            .body(content.into())
-            .unwrap()
-            .into()
+        (mime, content).into()
     }
 }

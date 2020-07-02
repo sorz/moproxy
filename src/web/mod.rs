@@ -1,6 +1,7 @@
 mod helpers;
 mod prometheus;
-
+#[cfg(feature = "rich_web")]
+mod rich;
 use futures::{pin_mut, ready};
 use helpers::{DurationExt, RequestExt};
 use hyper::{

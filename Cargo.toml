@@ -20,6 +20,7 @@ env_logger = "0.7"
 serde = {version = "1.0", features = ["rc"]}
 serde_json = "1.0"
 serde_derive = "1.0"
+serde_with = "1.4.0"
 rust-ini = "0.15"
 hyper = {version = "0.13", optional = true, default-features = false, features = ["stream", "tcp"]}
 parking_lot = { version = "0.10", features = ["serde", "deadlock_detection"] }

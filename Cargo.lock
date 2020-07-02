@@ -550,6 +550,7 @@ dependencies = [
  "serde 1.0.112 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.112 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_json 1.0.55 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde_with 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio 0.2.21 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -859,6 +860,25 @@ dependencies = [
  "itoa 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "ryu 1.0.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.112 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "serde_with"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "serde 1.0.112 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde_with_macros 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "serde_with_macros"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "proc-macro2 1.0.18 (registry+https://github.com/rust-lang/crates.io-index)",
+ "quote 1.0.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "syn 1.0.31 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -1203,6 +1223,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum serde 1.0.112 (registry+https://github.com/rust-lang/crates.io-index)" = "736aac72d1eafe8e5962d1d1c3d99b0df526015ba40915cb3c49d042e92ec243"
 "checksum serde_derive 1.0.112 (registry+https://github.com/rust-lang/crates.io-index)" = "bf0343ce212ac0d3d6afd9391ac8e9c9efe06b533c8d33f660f6390cc4093f57"
 "checksum serde_json 1.0.55 (registry+https://github.com/rust-lang/crates.io-index)" = "ec2c5d7e739bc07a3e73381a39d61fdb5f671c60c1df26a130690665803d8226"
+"checksum serde_with 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "89d3d595d64120bbbc70b7f6d5ae63298b62a3d9f373ec2f56acf5365ca8a444"
+"checksum serde_with_macros 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "4070d2c9b9d258465ad1d82aabb985b84cd9a3afa94da25ece5a9938ba5f1606"
 "checksum signal-hook-registry 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "94f478ede9f64724c5d173d7bb56099ec3e2d9fc2774aac65d34b8b890405f41"
 "checksum slab 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)" = "c111b5bd5695e56cffe5129854aa230b39c93a305372fdbb2668ca2394eea9f8"
 "checksum smallvec 1.4.0 (registry+https://github.com/rust-lang/crates.io-index)" = "c7cb5678e1615754284ec264d9bb5b4c27d2018577fd90ac0ceb578591ed5ee4"

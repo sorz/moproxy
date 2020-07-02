@@ -129,6 +129,7 @@ pub struct ProxyServerStatus {
     pub conn_alive: u32,
     pub conn_total: u32,
     pub conn_error: u32,
+    #[serde(with = "serde_with::rust::display_fromstr")]
     pub close_history: u64,
 }
 

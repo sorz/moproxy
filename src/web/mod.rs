@@ -83,9 +83,6 @@ fn home_page(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Re
     if req.accept_html() {
         #[cfg(feature = "rich_web")]
         let resp = BUNDLE.get("/index.html").map(|(mime, content)| {
-            let content = String::from_utf8(content).unwrap();
-            let status = plaintext_status(start_time, monitor);
-            let content = content.replace("REPLACED ON RUNTIME", &status);
             Response::builder()
                 .header("Content-Type", mime)
                 .body(content.into())

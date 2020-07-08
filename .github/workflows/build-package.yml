@@ -6,7 +6,7 @@ on:
       - v*
 
 jobs:
-  build-unix:
+  build-linux:
     name: Build and upload binaries and pre-build packages
     runs-on: ubuntu-latest
     steps:
@@ -24,3 +24,18 @@ jobs:
         with:
           artifacts: target/debian/*.deb,target/release/*.bin.xz
           token: ${{ secrets.GITHUB_TOKEN }}
+  build-windows:
+    name: Build and upload binary for Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --all-features
+      - run: xz -kfS "_${GITHUB_REF#*/v}_windows_amd64.exe.xz" target/release/moproxy
+      - uses: ncipollo/release-action@v1
+        with:
+          artifacts: target/release/*.exe.xz
+          token: ${{ secrets.GITHUB_TOKEN }}
+

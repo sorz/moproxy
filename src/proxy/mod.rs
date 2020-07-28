@@ -23,7 +23,7 @@ use tokio::net::TcpStream;
 
 const GRAPHITE_PATH_PREFIX: &str = "moproxy.proxy_servers";
 
-#[derive(Hash, Eq, PartialEq, Copy, Clone, Debug, Serialize)]
+#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize)]
 pub enum ProxyProto {
     #[serde(rename = "SOCKSv5")]
     Socks5 {
@@ -32,6 +32,7 @@ pub enum ProxyProto {
         /// This saves [TODO] round-trip delay but may cause problem on some
         /// servers.
         fake_handshaking: bool,
+        user_pass_auth: Option<SocksUserPassAuthCredential>,
     },
     #[serde(rename = "HTTP")]
     Http {
@@ -46,6 +47,13 @@ pub enum ProxyProto {
         connect_with_payload: bool,
     },
     Direct,
+}
+
+
+#[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize)]
+pub struct SocksUserPassAuthCredential {
+    username: String,
+    password: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -313,7 +321,7 @@ impl ToLua<'_> for Traffic {
 
 impl ProxyProto {
     pub fn socks5(fake_handshaking: bool) -> Self {
-        ProxyProto::Socks5 { fake_handshaking }
+        ProxyProto::Socks5 { fake_handshaking, user_pass_auth: None }
     }
 
     pub fn http(connect_with_payload: bool) -> Self {
@@ -399,19 +407,18 @@ impl ProxyServer {
     where
         T: AsRef<[u8]> + 'static,
     {
-        let proto = self.proto;
         let mut stream = TcpStream::connect(&self.addr).await?;
         debug!("connected with {:?}", stream.peer_addr());
         stream.set_nodelay(true)?;
 
-        match proto {
+        match &self.proto {
             ProxyProto::Direct => unimplemented!(),
-            ProxyProto::Socks5 { fake_handshaking } => {
-                socks5::handshake(&mut stream, &addr, data, fake_handshaking).await?
+            ProxyProto::Socks5 { fake_handshaking, user_pass_auth } => {
+                socks5::handshake(&mut stream, &addr, data, *fake_handshaking, user_pass_auth).await?
             }
             ProxyProto::Http {
                 connect_with_payload,
-            } => http::handshake(&mut stream, &addr, data, connect_with_payload).await?,
+            } => http::handshake(&mut stream, &addr, data, *connect_with_payload).await?,
         }
         Ok(stream)
     }

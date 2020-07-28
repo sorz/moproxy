@@ -7,21 +7,24 @@ use tokio::{
     net::TcpStream,
 };
 
+use super::SocksUserPassAuthCredential;
+
 pub async fn handshake<T>(
     stream: &mut TcpStream,
     addr: &Destination,
     data: Option<T>,
     fake_handshaking: bool,
+    user_pass_auth: &Option<SocksUserPassAuthCredential>,
 ) -> io::Result<()>
 where
     T: AsRef<[u8]>,
 {
-    if fake_handshaking {
+    if fake_handshaking && user_pass_auth.is_none() {
         trace!("socks: do FAKE handshake w/ {:?}", addr);
         fake_handshake(stream, addr, data).await
     } else {
         trace!("socks: do FULL handshake w/ {:?}", addr);
-        full_handshake(stream, addr, data).await
+        full_handshake(stream, addr, data, user_pass_auth).await
     }
 }
 
@@ -45,36 +48,68 @@ where
     Ok(())
 }
 
+macro_rules! err {
+    ($msg:expr) => {
+        return Err(io::Error::new(ErrorKind::Other, $msg));
+    };
+}
+
 pub async fn full_handshake<T>(
     stream: &mut TcpStream,
     addr: &Destination,
     data: Option<T>,
+    user_pass_auth: &Option<SocksUserPassAuthCredential>,
 ) -> io::Result<()>
 where
     T: AsRef<[u8]>,
 {
-    // Send request w/ auth method 0x00 (no auth)
-    trace!("socks: write [5, 1, 0]");
-    stream.write_all(&[0x05, 0x01, 0x00]).await?;
+    let mut buf = vec![];
+    if user_pass_auth.is_none() {
+        // Send request w/ auth method 0x00 (no auth)
+        buf.extend(&[0x05, 0x01, 0x00])
+    } else {
+        // Or, include 0x02 (username/password auth)
+        buf.extend(&[0x05, 0x01, 0x00, 0x02])
+    };
+    trace!("socks: write {:?}", buf);
+    stream.write_all(&buf).await?;
 
-    // Server should select 0x00 as auth method
+    // Server select auth method
     let mut buf = vec![0; 2];
     stream.read_exact(&mut buf).await?;
     trace!("socks: read {:?}", buf);
     match buf[..2] {
-        [0x05, 0xff] => {
-            return Err(io::Error::new(
-                ErrorKind::Other,
-                "auth required by socks server",
-            ))
-        }
+        // 0xff: no acceptable method
+        [0x05, 0xff] => err!("auth required by socks server"),
+        // 0x00: no auth required
         [0x05, 0x00] => (),
-        _ => {
-            return Err(io::Error::new(
-                ErrorKind::Other,
-                "unrecognized reply from socks server",
-            ))
-        }
+        // 0x02: username/password method
+        [0x05, 0x02] => {
+            if let Some(auth) = user_pass_auth {
+                if auth.username.len() > 255 || auth.password.len() > 255 {
+                    panic!("SOCKSv5 username/password exceeds 255 bytes");
+                }
+                buf.clear();
+                buf.push(0x05);
+                buf.push(auth.username.len() as u8);
+                buf.extend(auth.username.as_bytes());
+                buf.push(auth.password.len() as u8);
+                buf.extend(auth.password.as_bytes());
+                trace!("socks: write auth {:?}", buf);
+                stream.write_all(&buf).await?;
+
+                // Parse response
+                buf.resize(2, 0);
+                stream.read_exact(&mut buf).await?;
+                trace!("socks: read {:?}", buf);
+                if buf != [0x05, 0x00] {
+                    err!("auth rejected by SOCKSv5 server")
+                }
+            } else {
+                err!("missing username/password required by socks server");
+            }
+        },
+        _ => err!("unrecognized reply from socks server"),
     }
 
     // Write the actual request
@@ -88,7 +123,7 @@ where
     stream.read_exact(&mut buf).await?;
     trace!("socks: read reply {:?}", buf);
     if !buf.starts_with(&[0x05, 0x00]) {
-        return Err(io::Error::new(ErrorKind::Other, "socks server reply error"));
+       err!("socks server reply error");
     }
     if buf[3] == 4 {
         // Consume truncted IPv6 address

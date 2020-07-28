@@ -98,3 +98,11 @@ args:
         value_name: LUA-SCRIPT
         takes_value: true
         help: Custom Lua script caculating score.
+    - max-wait:
+        long: max-wait
+        value_name: SECONDS
+        takes_value: true
+        default_value: "4"
+        help: >
+          Max waiting time in seconds for connection establishment before
+          timeout. Applied for both probe & normal proxy connections.

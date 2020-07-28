@@ -21,7 +21,6 @@ use std::{
 };
 use tokio::net::TcpStream;
 
-const DEFAULT_MAX_WAIT_MILLILS: u64 = 4_000;
 const GRAPHITE_PATH_PREFIX: &str = "moproxy.proxy_servers";
 
 #[derive(Hash, Eq, PartialEq, Copy, Clone, Debug, Serialize)]
@@ -329,11 +328,12 @@ impl ProxyServerConfig {
         test_dns: SocketAddr,
         score_base: Option<i32>,
         listen_ports: Option<HashSet<u16>>,
+        max_wait: Duration,
     ) -> Self {
         Self {
             test_dns,
+            max_wait,
             listen_ports: listen_ports.unwrap_or_default(),
-            max_wait: Duration::from_millis(DEFAULT_MAX_WAIT_MILLILS),
             score_base: score_base.unwrap_or(0),
         }
     }
@@ -344,6 +344,7 @@ impl ProxyServer {
         addr: SocketAddr,
         proto: ProxyProto,
         test_dns: SocketAddr,
+        max_wait: Duration,
         listen_ports: Option<HashSet<u16>>,
         tag: Option<&str>,
         score_base: Option<i32>,
@@ -365,19 +366,19 @@ impl ProxyServer {
                 }
             }
             .into_boxed_str(),
-            config: ProxyServerConfig::new(test_dns, score_base, listen_ports).into(),
+            config: ProxyServerConfig::new(test_dns, score_base, listen_ports, max_wait).into(),
             status: Default::default(),
             traffic: Default::default(),
         }
     }
 
-    pub fn direct() -> Self {
+    pub fn direct(max_wait: Duration) -> Self {
         let stub_addr = "0.0.0.0:0".parse().unwrap();
         Self {
             addr: stub_addr,
             proto: ProxyProto::Direct,
             tag: "__DIRECT__".into(),
-            config: ProxyServerConfig::new(stub_addr, None, None).into(),
+            config: ProxyServerConfig::new(stub_addr, None, None, max_wait).into(),
             status: Default::default(),
             traffic: Default::default(),
         }

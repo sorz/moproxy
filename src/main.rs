@@ -3,7 +3,15 @@ use futures::{stream, StreamExt};
 use ini::Ini;
 use log::{debug, error, info, warn, LevelFilter};
 use parking_lot::deadlock;
-use std::{collections::HashSet, env, io, io::Write, net::SocketAddr, str::FromStr, sync::Arc};
+use std::{
+    collections::HashSet,
+    env,
+    io::{self, Write},
+    net::SocketAddr,
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
+};
 #[cfg(all(feature = "web_console", unix))]
 use tokio::net::UnixListener;
 #[cfg(unix)]
@@ -198,7 +206,7 @@ async fn main() {
 
     // Optional direct connect
     let direct_server = if allow_direct {
-        Some(Arc::new(ProxyServer::direct()))
+        Some(Arc::new(ProxyServer::direct(parse_max_wait(&args))))
     } else {
         None
     };
@@ -289,6 +297,7 @@ async fn handle_client(
 
 struct ServerListCfg {
     default_test_dns: SocketAddr,
+    default_max_wait: Duration,
     cli_servers: Vec<Arc<ProxyServer>>,
     path: Option<String>,
     listen_ports: HashSet<u16>,
@@ -301,6 +310,8 @@ impl ServerListCfg {
             .unwrap()
             .parse()
             .expect("not a valid socket address");
+        let default_max_wait = parse_max_wait(args);
+
         let mut cli_servers = vec![];
         if let Some(s) = args.values_of("socks5-servers") {
             for s in s.map(parse_server) {
@@ -308,6 +319,7 @@ impl ServerListCfg {
                     s.expect("not a valid SOCKSv5 server"),
                     ProxyProto::socks5(false),
                     default_test_dns,
+                    default_max_wait,
                     None,
                     None,
                     None,
@@ -320,6 +332,7 @@ impl ServerListCfg {
                     s.expect("not a valid HTTP server"),
                     ProxyProto::http(false),
                     default_test_dns,
+                    default_max_wait,
                     None,
                     None,
                     None,
@@ -335,6 +348,7 @@ impl ServerListCfg {
 
         ServerListCfg {
             default_test_dns,
+            default_max_wait,
             cli_servers,
             path,
             listen_ports,
@@ -361,6 +375,12 @@ impl ServerListCfg {
                     .parse()
                     .or(Err("not a valid socket address"))?
                     .unwrap_or(self.default_test_dns);
+                let max_wait = props
+                    .get("max wait")
+                    .parse()
+                    .or(Err("not a valid number"))?
+                    .map(Duration::from_secs)
+                    .unwrap_or(self.default_max_wait);
                 let listen_ports = if let Some(ports) = props.get("listen ports") {
                     let ports = ports
                         .split(|c| c == ' ' || c == ',')
@@ -402,7 +422,8 @@ impl ServerListCfg {
                     }
                     _ => return Err("unknown proxy protocol"),
                 };
-                let server = ProxyServer::new(addr, proto, test_dns, listen_ports, tag, base);
+                let server =
+                    ProxyServer::new(addr, proto, test_dns, max_wait, listen_ports, tag, base);
                 servers.push(Arc::new(server));
             }
         }
@@ -421,4 +442,12 @@ fn parse_server(addr: &str) -> Result<SocketAddr, &'static str> {
         format!("127.0.0.1:{}", addr).parse()
     }
     .or(Err("not a valid server address"))
+}
+
+fn parse_max_wait(args: &clap::ArgMatches) -> Duration {
+    args.value_of("max-wait")
+        .parse()
+        .expect("not a valid number")
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(4))
 }

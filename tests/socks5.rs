@@ -35,7 +35,7 @@ async fn test_socks5_domain() {
     let mut stream = TcpStream::connect(&addr).await.unwrap();
     let dest = ("example.com", 80).into();
     let payload = b"early-payload";
-    handshake(&mut stream, &dest, Some(payload), false)
+    handshake(&mut stream, &dest, Some(payload), false, &None)
         .await
         .unwrap();
     let mut buf = [0u8; 128];
@@ -80,7 +80,7 @@ async fn test_socks5_ipv6() {
     let mut stream = TcpStream::connect(&addr).await.unwrap();
     let dest = "[2001:db8::1]:80".parse::<SocketAddr>().unwrap().into();
     let payload = b"early-payload";
-    handshake(&mut stream, &dest, Some(payload), false)
+    handshake(&mut stream, &dest, Some(payload), false, &None)
         .await
         .unwrap();
     let mut buf = [0u8; 128];

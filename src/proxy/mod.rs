@@ -327,6 +327,7 @@ impl ProxyProto {
     }
 
     pub fn socks5_with_auth(username: String, password: String) -> Self {
+        debug!("socks5 with auth user: {}", username);
         let user_pass_auth = Some(SocksUserPassAuthCredential { username, password });
         ProxyProto::Socks5 {
             fake_handshaking: false,

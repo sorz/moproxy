@@ -69,7 +69,7 @@ where
         buf.extend(&[0x05, 0x01, 0x00])
     } else {
         // Or, include 0x02 (username/password auth)
-        buf.extend(&[0x05, 0x01, 0x00, 0x02])
+        buf.extend(&[0x05, 0x02, 0x00, 0x02])
     };
     trace!("socks: write {:?}", buf);
     stream.write_all(&buf).await?;
@@ -90,7 +90,7 @@ where
                     panic!("SOCKSv5 username/password exceeds 255 bytes");
                 }
                 buf.clear();
-                buf.push(0x05);
+                buf.push(0x01); // version
                 buf.push(auth.username.len() as u8);
                 buf.extend(auth.username.as_bytes());
                 buf.push(auth.password.len() as u8);
@@ -102,7 +102,7 @@ where
                 buf.resize(2, 0);
                 stream.read_exact(&mut buf).await?;
                 trace!("socks: read {:?}", buf);
-                if buf != [0x05, 0x00] {
+                if buf != [0x01, 0x00] {
                     err!("auth rejected by SOCKSv5 server")
                 }
             } else {

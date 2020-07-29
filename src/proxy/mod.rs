@@ -49,7 +49,6 @@ pub enum ProxyProto {
     Direct,
 }
 
-
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize)]
 pub struct SocksUserPassAuthCredential {
     username: String,
@@ -321,7 +320,18 @@ impl ToLua<'_> for Traffic {
 
 impl ProxyProto {
     pub fn socks5(fake_handshaking: bool) -> Self {
-        ProxyProto::Socks5 { fake_handshaking, user_pass_auth: None }
+        ProxyProto::Socks5 {
+            fake_handshaking,
+            user_pass_auth: None,
+        }
+    }
+
+    pub fn socks5_with_auth(username: String, password: String) -> Self {
+        let user_pass_auth = Some(SocksUserPassAuthCredential { username, password });
+        ProxyProto::Socks5 {
+            fake_handshaking: false,
+            user_pass_auth,
+        }
     }
 
     pub fn http(connect_with_payload: bool) -> Self {
@@ -413,8 +423,12 @@ impl ProxyServer {
 
         match &self.proto {
             ProxyProto::Direct => unimplemented!(),
-            ProxyProto::Socks5 { fake_handshaking, user_pass_auth } => {
-                socks5::handshake(&mut stream, &addr, data, *fake_handshaking, user_pass_auth).await?
+            ProxyProto::Socks5 {
+                fake_handshaking,
+                user_pass_auth,
+            } => {
+                socks5::handshake(&mut stream, &addr, data, *fake_handshaking, user_pass_auth)
+                    .await?
             }
             ProxyProto::Http {
                 connect_with_payload,

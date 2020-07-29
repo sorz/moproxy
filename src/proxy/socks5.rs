@@ -108,7 +108,7 @@ where
             } else {
                 err!("missing username/password required by socks server");
             }
-        },
+        }
         _ => err!("unrecognized reply from socks server"),
     }
 
@@ -123,7 +123,7 @@ where
     stream.read_exact(&mut buf).await?;
     trace!("socks: read reply {:?}", buf);
     if !buf.starts_with(&[0x05, 0x00]) {
-       err!("socks server reply error");
+        err!("socks server reply error");
     }
     if buf[3] == 4 {
         // Consume truncted IPv6 address

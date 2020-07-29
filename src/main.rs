@@ -410,7 +410,19 @@ impl ServerListCfg {
                             .parse()
                             .or(Err("not a boolean value"))?
                             .unwrap_or(false);
-                        ProxyProto::socks5(fake_hs)
+                        let username = props.get("socks username").unwrap_or("");
+                        let password = props.get("socks password").unwrap_or("");
+                        match (username.len(), password.len()) {
+                            (0, 0) => ProxyProto::socks5(fake_hs),
+                            (0, _) | (_, 0) => return Err("socks username/password is empty"),
+                            (u, p) if u > 255 || p > 255 => {
+                                return Err("socks username/password too long")
+                            }
+                            _ => ProxyProto::socks5_with_auth(
+                                username.to_string(),
+                                password.to_string(),
+                            ),
+                        }
                     }
                     "http" => {
                         let cwp = props

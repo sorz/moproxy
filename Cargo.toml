@@ -1,6 +1,6 @@
 [package]
 name = "moproxy"
-version = "0.3.5"
+version = "0.3.6"
 authors = ["sorz <me@sorz.org>"]
 edition = "2018"
 description = "Transparent TCP to SOCKSv5/HTTP proxy on Linux written in Rust"
@@ -17,15 +17,15 @@ net2 = "0.2"
 clap = { version = "2.33", features = ["yaml", "color"] }
 log = "0.4"
 env_logger = "0.7"
-serde = {version = "1.0", features = ["rc"]}
+serde = { version = "1.0", features = ["rc"] }
 serde_json = "1.0"
 serde_derive = "1.0"
 serde_with = "1.4.0"
 rust-ini = "0.15"
-hyper = {version = "0.13", optional = true, default-features = false, features = ["stream", "tcp"]}
+hyper = { version = "0.13", optional = true, default-features = false, features = ["stream", "tcp"] }
 parking_lot = { version = "0.11", features = ["serde", "deadlock_detection"] }
 http = "0.2"
-prettytable-rs = {version = "0.8", default-features = false}
+prettytable-rs = { version = "0.8", default-features = false }
 regex = "1"
 lazy_static = "1.4"
 number_prefix = "0.4"
@@ -37,7 +37,7 @@ zip = { version = "0.5", optional = true, default-features = false, features = [
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
-nix = "0.17"
+nix = "0.18"
 sd-notify = { version = "0.1.1", optional = true }
 
 [features]
@@ -48,7 +48,7 @@ score_script = ["rlua"]
 systemd = ["sd-notify"]
 
 [build-dependencies]
-reqwest = { version = "0.10.6", features = ["blocking"] }
+reqwest = { version = "0.10", features = ["blocking"] }
 
 [package.metadata.deb]
 section = "net"
@@ -61,4 +61,3 @@ assets = [
     ["conf/proxy.ini", "etc/moproxy/", "644"],
     ["conf/simple_score.lua", "etc/moproxy/", "644"],
 ]
-

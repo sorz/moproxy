@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-linux:
-    name: Build for Linux
+    name: Build for
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -34,7 +34,7 @@ jobs:
         with:
           command: build
           args: --release --all-features
-      - run: xz -kfS "_${GITHUB_REF#*/v}_windows_amd64.exe.xz" target/release/moproxy.exe
+      - run: xz -kf target/release/moproxy.exe > "moproxy_${GITHUB_REF#*/v}_windows_amd64.exe.xz"
       - uses: ncipollo/release-action@v1
         with:
           artifacts: target/release/*.exe.xz

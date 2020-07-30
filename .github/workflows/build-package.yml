@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-linux:
-    name: Build and upload binaries and pre-build packages
+    name: Build for Linux
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -24,8 +24,9 @@ jobs:
         with:
           artifacts: target/debian/*.deb,target/release/*.bin.xz
           token: ${{ secrets.GITHUB_TOKEN }}
+          allowUpdates: true
   build-windows:
-    name: Build and upload binary for Windows
+    name: Build for Windows
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v2
@@ -38,4 +39,4 @@ jobs:
         with:
           artifacts: target/release/*.exe.xz
           token: ${{ secrets.GITHUB_TOKEN }}
-
+          allowUpdates: true

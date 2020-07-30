@@ -52,6 +52,7 @@ pub enum ProxyProto {
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize)]
 pub struct SocksUserPassAuthCredential {
     username: String,
+    #[serde(skip_serializing)]
     password: String,
 }
 

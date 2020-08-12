@@ -4,8 +4,7 @@ After=network.target
 
 [Service]
 Type=notify
-User=nobody
-Group=nobody
+DynamicUser=yes
 
 WatchdogSec=5
 Restart=on-failure

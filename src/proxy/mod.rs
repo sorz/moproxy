@@ -6,7 +6,6 @@ pub mod socks5;
 use log::debug;
 use parking_lot::{Mutex, RwLock};
 use serde::{Serialize, Serializer};
-use serde_derive::Serialize;
 use std::{
     cmp,
     collections::HashSet,

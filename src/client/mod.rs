@@ -313,13 +313,19 @@ impl ConnectedClient {
             server,
         } = self;
         // TODO: make keepalive configurable
+        // FIXME: set_cookies
+        /*
         let timeout = Some(Duration::from_secs(180));
+        FIXME: keepalive
+        https://github.com/tokio-rs/tokio/issues/3109
+
         if let Err(e) = left
             .set_keepalive(timeout)
             .and(right.set_keepalive(timeout))
         {
             warn!("fail to set keepalive: {}", e);
         }
+        */
         server.update_stats_conn_open();
         match pipe(left, right, server.clone()).await {
             Ok(amt) => {

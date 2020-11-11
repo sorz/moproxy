@@ -244,7 +244,7 @@ async fn main() {
     systemd::notify_ready(); // TODO: ready after first probe?
 
     // The proxy server
-    let mut clients = stream::select_all(listeners.iter_mut().map(|l| l.incoming()));
+    let mut clients = stream::select_all(listeners.iter_mut());
     while let Some(sock) = clients.next().await {
         let direct = direct_server.clone();
         let servers = monitor.servers();

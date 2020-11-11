@@ -8,7 +8,7 @@ use tokio::{
 
 #[tokio::test]
 async fn test_socks5_domain() {
-    let mut listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
     tokio::spawn(async move {
@@ -45,7 +45,7 @@ async fn test_socks5_domain() {
 
 #[tokio::test]
 async fn test_socks5_ipv6() {
-    let mut listener = TcpListener::bind("[::1]:0").await.unwrap();
+    let listener = TcpListener::bind("[::1]:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
     tokio::spawn(async move {

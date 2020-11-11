@@ -12,7 +12,7 @@ use std::{
     thread_local,
 };
 use tokio::{
-    io::{AsyncRead, AsyncWrite},
+    io::{AsyncRead, AsyncWrite, ReadBuf},
     net::TcpStream,
 };
 
@@ -90,9 +90,18 @@ impl StreamWithBuffer {
         let stream = Pin::new(&mut self.stream);
 
         let n = try_poll!(if let Some(ref mut buf) = self.buf {
-            stream.poll_read(cx, buf)
+            let mut buf = ReadBuf::new(buf);
+            stream
+                .poll_read(cx, &mut buf)
+                .map_ok(|_| buf.filled().len())
         } else {
-            SHARED_BUFFER.with(|buf| stream.poll_read(cx, &mut buf.borrow_mut()[..]))
+            SHARED_BUFFER.with(|buf| {
+                let shared_buf = &mut buf.borrow_mut()[..];
+                let mut buf = ReadBuf::new(shared_buf);
+                stream
+                    .poll_read(cx, &mut buf)
+                    .map_ok(|_| buf.filled().len())
+            })
         });
 
         if n == 0 {

@@ -22,7 +22,7 @@ async fn try_connect(
 ) -> io::Result<TcpStream> {
     let max_wait = server.max_wait();
     // waiting for proxy server connected
-    let mut stream = timeout(max_wait, server.connect(&dest, pending_data)).await??;
+    let stream = timeout(max_wait, server.connect(&dest, pending_data)).await??;
 
     // waiting for response data
     if wait_response {

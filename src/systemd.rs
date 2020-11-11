@@ -1,7 +1,7 @@
 use log::{debug, trace, warn};
 use sd_notify::{notify, NotifyState};
 use std::{env, process, time::Duration};
-use tokio::time::delay_for;
+use tokio::time::sleep;
 
 fn notify_enabled() -> bool {
     env::var_os("NOTIFY_SOCKET").is_some()
@@ -44,6 +44,6 @@ pub async fn watchdog_loop(timeout: Duration) -> ! {
         if notify(false, &[NotifyState::Watchdog]).is_err() {
             warn!("fail to poke watchdog");
         }
-        delay_for(timeout).await;
+        sleep(timeout).await;
     }
 }

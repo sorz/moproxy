@@ -430,7 +430,16 @@ impl ServerListCfg {
                             .parse()
                             .or(Err("not a boolean value"))?
                             .unwrap_or(false);
-                        ProxyProto::http(cwp)
+                        let username = props.get("http username").unwrap_or("");
+                        let password = props.get("http password").unwrap_or("");
+                        match (username.len(), password.len()) {
+                            (0, 0) => ProxyProto::http(cwp),
+                            _ => ProxyProto::http_with_auth(
+                                cwp,
+                                username.to_string(),
+                                password.to_string(),
+                            ),
+                        }
                     }
                     _ => return Err("unknown proxy protocol"),
                 };

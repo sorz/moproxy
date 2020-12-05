@@ -9,6 +9,8 @@ use tokio::{
 
 use crate::proxy::{Address, Destination};
 
+use super::UserPassAuthCredential;
+
 macro_rules! ensure_200 {
     ($code:expr) => {
         if $code != 200 {
@@ -27,11 +29,12 @@ pub async fn handshake<T>(
     addr: &Destination,
     data: Option<T>,
     with_playload: bool,
+    user_pass_auth: &Option<UserPassAuthCredential>,
 ) -> io::Result<()>
 where
     T: AsRef<[u8]> + 'static,
 {
-    let mut buf = build_request(addr).into_bytes();
+    let mut buf = build_request(addr, user_pass_auth).into_bytes();
     stream.write_all(&buf).await?;
 
     if with_playload {
@@ -90,7 +93,7 @@ where
     Ok(())
 }
 
-fn build_request(addr: &Destination) -> String {
+fn build_request(addr: &Destination, user_pass_auth: &Option<UserPassAuthCredential>) -> String {
     let port = addr.port;
     let host = match addr.host {
         Address::Ip(ip) => match ip {
@@ -99,10 +102,26 @@ fn build_request(addr: &Destination) -> String {
         },
         Address::Domain(ref s) => format!("{}:{}", s, port),
     };
-    format!(
-        "CONNECT {host} HTTP/1.1\r\n\
-         Host: {host}\r\n\
-         Connection: close\r\n\r\n",
-        host = host
-    )
+
+    if let Some(user_pass_auth) = user_pass_auth {
+        let auth = format!(
+            "{username}:{password}",
+            username = user_pass_auth.username,
+            password = user_pass_auth.password
+        );
+        let basic_auth = base64::encode(&auth);
+        format!(
+            "CONNECT {host} HTTP/1.1\r\n\
+             Host: {host}\r\n\
+             Proxy-Authorization: Basic {basic_auth}\r\n\r\n",
+            host = host,
+            basic_auth = basic_auth,
+        )
+    } else {
+        format!(
+            "CONNECT {host} HTTP/1.1\r\n\
+             Host: {host}\r\n\r\n",
+            host = host
+        )
+    }
 }

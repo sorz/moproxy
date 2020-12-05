@@ -808,6 +808,7 @@ dependencies = [
 name = "moproxy"
 version = "0.3.6"
 dependencies = [
+ "base64 0.12.3",
  "bytes 0.6.0",
  "clap",
  "env_logger",

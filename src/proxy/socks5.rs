@@ -7,14 +7,14 @@ use tokio::{
     net::TcpStream,
 };
 
-use super::SocksUserPassAuthCredential;
+use super::UserPassAuthCredential;
 
 pub async fn handshake<T>(
     stream: &mut TcpStream,
     addr: &Destination,
     data: Option<T>,
     fake_handshaking: bool,
-    user_pass_auth: &Option<SocksUserPassAuthCredential>,
+    user_pass_auth: &Option<UserPassAuthCredential>,
 ) -> io::Result<()>
 where
     T: AsRef<[u8]>,
@@ -58,7 +58,7 @@ pub async fn full_handshake<T>(
     stream: &mut TcpStream,
     addr: &Destination,
     data: Option<T>,
-    user_pass_auth: &Option<SocksUserPassAuthCredential>,
+    user_pass_auth: &Option<UserPassAuthCredential>,
 ) -> io::Result<()>
 where
     T: AsRef<[u8]>,

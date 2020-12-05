@@ -31,7 +31,7 @@ pub enum ProxyProto {
         /// This saves [TODO] round-trip delay but may cause problem on some
         /// servers.
         fake_handshaking: bool,
-        user_pass_auth: Option<SocksUserPassAuthCredential>,
+        user_pass_auth: Option<UserPassAuthCredential>,
     },
     #[serde(rename = "HTTP")]
     Http {
@@ -44,12 +44,13 @@ pub enum ProxyProto {
         /// >> semantics; sending a payload body on a CONNECT request might
         /// cause some existing implementations to reject the request.
         connect_with_payload: bool,
+        user_pass_auth: Option<UserPassAuthCredential>,
     },
     Direct,
 }
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize)]
-pub struct SocksUserPassAuthCredential {
+pub struct UserPassAuthCredential {
     username: String,
     #[serde(skip_serializing)]
     password: String,
@@ -328,7 +329,7 @@ impl ProxyProto {
 
     pub fn socks5_with_auth(username: String, password: String) -> Self {
         debug!("socks5 with auth user: {}", username);
-        let user_pass_auth = Some(SocksUserPassAuthCredential { username, password });
+        let user_pass_auth = Some(UserPassAuthCredential { username, password });
         ProxyProto::Socks5 {
             fake_handshaking: false,
             user_pass_auth,
@@ -338,6 +339,16 @@ impl ProxyProto {
     pub fn http(connect_with_payload: bool) -> Self {
         ProxyProto::Http {
             connect_with_payload,
+            user_pass_auth: None,
+        }
+    }
+
+    pub fn http_with_auth(connect_with_payload: bool, username: String, password: String) -> Self {
+        debug!("http with auth user: {}", username);
+        let user_pass_auth = Some(UserPassAuthCredential { username, password });
+        ProxyProto::Http {
+            connect_with_payload,
+            user_pass_auth,
         }
     }
 }
@@ -433,7 +444,17 @@ impl ProxyServer {
             }
             ProxyProto::Http {
                 connect_with_payload,
-            } => http::handshake(&mut stream, &addr, data, *connect_with_payload).await?,
+                user_pass_auth,
+            } => {
+                http::handshake(
+                    &mut stream,
+                    &addr,
+                    data,
+                    *connect_with_payload,
+                    user_pass_auth,
+                )
+                .await?
+            }
         }
         Ok(stream)
     }

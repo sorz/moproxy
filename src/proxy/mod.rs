@@ -56,6 +56,15 @@ pub struct UserPassAuthCredential {
     password: String,
 }
 
+impl UserPassAuthCredential {
+    pub fn new<T: AsRef<str>>(username: T, password: T) -> Self {
+        Self {
+            username: username.as_ref().into(),
+            password: password.as_ref().into(),
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct ProxyServer {
     pub addr: SocketAddr,
@@ -327,28 +336,17 @@ impl ProxyProto {
         }
     }
 
-    pub fn socks5_with_auth(username: String, password: String) -> Self {
-        debug!("socks5 with auth user: {}", username);
-        let user_pass_auth = Some(UserPassAuthCredential { username, password });
+    pub fn socks5_with_auth(credential: UserPassAuthCredential) -> Self {
         ProxyProto::Socks5 {
             fake_handshaking: false,
-            user_pass_auth,
+            user_pass_auth: Some(credential),
         }
     }
 
-    pub fn http(connect_with_payload: bool) -> Self {
+    pub fn http(connect_with_payload: bool, credential: Option<UserPassAuthCredential>) -> Self {
         ProxyProto::Http {
             connect_with_payload,
-            user_pass_auth: None,
-        }
-    }
-
-    pub fn http_with_auth(connect_with_payload: bool, username: String, password: String) -> Self {
-        debug!("http with auth user: {}", username);
-        let user_pass_auth = Some(UserPassAuthCredential { username, password });
-        ProxyProto::Http {
-            connect_with_payload,
-            user_pass_auth,
+            user_pass_auth: credential,
         }
     }
 }
@@ -615,7 +613,7 @@ impl FromStr for ProxyProto {
             // default to disable fake handshaking
             "socks5" | "socksv5" => Ok(ProxyProto::socks5(false)),
             // default to disable connect with payload
-            "http" => Ok(ProxyProto::http(false)),
+            "http" => Ok(ProxyProto::http(false, None)),
             _ => Err(()),
         }
     }

@@ -30,7 +30,7 @@ use moproxy::web;
 use moproxy::{
     client::{Connectable, NewClient},
     monitor::{Monitor, ServerList},
-    proxy::{ProxyProto, ProxyServer},
+    proxy::{ProxyProto, ProxyServer, UserPassAuthCredential},
 };
 
 trait FromOptionStr<E, T: FromStr<Err = E>> {
@@ -330,7 +330,7 @@ impl ServerListCfg {
             for s in s.map(parse_server) {
                 cli_servers.push(Arc::new(ProxyServer::new(
                     s.expect("not a valid HTTP server"),
-                    ProxyProto::http(false),
+                    ProxyProto::http(false, None),
                     default_test_dns,
                     default_max_wait,
                     None,
@@ -418,10 +418,9 @@ impl ServerListCfg {
                             (u, p) if u > 255 || p > 255 => {
                                 return Err("socks username/password too long")
                             }
-                            _ => ProxyProto::socks5_with_auth(
-                                username.to_string(),
-                                password.to_string(),
-                            ),
+                            _ => ProxyProto::socks5_with_auth(UserPassAuthCredential::new(
+                                username, password,
+                            )),
                         }
                     }
                     "http" => {
@@ -430,16 +429,18 @@ impl ServerListCfg {
                             .parse()
                             .or(Err("not a boolean value"))?
                             .unwrap_or(false);
-                        let username = props.get("http username").unwrap_or("");
-                        let password = props.get("http password").unwrap_or("");
-                        match (username.len(), password.len()) {
-                            (0, 0) => ProxyProto::http(cwp),
-                            _ => ProxyProto::http_with_auth(
-                                cwp,
-                                username.to_string(),
-                                password.to_string(),
-                            ),
-                        }
+                        let credential =
+                            match (props.get("http username"), props.get("http password")) {
+                                (None, None) => None,
+                                (Some(user), _) if user.contains(":") => {
+                                    return Err("semicolon (:) in http username")
+                                }
+                                (user, pass) => Some(UserPassAuthCredential::new(
+                                    user.unwrap_or(""),
+                                    pass.unwrap_or(""),
+                                )),
+                            };
+                        ProxyProto::http(cwp, credential)
                     }
                     _ => return Err("unknown proxy protocol"),
                 };

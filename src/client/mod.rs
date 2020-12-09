@@ -82,7 +82,8 @@ impl NewClient {
         #[cfg(target_os = "linux")]
         let dest = get_original_dest(&left)
             .map(SocketAddr::V4)
-            .or_else(|_| get_original_dest6(&left).map(SocketAddr::V6))?;
+            .or_else(|_| get_original_dest6(&left).map(SocketAddr::V6))
+            .or_else(|_| left.local_addr())?;
 
         // No NAT supported, always be our local address
         #[cfg(not(target_os = "linux"))]

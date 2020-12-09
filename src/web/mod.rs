@@ -2,10 +2,10 @@ mod helpers;
 mod prometheus;
 #[cfg(feature = "rich_web")]
 mod rich;
-use futures::{pin_mut, ready};
+use futures::Stream;
 use helpers::{DurationExt, RequestExt};
 use hyper::{
-    server::{accept::Accept, conn::Http},
+    server::{accept::from_stream, conn::Http},
     service::{make_service_fn, service_fn},
     Body, Method, Request, Response, StatusCode,
 };
@@ -18,28 +18,20 @@ use std::{
     error::Error,
     fmt::Write,
     fs,
-    future::Future,
-    io,
     path::Path,
-    pin::Pin,
     sync::Arc,
-    task::{Context, Poll},
     time::{Duration, Instant},
 };
 #[cfg(unix)]
-use tokio::net::{UnixListener, UnixStream};
 use tokio::{
     self,
     io::{AsyncRead, AsyncWrite},
-    net::{TcpListener, TcpStream},
 };
 
 use crate::{
     monitor::{Monitor, Throughput},
     proxy::{Delay, ProxyServer},
 };
-
-pub use hyper::server::accept::from_stream;
 
 #[cfg(feature = "rich_web")]
 lazy_static! {
@@ -235,11 +227,11 @@ fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Res
     }
 }
 
-pub async fn run_server<A>(accept: A, monitor: Monitor)
+pub async fn run_server<S, IO, E>(stream: S, monitor: Monitor)
 where
-    A: Accept,
-    A::Error: Into<Box<dyn Error + Send + Sync>>,
-    A::Conn: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    S: Stream<Item = Result<IO, E>>,
+    E: Into<Box<dyn Error + Send + Sync>>,
+    IO: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     tokio::spawn(monitor.clone().monitor_throughput());
     let start_time = Instant::now();
@@ -254,10 +246,12 @@ where
         }
     });
     let http = Http::new();
+    let accept = from_stream(stream);
     let server = hyper::server::Builder::new(accept, http).serve(make_svc);
     if let Err(e) = server.await {
         warn!("web server error: {}", e);
     }
+    warn!("web server stopped");
 }
 
 /// File on this path will be removed on `drop()`.
@@ -282,53 +276,5 @@ impl<'a> Drop for AutoRemoveFile<'a> {
 impl<'a> AsRef<Path> for &'a AutoRemoveFile<'a> {
     fn as_ref(&self) -> &Path {
         self.path.as_ref()
-    }
-}
-
-pub struct TcpAccept(TcpListener);
-#[cfg(unix)]
-pub struct UnixAccept(UnixListener);
-
-impl From<TcpListener> for TcpAccept {
-    fn from(listener: TcpListener) -> Self {
-        Self(listener)
-    }
-}
-
-#[cfg(unix)]
-impl From<UnixListener> for UnixAccept {
-    fn from(listener: UnixListener) -> Self {
-        Self(listener)
-    }
-}
-
-impl Accept for TcpAccept {
-    type Conn = TcpStream;
-    type Error = io::Error;
-
-    fn poll_accept(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Self::Conn, Self::Error>>> {
-        let accept = self.get_mut().0.accept();
-        pin_mut!(accept);
-        let result = ready!(accept.poll(cx)).map(|(stream, _)| stream);
-        Poll::Ready(Some(result))
-    }
-}
-
-#[cfg(unix)]
-impl Accept for UnixAccept {
-    type Conn = UnixStream;
-    type Error = io::Error;
-
-    fn poll_accept(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Result<Self::Conn, Self::Error>>> {
-        let accept = self.get_mut().0.accept();
-        pin_mut!(accept);
-        let result = ready!(accept.poll(cx)).map(|(stream, _)| stream);
-        Poll::Ready(Some(result))
     }
 }

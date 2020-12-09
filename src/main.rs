@@ -143,20 +143,17 @@ async fn main() {
             {
                 if http_addr.starts_with('/') {
                     let sock = web::AutoRemoveFile::new(&http_addr);
-                    let accept: web::UnixAccept = UnixListener::bind(&sock)
-                        .expect("fail to bind web server")
-                        .into();
-                    let serv = web::run_server(accept, monitor.clone());
+                    let listener = UnixListener::bind(&sock).expect("fail to bind web server");
+                    let serv = web::run_server(listener, monitor.clone());
                     tokio::spawn(serv);
                     sock_file = Some(sock);
                 }
             }
             if !http_addr.starts_with('/') || cfg!(not(unix)) {
-                let accept: web::TcpAccept = TcpListener::bind(&http_addr)
+                let listener = TcpListener::bind(&http_addr)
                     .await
-                    .expect("fail to bind web server")
-                    .into();
-                let serv = web::run_server(accept, monitor.clone());
+                    .expect("fail to bind web server");
+                let serv = web::run_server(listener, monitor.clone());
                 tokio::spawn(serv);
             }
         }

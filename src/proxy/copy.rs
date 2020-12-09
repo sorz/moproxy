@@ -1,7 +1,7 @@
 use log::{debug, trace};
 use std::{
     cell::RefCell,
-    fmt,
+    cmp, fmt,
     future::Future,
     io,
     net::Shutdown,
@@ -55,10 +55,13 @@ macro_rules! try_poll {
     };
 }
 
-const BUF_SIZE: usize = 4096;
+// The number of shared buffers is fixed (equals to no. of CPU threads),
+// so we can use a larger one for better performance.
+const SHARED_BUF_SIZE: usize = 1024 * 64;
+const PRIVATE_BUF_SIZE: usize = 1024 * 8;
 
 thread_local!(
-    static SHARED_BUFFER: RefCell<[u8; BUF_SIZE]> = RefCell::new([0u8; BUF_SIZE]);
+    static SHARED_BUFFER: RefCell<[u8; SHARED_BUF_SIZE]> = RefCell::new([0u8; SHARED_BUF_SIZE]);
 );
 
 struct StreamWithBuffer {
@@ -142,7 +145,7 @@ impl StreamWithBuffer {
                 trace!("allocate private buffer for {} bytes", n);
                 SHARED_BUFFER.with(|shared_buf| {
                     let shared_buf = shared_buf.borrow();
-                    let mut buf = vec![0; shared_buf.len()];
+                    let mut buf = vec![0; cmp::max(PRIVATE_BUF_SIZE, n)];
                     buf[..n].copy_from_slice(&shared_buf[self.pos..self.cap]);
                     self.pos = 0;
                     self.cap = n;
@@ -151,6 +154,20 @@ impl StreamWithBuffer {
                 Poll::Pending
             }
             _ => result,
+        }
+    }
+
+    pub fn shrink_private_buffer_if_need(&mut self) {
+        assert!(self.is_empty());
+        if let Some(ref mut buf) = self.buf {
+            if buf.len() > PRIVATE_BUF_SIZE {
+                trace!(
+                    "shrink private buffer from {} to {} bytes",
+                    buf.len(),
+                    PRIVATE_BUF_SIZE
+                );
+                *buf = vec![0; PRIVATE_BUF_SIZE].into_boxed_slice()
+            }
         }
     }
 }
@@ -198,10 +215,13 @@ impl BiPipe {
                 server.add_traffic(amt);
                 *traffic += amt;
             }
+
             // write out if buffer is not empty
             while !reader.is_empty() {
                 try_poll!(reader.poll_write_buffer_to(cx, &mut writer.stream));
             }
+            reader.shrink_private_buffer_if_need();
+
             // flush and does half close if seen eof
             if reader.read_eof {
                 try_poll!(Pin::new(&mut writer.stream).poll_flush(cx));

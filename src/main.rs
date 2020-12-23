@@ -1,5 +1,5 @@
 use clap::{load_yaml, AppSettings};
-use futures::{stream, StreamExt};
+use futures_util::{stream, StreamExt};
 use ini::Ini;
 use log::{debug, error, info, warn, LevelFilter};
 use parking_lot::deadlock;

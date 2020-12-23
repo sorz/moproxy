@@ -2,7 +2,7 @@ mod helpers;
 mod prometheus;
 #[cfg(feature = "rich_web")]
 mod rich;
-use futures::Stream;
+use futures_core::Stream;
 use helpers::{DurationExt, RequestExt};
 use hyper::{
     server::{accept::from_stream, conn::Http},

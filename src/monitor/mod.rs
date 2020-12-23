@@ -2,7 +2,7 @@ mod graphite;
 #[cfg(feature = "score_script")]
 use rlua::prelude::*;
 mod traffic;
-use futures::future::join_all;
+use futures_util::future::join_all;
 use log::{debug, warn};
 use parking_lot::Mutex;
 use rand::{self, Rng};

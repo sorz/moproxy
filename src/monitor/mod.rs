@@ -271,7 +271,7 @@ async fn alive_test(server: &ProxyServer) -> io::Result<Duration> {
     let result = timeout(server.max_wait(), async {
         let mut stream = server.connect(&test_dns, Some(request)).await?;
         stream.read_exact(&mut buf).await?;
-        stream.shutdown(Shutdown::Both)
+        stream.into_std()?.shutdown(Shutdown::Both)
     })
     .await;
 

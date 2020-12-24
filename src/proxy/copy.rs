@@ -4,7 +4,6 @@ use std::{
     cmp, fmt,
     future::Future,
     io,
-    net::Shutdown,
     ops::Neg,
     pin::Pin,
     sync::Arc,
@@ -224,9 +223,11 @@ impl BiPipe {
 
             // flush and does half close if seen eof
             if reader.read_eof {
-                try_poll!(Pin::new(&mut writer.stream).poll_flush(cx));
-                if let Err(err) = writer.stream.shutdown(Shutdown::Write) {
-                    debug!("fail to shutdown: {}", err);
+                // shutdown implies flush
+                match Pin::new(&mut writer.stream).poll_shutdown(cx) {
+                    Poll::Pending => return Poll::Pending,
+                    Poll::Ready(Ok(_)) => (),
+                    Poll::Ready(Err(err)) => debug!("fail to shutdown: {}", err),
                 }
                 reader.all_done = true;
                 return Poll::Ready(Ok(()));

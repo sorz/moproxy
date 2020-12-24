@@ -31,6 +31,7 @@ use moproxy::{
     client::{Connectable, NewClient},
     monitor::{Monitor, ServerList},
     proxy::{ProxyProto, ProxyServer, UserPassAuthCredential},
+    stream::{TcpListenerStream, UnixListenerStream},
 };
 
 trait FromOptionStr<E, T: FromStr<Err = E>> {
@@ -144,7 +145,7 @@ async fn main() {
                 if http_addr.starts_with('/') {
                     let sock = web::AutoRemoveFile::new(&http_addr);
                     let listener = UnixListener::bind(&sock).expect("fail to bind web server");
-                    let serv = web::run_server(listener, monitor.clone());
+                    let serv = web::run_server(UnixListenerStream(listener), monitor.clone());
                     tokio::spawn(serv);
                     sock_file = Some(sock);
                 }
@@ -153,7 +154,7 @@ async fn main() {
                 let listener = TcpListener::bind(&http_addr)
                     .await
                     .expect("fail to bind web server");
-                let serv = web::run_server(listener, monitor.clone());
+                let serv = web::run_server(TcpListenerStream(listener), monitor.clone());
                 tokio::spawn(serv);
             }
         }
@@ -171,7 +172,7 @@ async fn main() {
     let mut signals = signal(SignalKind::hangup()).expect("cannot catch signal");
     #[cfg(unix)]
     tokio::spawn(async move {
-        while signals.next().await.is_some() {
+        while signals.recv().await.is_some() {
             #[cfg(all(feature = "systemd", target_os = "linux"))]
             systemd::notify_realoding();
 
@@ -225,7 +226,7 @@ async fn main() {
                 check tcp_allowed_congestion_control?",
             );
         }
-        listeners.push(listener);
+        listeners.push(TcpListenerStream(listener));
     }
 
     // Watchdog
@@ -429,7 +430,7 @@ impl ServerListCfg {
                         let credential =
                             match (props.get("http username"), props.get("http password")) {
                                 (None, None) => None,
-                                (Some(user), _) if user.contains(":") => {
+                                (Some(user), _) if user.contains(':') => {
                                     return Err("semicolon (:) in http username")
                                 }
                                 (user, pass) => Some(UserPassAuthCredential::new(

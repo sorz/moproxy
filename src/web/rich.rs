@@ -17,12 +17,7 @@ impl ResourceBundle {
     }
 
     pub fn get(&self, path: &str) -> Option<(&'static str, Vec<u8>)> {
-        let name = if path.starts_with('/') {
-            &path[1..]
-        } else {
-            &path
-        };
-
+        let name = path.strip_prefix('/').unwrap_or(path);
         let mut zip = self.zip.lock();
         let mut file = zip.by_name(name).ok()?;
         if !file.is_file() {

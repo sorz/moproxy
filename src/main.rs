@@ -2,7 +2,6 @@ use clap::{load_yaml, AppSettings};
 use futures_util::{stream, StreamExt};
 use ini::Ini;
 use log::{debug, error, info, warn, LevelFilter};
-use parking_lot::deadlock;
 use std::{
     collections::HashSet,
     env,
@@ -23,16 +22,16 @@ use tokio::{
 
 #[cfg(all(feature = "systemd", target_os = "linux"))]
 use moproxy::systemd;
-#[cfg(target_os = "linux")]
-use moproxy::tcp::set_congestion;
 #[cfg(feature = "web_console")]
 use moproxy::web;
 use moproxy::{
     client::{Connectable, NewClient},
     monitor::{Monitor, ServerList},
     proxy::{ProxyProto, ProxyServer, UserPassAuthCredential},
-    stream::{TcpListenerStream, UnixListenerStream},
+    stream::TcpListenerStream,
 };
+#[cfg(target_os = "linux")]
+use moproxy::{stream::UnixListenerStream, tcp::set_congestion};
 
 trait FromOptionStr<E, T: FromStr<Err = E>> {
     fn parse(&self) -> Result<Option<T>, E>;
@@ -177,7 +176,7 @@ async fn main() {
             systemd::notify_realoding();
 
             // feature: check deadlocks on signal
-            let deadlocks = deadlock::check_deadlock();
+            let deadlocks = parking_lot::deadlock::check_deadlock();
             if !deadlocks.is_empty() {
                 error!("{} deadlocks detected!", deadlocks.len());
                 for (i, threads) in deadlocks.iter().enumerate() {

@@ -22,7 +22,6 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-#[cfg(unix)]
 use tokio::{
     self,
     io::{AsyncRead, AsyncWrite},

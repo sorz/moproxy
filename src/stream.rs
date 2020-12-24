@@ -3,7 +3,9 @@ use std::{
     io::Result,
     task::{Context, Poll},
 };
-use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
+use tokio::net::{TcpListener, TcpStream};
+#[cfg(unix)]
+use tokio::net::{UnixListener, UnixStream};
 
 macro_rules! impl_stream {
     ($name:ident : $listener:ty => $stream:ty) => {
@@ -24,4 +26,6 @@ macro_rules! impl_stream {
 }
 
 impl_stream!(TcpListenerStream: TcpListener => TcpStream);
+
+#[cfg(unix)]
 impl_stream!(UnixListenerStream: UnixListener => UnixStream);

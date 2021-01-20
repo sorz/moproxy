@@ -21,17 +21,17 @@ use tokio::{
 };
 
 #[cfg(all(feature = "systemd", target_os = "linux"))]
-use moproxy::systemd;
+use moproxy::linux::systemd;
 #[cfg(feature = "web_console")]
 use moproxy::web;
 use moproxy::{
     client::{Connectable, NewClient},
+    futures_stream::TcpListenerStream,
     monitor::{Monitor, ServerList},
     proxy::{ProxyProto, ProxyServer, UserPassAuthCredential},
-    stream::TcpListenerStream,
 };
 #[cfg(target_os = "linux")]
-use moproxy::{stream::UnixListenerStream, tcp::set_congestion};
+use moproxy::{futures_stream::UnixListenerStream, linux::tcp::set_congestion};
 
 trait FromOptionStr<E, T: FromStr<Err = E>> {
     fn parse(&self) -> Result<Option<T>, E>;

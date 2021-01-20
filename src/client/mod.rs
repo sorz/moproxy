@@ -1,5 +1,5 @@
 mod connect;
-mod tls;
+mod tls_parser;
 use bytes::{Bytes, BytesMut};
 use log::{debug, info, warn};
 use std::{
@@ -12,10 +12,9 @@ use tokio::{
 };
 
 #[cfg(target_os = "linux")]
-use crate::tcp::{get_original_dest, get_original_dest6};
+use crate::linux::tcp::{get_original_dest, get_original_dest6};
 use crate::{
     client::connect::try_connect_all,
-    client::tls::parse_client_hello,
     monitor::ServerList,
     proxy::copy::pipe,
     proxy::{Address, Destination, ProxyServer},
@@ -179,7 +178,7 @@ impl NewClient {
         if let Ok(len) = timeout(wait, left.read(&mut buf)).await {
             buf.truncate(len?);
             // only TLS is safe to duplicate requests.
-            match parse_client_hello(&buf) {
+            match tls_parser::parse_client_hello(&buf) {
                 Err(err) => info!("fail to parse hello: {}", err),
                 Ok(hello) => {
                     has_full_tls_hello = true;

@@ -1,4 +1,4 @@
-use log::{debug, trace, warn};
+use log::{debug, trace};
 use std::{
     cell::RefCell,
     cmp, fmt,
@@ -275,14 +275,12 @@ impl Future for BiPipe {
                         Poll::Pending
                     }
                     Some(deadline) if !deadline.is_elapsed() => {
-                        // FIXME: change warn to debug/trace before release
-                        warn!("(BiPipe) reset half-close timer");
+                        trace!("(BiPipe) reset half-close timer");
                         deadline.as_mut().reset(Instant::now() + HALF_CLOSE_TIMEOUT);
                         Poll::Pending
                     }
                     Some(_) => {
-                        // FIXME: change warn to debug/trace before release
-                        warn!("(BiPipe) half-close conn timed out");
+                        debug!("(BiPipe) half-close conn timed out");
                         Poll::Ready(Ok(self.traffic))
                     }
                 }

@@ -250,13 +250,13 @@ impl Future for BiPipe {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<Traffic>> {
         if !self.left.all_done {
-            trace!("BiPipe: poll left");
+            trace!("(BiPipe) poll left");
             if let Poll::Ready(Err(err)) = self.poll_one_side(cx, Left) {
                 return Poll::Ready(Err(err));
             }
         }
         if !self.right.all_done {
-            trace!("BiPipe: poll right");
+            trace!("(BiPipe) poll right");
             if let Poll::Ready(Err(err)) = self.poll_one_side(cx, Right) {
                 return Poll::Ready(Err(err));
             }
@@ -266,18 +266,23 @@ impl Future for BiPipe {
             (false, false) => Poll::Pending,
             _ => {
                 // Half close
-                let deadline = self
-                    .half_close_deadline
-                    .get_or_insert_with(|| Box::pin(sleep(HALF_CLOSE_TIMEOUT)));
-                match deadline.as_mut().poll(cx) {
-                    Poll::Pending => {
-                        trace!("BiPipe: reset half-close timer");
+                match &mut self.half_close_deadline {
+                    None => {
+                        // Setup a deadline then poll it
+                        let mut deadline = Box::pin(sleep(HALF_CLOSE_TIMEOUT));
+                        let _ = deadline.as_mut().poll(cx); // always return pending
+                        self.half_close_deadline = Some(deadline);
+                        Poll::Pending
+                    }
+                    Some(deadline) if !deadline.is_elapsed() => {
+                        // FIXME: change warn to debug/trace before release
+                        warn!("(BiPipe) reset half-close timer");
                         deadline.as_mut().reset(Instant::now() + HALF_CLOSE_TIMEOUT);
                         Poll::Pending
                     }
-                    Poll::Ready(_) => {
+                    Some(_) => {
                         // FIXME: change warn to debug/trace before release
-                        warn!("BiPipe: half-close conn timed out");
+                        warn!("(BiPipe) half-close conn timed out");
                         Poll::Ready(Ok(self.traffic))
                     }
                 }

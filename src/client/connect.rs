@@ -5,7 +5,6 @@ use std::{
     collections::VecDeque,
     future::Future,
     io::{self, ErrorKind},
-    iter::FromIterator,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -59,7 +58,7 @@ pub fn try_connect_all(
     pending_data: Option<Bytes>,
 ) -> TryConnectAll {
     let parallel_n = cmp::max(1, parallel_n);
-    let servers = VecDeque::from_iter(servers.into_iter());
+    let servers = servers.into_iter().collect();
     TryConnectAll {
         dest,
         parallel_n,

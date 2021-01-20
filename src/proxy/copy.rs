@@ -1,4 +1,4 @@
-use log::{debug, trace};
+use log::{debug, trace, warn};
 use std::{
     cell::RefCell,
     cmp, fmt,
@@ -9,10 +9,12 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
     thread_local,
+    time::Duration,
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf},
     net::TcpStream,
+    time::{sleep, Instant, Sleep},
 };
 
 use self::Side::{Left, Right};
@@ -178,7 +180,12 @@ pub struct BiPipe {
     right: StreamWithBuffer,
     server: Arc<ProxyServer>,
     traffic: Traffic,
+    half_close_deadline: Option<Pin<Box<Sleep>>>,
 }
+
+// Half-closed connections will be forcibly closed if there is no traffic
+// after the following duration.
+const HALF_CLOSE_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub fn pipe(left: TcpStream, right: TcpStream, server: Arc<ProxyServer>) -> BiPipe {
     let (left, right) = (StreamWithBuffer::new(left), StreamWithBuffer::new(right));
@@ -187,6 +194,7 @@ pub fn pipe(left: TcpStream, right: TcpStream, server: Arc<ProxyServer>) -> BiPi
         right,
         server,
         traffic: Default::default(),
+        half_close_deadline: Default::default(),
     }
 }
 
@@ -197,6 +205,7 @@ impl BiPipe {
             ref mut right,
             ref mut server,
             ref mut traffic,
+            ..
         } = *self;
         let (reader, writer) = match side {
             Left => (left, right),
@@ -241,23 +250,38 @@ impl Future for BiPipe {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<io::Result<Traffic>> {
         if !self.left.all_done {
-            trace!("poll left");
+            trace!("BiPipe: poll left");
             if let Poll::Ready(Err(err)) = self.poll_one_side(cx, Left) {
                 return Poll::Ready(Err(err));
             }
         }
         if !self.right.all_done {
-            trace!("poll right");
+            trace!("BiPipe: poll right");
             if let Poll::Ready(Err(err)) = self.poll_one_side(cx, Right) {
                 return Poll::Ready(Err(err));
             }
         }
-        if self.left.all_done && self.right.all_done {
-            trace!("all done");
-            Poll::Ready(Ok(self.traffic))
-        } else {
-            trace!("pending");
-            Poll::Pending
+        match (self.left.all_done, self.right.all_done) {
+            (true, true) => Poll::Ready(Ok(self.traffic)),
+            (false, false) => Poll::Pending,
+            _ => {
+                // Half close
+                let deadline = self
+                    .half_close_deadline
+                    .get_or_insert_with(|| Box::pin(sleep(HALF_CLOSE_TIMEOUT)));
+                match deadline.as_mut().poll(cx) {
+                    Poll::Pending => {
+                        trace!("BiPipe: reset half-close timer");
+                        deadline.as_mut().reset(Instant::now() + HALF_CLOSE_TIMEOUT);
+                        Poll::Pending
+                    }
+                    Poll::Ready(_) => {
+                        // FIXME: change warn to debug/trace before release
+                        warn!("BiPipe: half-close conn timed out");
+                        Poll::Ready(Ok(self.traffic))
+                    }
+                }
+            }
         }
     }
 }

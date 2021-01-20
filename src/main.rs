@@ -101,7 +101,7 @@ async fn main() {
         .value_of("n-parallel")
         .parse()
         .expect("not a valid number")
-        .unwrap_or(0 as usize);
+        .unwrap_or(0_usize);
     let cong_local = args.value_of("cong-local");
     let allow_direct = args.is_present("allow-direct");
     let graphite = args

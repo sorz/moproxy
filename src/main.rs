@@ -180,10 +180,10 @@ async fn main() {
             if !deadlocks.is_empty() {
                 error!("{} deadlocks detected!", deadlocks.len());
                 for (i, threads) in deadlocks.iter().enumerate() {
-                    warn!("Deadlock #{}", i);
+                    debug!("Deadlock #{}", i);
                     for t in threads {
-                        warn!("Thread Id {:#?}", t.thread_id());
-                        info!("{:#?}", t.backtrace());
+                        debug!("Thread Id {:#?}", t.thread_id());
+                        debug!("{:#?}", t.backtrace());
                     }
                 }
             }

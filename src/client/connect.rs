@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use log::debug;
+use log::info;
 use std::{
     cmp,
     collections::VecDeque,
@@ -94,7 +94,7 @@ impl<'a> Future for TryConnectAll<'a> {
                 match conn.as_mut().poll(cx) {
                     // error, stop trying, drop it.
                     Poll::Ready(Err(e)) => {
-                        debug!("connect {} via {} error: {}", dest, server, e);
+                        info!("connect {} via {} error: {}", dest, server, e);
                         drop(self.connects.remove(i));
                     }
                     // not ready, keep here, poll next one.

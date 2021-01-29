@@ -338,7 +338,7 @@ impl ConnectedClient {
             }
             Err(err) => {
                 server.update_stats_conn_close(true);
-                warn!("{} (=> {}) close with error", server, dest);
+                info!("{} (=> {}) close with error", server, dest);
                 Err(err)
             }
         }

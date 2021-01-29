@@ -1,4 +1,4 @@
-use log::{debug, trace, warn};
+use log::{info, trace, warn};
 use sd_notify::{notify, NotifyState};
 use std::{env, process, time::Duration};
 use tokio::time::sleep;
@@ -26,7 +26,7 @@ pub fn watchdog_timeout() -> Option<Duration> {
     }
     let pid: u32 = env::var("WATCHDOG_PID").ok()?.parse().ok()?;
     if pid != process::id() {
-        debug!(
+        info!(
             "WATCHDOG_PID was set to {}, not ours {}",
             pid,
             process::id()
@@ -38,7 +38,7 @@ pub fn watchdog_timeout() -> Option<Duration> {
 }
 
 pub async fn watchdog_loop(timeout: Duration) -> ! {
-    debug!("start poking watchdog for every {}ms", timeout.as_millis());
+    info!("Watchdog enabled, poke for every {}ms", timeout.as_millis());
     loop {
         trace!("poke the watchdog");
         if notify(false, &[NotifyState::Watchdog]).is_err() {

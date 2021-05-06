@@ -1,6 +1,6 @@
 use log::{info, trace, warn};
 use sd_notify::{notify, NotifyState};
-use std::{env, process, time::Duration};
+use std::{borrow::Cow, env, process, time::Duration};
 use tokio::time::sleep;
 
 fn notify_enabled() -> bool {
@@ -16,6 +16,12 @@ pub fn notify_ready() {
 pub fn notify_realoding() {
     if notify_enabled() && notify(false, &[NotifyState::Reloading]).is_err() {
         warn!("fail to notify systemd (reloading)")
+    }
+}
+
+pub fn set_status(status: Cow<str>) {
+    if notify_enabled() && notify(false, &[NotifyState::Status(status.into_owned())]).is_err() {
+        warn!("fail to notify systemd (set status)");
     }
 }
 

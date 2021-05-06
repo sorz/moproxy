@@ -1,8 +1,8 @@
 mod graphite;
 #[cfg(feature = "score_script")]
 use rlua::prelude::*;
+mod alive_test;
 mod traffic;
-use futures_util::future::join_all;
 use log::{debug, warn};
 use parking_lot::Mutex;
 use rand::{self, Rng};
@@ -11,20 +11,21 @@ use std::{
     collections::{HashMap, HashSet},
     io,
     iter::FromIterator,
-    net::{Shutdown, SocketAddr},
+    net::SocketAddr,
     sync::Arc,
     time::{Duration, SystemTime},
 };
 #[cfg(feature = "score_script")]
 use std::{error::Error, fs::File, io::Read};
-use tokio::{
-    io::AsyncReadExt,
-    time::{interval_at, timeout, Instant},
-};
+use tokio::time::{interval_at, Instant};
 
-use self::graphite::{Graphite, Record};
-use self::traffic::Meter;
 pub use self::traffic::Throughput;
+use self::{
+    graphite::{Graphite, Record},
+    traffic::Meter,
+};
+#[cfg(all(feature = "systemd", target_os = "linux"))]
+use crate::linux::systemd;
 use crate::proxy::ProxyServer;
 
 static THROUGHPUT_INTERVAL_SECS: u64 = 1;
@@ -46,6 +47,19 @@ impl Monitor {
             .iter()
             .map(|server| (server.clone(), Meter::new()))
             .collect();
+        #[cfg(all(feature = "systemd", target_os = "linux"))]
+        systemd::set_status(
+            format!(
+                "serving ({} upstream {}, state unknown)",
+                servers.len(),
+                if servers.len() > 1 {
+                    "proxies"
+                } else {
+                    "proxy"
+                }
+            )
+            .into(),
+        );
         Monitor {
             servers: Arc::new(Mutex::new(servers)),
             meters: Arc::new(Mutex::new(meters)),
@@ -129,12 +143,12 @@ impl Monitor {
         let mut graphite = self.graphite.map(Graphite::new);
         let interval = Duration::from_secs(probe);
 
-        test_all(&self).await;
+        alive_test::test_all(&self).await;
 
         let mut interval = interval_at(Instant::now() + interval, interval);
         loop {
             interval.tick().await;
-            test_all(&self).await;
+            alive_test::test_all(&self).await;
             if let Some(ref mut graphite) = graphite {
                 match send_metrics(&self, graphite).await {
                     Ok(_) => debug!("metrics sent"),
@@ -180,41 +194,6 @@ fn info_stats(infos: &[Arc<ProxyServer>]) -> String {
     stats
 }
 
-async fn test_all(monitor: &Monitor) {
-    debug!("testing all servers...");
-    let tests: Vec<_> = monitor
-        .servers()
-        .into_iter()
-        .map(move |server| {
-            Box::pin(async move {
-                let delay = alive_test(&server).await.ok();
-
-                #[cfg(feature = "score_script")]
-                {
-                    let mut caculated = false;
-                    if let Some(lua) = &monitor.lua {
-                        match lua
-                            .lock()
-                            .context(|ctx| server.update_delay_with_lua(delay, ctx))
-                        {
-                            Ok(()) => caculated = true,
-                            Err(err) => warn!("fail to update score w/ Lua script: {}", err),
-                        }
-                    }
-                    if !caculated {
-                        server.update_delay(delay);
-                    }
-                }
-                #[cfg(not(feature = "score_script"))]
-                server.update_delay(delay);
-            })
-        })
-        .collect();
-
-    join_all(tests).await;
-    monitor.resort();
-}
-
 // send graphite metrics if need
 async fn send_metrics(monitor: &Monitor, graphite: &mut Graphite) -> io::Result<()> {
     let records = monitor
@@ -238,54 +217,4 @@ async fn send_metrics(monitor: &Monitor, graphite: &mut Graphite) -> io::Result<
         .filter_map(|v| v)
         .collect(); // FIXME: avoid allocate large memory
     graphite.write_records(records).await
-}
-
-async fn alive_test(server: &ProxyServer) -> io::Result<Duration> {
-    let request = [
-        0,
-        17, // length
-        rand::random(),
-        rand::random(), // transaction ID
-        1,
-        32, // standard query
-        0,
-        1, // one query
-        0,
-        0, // answer
-        0,
-        0, // authority
-        0,
-        0, // addition
-        0, // query: root
-        0,
-        1, // query: type A
-        0,
-        1, // query: class IN
-    ];
-    let tid = |req: &[u8]| (req[2] as u16) << 8 | (req[3] as u16);
-    let req_tid = tid(&request);
-    let now = Instant::now();
-
-    let mut buf = [0u8; 12];
-    let test_dns = server.test_dns().into();
-    let result = timeout(server.max_wait(), async {
-        let mut stream = server.connect(&test_dns, Some(request)).await?;
-        stream.read_exact(&mut buf).await?;
-        stream.into_std()?.shutdown(Shutdown::Both)
-    })
-    .await;
-
-    match result {
-        Err(_) => return Err(io::Error::new(io::ErrorKind::TimedOut, "test timeout")),
-        Ok(Err(e)) => return Err(e),
-        Ok(Ok(_)) => (),
-    }
-
-    if req_tid == tid(&buf) {
-        let t = now.elapsed();
-        debug!("[{}] delay {}ms", server.tag, t.as_millis());
-        Ok(t)
-    } else {
-        Err(io::Error::new(io::ErrorKind::Other, "unknown response"))
-    }
 }

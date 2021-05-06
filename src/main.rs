@@ -20,7 +20,7 @@ use tokio::{
     net::{TcpListener, TcpStream},
 };
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "web_console"))]
 use moproxy::futures_stream::UnixListenerStream;
 #[cfg(all(feature = "systemd", target_os = "linux"))]
 use moproxy::linux::systemd;
@@ -240,7 +240,7 @@ async fn main() {
 
     // Notify systemd
     #[cfg(all(feature = "systemd", target_os = "linux"))]
-    systemd::notify_ready(); // TODO: ready after first probe?
+    systemd::notify_ready();
 
     // The proxy server
     let mut clients = stream::select_all(listeners.iter_mut());

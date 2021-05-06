@@ -144,6 +144,25 @@ Average delay for each proxy server:
 avg_over_time(moproxy_proxy_server_dns_delay_seconds[$__interval])
 ```
 
+### Systemd integration
+
+Sample service file: [conf/moproxy.service](conf/moproxy.service)
+
+Implemented features:
+
+- Watchdog
+- Reloading (via SIGHUP signal)
+- Notify (`type=notify`, reloading, status string)
+
+Get simple status without turing on the HTTP stats page:
+
+```
+$ systemctl status moproxy
+> ...
+> Status: "serving (7/11 upstream proxies up)"
+> ...
+```
+
 ## Install
 
 You may download the binary executable file on

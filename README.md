@@ -54,13 +54,13 @@ these proxy servers.
 moproxy --port 2080 --socks5 2001 2002 2003 --http 3128 192.0.2.0:3128
 
 # redirect local-initiated connections
-iptables -t nat -A OUTPUT -p tcp -m multiport --dports 80,443 -j REDIRECT --to-port 2080
-# redirect connections initiated by other hosts (if you are router)
-iptables -t nat -A PREROUTING -p tcp -m multiport --dports 80,443 -j REDIRECT --to-port 2080
-
-# or the nft equivalent
 nft add rule nat output tcp dport {80, 443} redirect to 2080
+# redirect connections initiated by other hosts (if you are router)
 nft add rule nat prerouting tcp dport {80, 443} redirect to 2080
+
+# or the legacy iptables equivalent
+iptables -t nat -A OUTPUT -p tcp -m multiport --dports 80,443 -j REDIRECT --to-port 2080
+iptables -t nat -A PREROUTING -p tcp -m multiport --dports 80,443 -j REDIRECT --to-port 2080
 ```
 
 SOCKSv5 server is also launched alongs with transparent proxy on the same port:

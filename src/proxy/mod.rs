@@ -292,11 +292,11 @@ pub struct Traffic {
     pub rx_bytes: usize,
 }
 
-impl Into<Traffic> for (usize, usize) {
-    fn into(self) -> Traffic {
-        Traffic {
-            tx_bytes: self.0,
-            rx_bytes: self.1,
+impl From<(usize, usize)> for Traffic {
+    fn from(tx_rx_bytes: (usize, usize)) -> Self {
+        Self {
+            tx_bytes: tx_rx_bytes.0,
+            rx_bytes: tx_rx_bytes.1,
         }
     }
 }

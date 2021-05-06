@@ -20,11 +20,11 @@ pub struct Throughput {
     pub rx_bps: usize,
 }
 
-impl Into<TrafficSample> for Traffic {
-    fn into(self) -> TrafficSample {
-        TrafficSample {
+impl From<Traffic> for TrafficSample {
+    fn from(traffic: Traffic) -> Self {
+        Self {
             time: Instant::now(),
-            amt: self,
+            amt: traffic,
         }
     }
 }

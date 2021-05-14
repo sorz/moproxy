@@ -3,6 +3,7 @@ name = "moproxy"
 version = "0.3.9"
 authors = ["sorz <me@sorz.org>"]
 edition = "2018"
+resolver = "2"
 description = "Transparent TCP to SOCKSv5/HTTP proxy on Linux written in Rust"
 readme = "README.md"
 repository = "https://github.com/sorz/moproxy"

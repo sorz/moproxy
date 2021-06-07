@@ -28,10 +28,11 @@ use std::os::unix::io::RawFd;
 
 const TUNSETIFF: u64 = 0x4004_54ca;
 const CLONE_DEVICE_PATH: &[u8] = b"/dev/net/tun\0";
+type IfName = [u8; libc::IFNAMSIZ];
 
 #[repr(C)]
 struct Ifreq {
-    name: [u8; libc::IFNAMSIZ],
+    name: IfName,
     flags: c_short,
     _pad: [u8; 64],
 }
@@ -48,25 +49,25 @@ struct IfInfomsg {
     ifi_change: libc::c_uint,
 }
 
-pub struct LinuxTun {}
-
-pub struct LinuxTunReader {
-    fd: RawFd,
+pub enum TunEvent {
+    Up(usize), // interface is up (supply MTU)
+    Down,      // interface is down
 }
 
-pub struct LinuxTunWriter {
+pub struct Tun {
     fd: RawFd,
+    status: TunStatus,
 }
 
-pub struct LinuxTunStatus {
+pub struct TunStatus {
     events: Vec<TunEvent>,
     index: i32,
-    name: [u8; libc::IFNAMSIZ],
+    name: IfName,
     fd: RawFd,
 }
 
 #[derive(Debug)]
-pub enum LinuxTunError {
+pub enum TunError {
     InvalidTunDeviceName,
     FailedToOpenCloneDevice,
     SetIFFIoctlFailed,
@@ -75,24 +76,24 @@ pub enum LinuxTunError {
     Closed, // TODO
 }
 
-impl fmt::Display for LinuxTunError {
+impl fmt::Display for TunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LinuxTunError::InvalidTunDeviceName => write!(f, "Invalid name (too long)"),
-            LinuxTunError::FailedToOpenCloneDevice => {
+            TunError::InvalidTunDeviceName => write!(f, "Invalid name (too long)"),
+            TunError::FailedToOpenCloneDevice => {
                 write!(f, "Failed to obtain fd for clone device")
             }
-            LinuxTunError::SetIFFIoctlFailed => {
+            TunError::SetIFFIoctlFailed => {
                 write!(f, "set_iff ioctl failed (insufficient permissions?)")
             }
-            LinuxTunError::Closed => write!(f, "The tunnel has been closed"),
-            LinuxTunError::GetMTUIoctlFailed => write!(f, "ifmtu ioctl failed"),
-            LinuxTunError::NetlinkFailure => write!(f, "Netlink listener error"),
+            TunError::Closed => write!(f, "The tunnel has been closed"),
+            TunError::GetMTUIoctlFailed => write!(f, "ifmtu ioctl failed"),
+            TunError::NetlinkFailure => write!(f, "Netlink listener error"),
         }
     }
 }
 
-impl Error for LinuxTunError {
+impl Error for TunError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         unimplemented!()
     }
@@ -102,39 +103,7 @@ impl Error for LinuxTunError {
     }
 }
 
-impl Reader for LinuxTunReader {
-    type Error = LinuxTunError;
-
-    fn read(&self, buf: &mut [u8], offset: usize) -> Result<usize, Self::Error> {
-        /*
-        debug_assert!(
-            offset < buf.len(),
-            "There is no space for the body of the read"
-        );
-        */
-        let n: isize =
-            unsafe { libc::read(self.fd, buf[offset..].as_mut_ptr() as _, buf.len() - offset) };
-        if n < 0 {
-            Err(LinuxTunError::Closed)
-        } else {
-            // conversion is safe
-            Ok(n as usize)
-        }
-    }
-}
-
-impl Writer for LinuxTunWriter {
-    type Error = LinuxTunError;
-
-    fn write(&self, src: &[u8]) -> Result<(), Self::Error> {
-        match unsafe { libc::write(self.fd, src.as_ptr() as _, src.len() as _) } {
-            -1 => Err(LinuxTunError::Closed),
-            _ => Ok(()),
-        }
-    }
-}
-
-fn get_ifindex(name: &[u8; libc::IFNAMSIZ]) -> i32 {
+fn get_ifindex(name: &IfName) -> i32 {
     debug_assert_eq!(
         name[libc::IFNAMSIZ - 1],
         0,
@@ -149,10 +118,10 @@ fn get_ifindex(name: &[u8; libc::IFNAMSIZ]) -> i32 {
     idx as i32
 }
 
-fn get_mtu(name: &[u8; libc::IFNAMSIZ]) -> Result<usize, LinuxTunError> {
+fn get_mtu(name: &IfName) -> Result<usize, TunError> {
     #[repr(C)]
     struct arg {
-        name: [u8; libc::IFNAMSIZ],
+        name: IfName,
         mtu: u32,
     }
 
@@ -165,7 +134,7 @@ fn get_mtu(name: &[u8; libc::IFNAMSIZ]) -> Result<usize, LinuxTunError> {
     // create socket
     let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
     if fd < 0 {
-        return Err(LinuxTunError::GetMTUIoctlFailed);
+        return Err(TunError::GetMTUIoctlFailed);
     }
 
     // do SIOCGIFMTU ioctl
@@ -183,17 +152,60 @@ fn get_mtu(name: &[u8; libc::IFNAMSIZ]) -> Result<usize, LinuxTunError> {
 
     // handle error from ioctl
     if err != 0 {
-        return Err(LinuxTunError::GetMTUIoctlFailed);
+        return Err(TunError::GetMTUIoctlFailed);
     }
 
     // upcast to usize
     Ok(buf.mtu as usize)
 }
 
-impl Status for LinuxTunStatus {
-    type Error = LinuxTunError;
+impl TunStatus {
+    const RTNLGRP_LINK: libc::c_uint = 1;
+    const RTNLGRP_IPV4_IFADDR: libc::c_uint = 5;
+    const RTNLGRP_IPV6_IFADDR: libc::c_uint = 9;
 
-    fn event(&mut self) -> Result<TunEvent, Self::Error> {
+    fn new(name: IfName) -> Result<TunStatus, TunError> {
+        // create netlink socket
+        let fd = unsafe { libc::socket(libc::AF_NETLINK, libc::SOCK_RAW, libc::NETLINK_ROUTE) };
+        if fd < 0 {
+            return Err(TunError::Closed);
+        }
+
+        // prepare address (specify groups)
+        let groups = (1 << (Self::RTNLGRP_LINK - 1))
+            | (1 << (Self::RTNLGRP_IPV4_IFADDR - 1))
+            | (1 << (Self::RTNLGRP_IPV6_IFADDR - 1));
+
+        let mut sockaddr: libc::sockaddr_nl = unsafe { mem::zeroed() };
+        sockaddr.nl_family = libc::AF_NETLINK as u16;
+        sockaddr.nl_groups = groups;
+        sockaddr.nl_pid = 0;
+
+        // attempt to bind
+        let res = unsafe {
+            libc::bind(
+                fd,
+                mem::transmute(&mut sockaddr),
+                mem::size_of::<libc::sockaddr_nl>() as u32,
+            )
+        };
+
+        if res != 0 {
+            Err(TunError::Closed)
+        } else {
+            Ok(TunStatus {
+                events: vec![
+                    #[cfg(feature = "start_up")]
+                    TunEvent::Up(1500),
+                ],
+                index: get_ifindex(&name),
+                fd,
+                name,
+            })
+        }
+    }
+
+    fn event(&mut self) -> Result<TunEvent, TunError> {
         const DONE: u16 = libc::NLMSG_DONE as u16;
         const ERROR: u16 = libc::NLMSG_ERROR as u16;
         const INFO_SIZE: usize = mem::size_of::<IfInfomsg>();
@@ -211,7 +223,7 @@ impl Status for LinuxTunStatus {
             let size: libc::ssize_t =
                 unsafe { libc::recv(self.fd, mem::transmute(&mut buf), buf.len(), 0) };
             if size < 0 {
-                break Err(LinuxTunError::NetlinkFailure);
+                break Err(TunError::NetlinkFailure);
             }
 
             // cut buffer to size
@@ -241,7 +253,7 @@ impl Status for LinuxTunStatus {
                     libc::RTM_NEWLINK => {
                         // extract info struct
                         if body.len() < INFO_SIZE {
-                            return Err(LinuxTunError::NetlinkFailure);
+                            return Err(TunError::NetlinkFailure);
                         }
                         let info: IfInfomsg = unsafe {
                             let mut info = [0u8; INFO_SIZE];
@@ -282,64 +294,8 @@ impl Status for LinuxTunStatus {
     }
 }
 
-impl LinuxTunStatus {
-    const RTNLGRP_LINK: libc::c_uint = 1;
-    const RTNLGRP_IPV4_IFADDR: libc::c_uint = 5;
-    const RTNLGRP_IPV6_IFADDR: libc::c_uint = 9;
-
-    fn new(name: [u8; libc::IFNAMSIZ]) -> Result<LinuxTunStatus, LinuxTunError> {
-        // create netlink socket
-        let fd = unsafe { libc::socket(libc::AF_NETLINK, libc::SOCK_RAW, libc::NETLINK_ROUTE) };
-        if fd < 0 {
-            return Err(LinuxTunError::Closed);
-        }
-
-        // prepare address (specify groups)
-        let groups = (1 << (Self::RTNLGRP_LINK - 1))
-            | (1 << (Self::RTNLGRP_IPV4_IFADDR - 1))
-            | (1 << (Self::RTNLGRP_IPV6_IFADDR - 1));
-
-        let mut sockaddr: libc::sockaddr_nl = unsafe { mem::zeroed() };
-        sockaddr.nl_family = libc::AF_NETLINK as u16;
-        sockaddr.nl_groups = groups;
-        sockaddr.nl_pid = 0;
-
-        // attempt to bind
-        let res = unsafe {
-            libc::bind(
-                fd,
-                mem::transmute(&mut sockaddr),
-                mem::size_of::<libc::sockaddr_nl>() as u32,
-            )
-        };
-
-        if res != 0 {
-            Err(LinuxTunError::Closed)
-        } else {
-            Ok(LinuxTunStatus {
-                events: vec![
-                    #[cfg(feature = "start_up")]
-                    TunEvent::Up(1500),
-                ],
-                index: get_ifindex(&name),
-                fd,
-                name,
-            })
-        }
-    }
-}
-
-impl Tun for LinuxTun {
-    type Writer = LinuxTunWriter;
-    type Reader = LinuxTunReader;
-    type Error = LinuxTunError;
-}
-
-impl PlatformTun for LinuxTun {
-    type Status = LinuxTunStatus;
-
-    #[allow(clippy::type_complexity)]
-    fn create(name: &str) -> Result<(Vec<Self::Reader>, Self::Writer, Self::Status), Self::Error> {
+impl Tun {
+    fn create(name: &str) -> Result<Self, TunError> {
         // construct request struct
         let mut req = Ifreq {
             name: [0u8; libc::IFNAMSIZ],
@@ -350,27 +306,47 @@ impl PlatformTun for LinuxTun {
         // sanity check length of device name
         let bs = name.as_bytes();
         if bs.len() > libc::IFNAMSIZ - 1 {
-            return Err(LinuxTunError::InvalidTunDeviceName);
+            return Err(TunError::InvalidTunDeviceName);
         }
         req.name[..bs.len()].copy_from_slice(bs);
 
         // open clone device
         let fd: RawFd = match unsafe { libc::open(CLONE_DEVICE_PATH.as_ptr() as _, libc::O_RDWR) } {
-            -1 => return Err(LinuxTunError::FailedToOpenCloneDevice),
+            -1 => return Err(TunError::FailedToOpenCloneDevice),
             fd => fd,
         };
         assert!(fd >= 0);
 
         // create TUN device
         if unsafe { libc::ioctl(fd, TUNSETIFF as _, &req) } < 0 {
-            return Err(LinuxTunError::SetIFFIoctlFailed);
+            return Err(TunError::SetIFFIoctlFailed);
         }
+        let status = TunStatus::new(req.name)?;
 
-        // create PlatformTunMTU instance
-        Ok((
-            vec![LinuxTunReader { fd }], // TODO: use multi-queue for Linux
-            LinuxTunWriter { fd },
-            LinuxTunStatus::new(req.name)?,
-        ))
+        Ok(Self { fd, status })
+    }
+
+    fn read(&self, buf: &mut [u8], offset: usize) -> Result<usize, TunError> {
+        /*
+        debug_assert!(
+            offset < buf.len(),
+            "There is no space for the body of the read"
+        );
+        */
+        let n: isize =
+            unsafe { libc::read(self.fd, buf[offset..].as_mut_ptr() as _, buf.len() - offset) };
+        if n < 0 {
+            Err(TunError::Closed)
+        } else {
+            // conversion is safe
+            Ok(n as usize)
+        }
+    }
+
+    fn write(&self, src: &[u8]) -> Result<(), TunError> {
+        match unsafe { libc::write(self.fd, src.as_ptr() as _, src.len() as _) } {
+            -1 => Err(TunError::Closed),
+            _ => Ok(()),
+        }
     }
 }

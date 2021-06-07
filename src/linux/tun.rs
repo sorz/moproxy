@@ -20,11 +20,13 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-use std::error::Error;
-use std::fmt;
-use std::mem;
-use std::os::raw::c_short;
-use std::os::unix::io::RawFd;
+use std::{
+    error::Error,
+    fmt,
+    mem,
+    os::{raw::c_short, unix::io::RawFd},
+    io::Error as IoError,
+};
 
 const TUNSETIFF: u64 = 0x4004_54ca;
 const CLONE_DEVICE_PATH: &[u8] = b"/dev/net/tun\0";
@@ -49,6 +51,7 @@ struct IfInfomsg {
     ifi_change: libc::c_uint,
 }
 
+#[derive(Debug)]
 pub enum TunEvent {
     Up(usize), // interface is up (supply MTU)
     Down,      // interface is down
@@ -56,7 +59,7 @@ pub enum TunEvent {
 
 pub struct Tun {
     fd: RawFd,
-    status: TunStatus,
+    pub status: TunStatus,
 }
 
 pub struct TunStatus {
@@ -70,8 +73,8 @@ pub struct TunStatus {
 pub enum TunError {
     InvalidTunDeviceName,
     FailedToOpenCloneDevice,
-    SetIFFIoctlFailed,
-    GetMTUIoctlFailed,
+    SetIFFIoctlFailed(IoError),
+    GetMTUIoctlFailed(IoError),
     NetlinkFailure,
     Closed, // TODO
 }
@@ -83,11 +86,11 @@ impl fmt::Display for TunError {
             TunError::FailedToOpenCloneDevice => {
                 write!(f, "Failed to obtain fd for clone device")
             }
-            TunError::SetIFFIoctlFailed => {
-                write!(f, "set_iff ioctl failed (insufficient permissions?)")
+            TunError::SetIFFIoctlFailed(err) => {
+                write!(f, "set_iff ioctl failed - {}", err)
             }
             TunError::Closed => write!(f, "The tunnel has been closed"),
-            TunError::GetMTUIoctlFailed => write!(f, "ifmtu ioctl failed"),
+            TunError::GetMTUIoctlFailed(err) => write!(f, "ifmtu ioctl failed - {}", err),
             TunError::NetlinkFailure => write!(f, "Netlink listener error"),
         }
     }
@@ -134,7 +137,7 @@ fn get_mtu(name: &IfName) -> Result<usize, TunError> {
     // create socket
     let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
     if fd < 0 {
-        return Err(TunError::GetMTUIoctlFailed);
+        return Err(TunError::GetMTUIoctlFailed(IoError::last_os_error()));
     }
 
     // do SIOCGIFMTU ioctl
@@ -146,14 +149,12 @@ fn get_mtu(name: &IfName) -> Result<usize, TunError> {
         let ptr: &libc::c_void = &*(&buf as *const _ as *const libc::c_void);
         libc::ioctl(fd, libc::SIOCGIFMTU, ptr)
     };
-
-    // close socket
-    unsafe { libc::close(fd) };
-
     // handle error from ioctl
     if err != 0 {
-        return Err(TunError::GetMTUIoctlFailed);
+        unsafe { libc::close(fd) };
+        return Err(TunError::GetMTUIoctlFailed(IoError::last_os_error()));
     }
+    unsafe { libc::close(fd) };
 
     // upcast to usize
     Ok(buf.mtu as usize)
@@ -205,7 +206,7 @@ impl TunStatus {
         }
     }
 
-    fn event(&mut self) -> Result<TunEvent, TunError> {
+    pub fn event(&mut self) -> Result<TunEvent, TunError> {
         const DONE: u16 = libc::NLMSG_DONE as u16;
         const ERROR: u16 = libc::NLMSG_ERROR as u16;
         const INFO_SIZE: usize = mem::size_of::<IfInfomsg>();
@@ -295,7 +296,7 @@ impl TunStatus {
 }
 
 impl Tun {
-    fn create(name: &str) -> Result<Self, TunError> {
+    pub fn create(name: &str) -> Result<Self, TunError> {
         // construct request struct
         let mut req = Ifreq {
             name: [0u8; libc::IFNAMSIZ],
@@ -319,14 +320,14 @@ impl Tun {
 
         // create TUN device
         if unsafe { libc::ioctl(fd, TUNSETIFF as _, &req) } < 0 {
-            return Err(TunError::SetIFFIoctlFailed);
+            return Err(TunError::SetIFFIoctlFailed(IoError::last_os_error()));
         }
         let status = TunStatus::new(req.name)?;
 
         Ok(Self { fd, status })
     }
 
-    fn read(&self, buf: &mut [u8], offset: usize) -> Result<usize, TunError> {
+    pub fn read(&self, buf: &mut [u8], offset: usize) -> Result<usize, TunError> {
         /*
         debug_assert!(
             offset < buf.len(),
@@ -343,7 +344,7 @@ impl Tun {
         }
     }
 
-    fn write(&self, src: &[u8]) -> Result<(), TunError> {
+    pub fn write(&self, src: &[u8]) -> Result<(), TunError> {
         match unsafe { libc::write(self.fd, src.as_ptr() as _, src.len() as _) } {
             -1 => Err(TunError::Closed),
             _ => Ok(()),

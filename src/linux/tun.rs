@@ -23,10 +23,11 @@
 use std::{
     error::Error,
     fmt,
+    io::{Error as IoError, Result as IoResult},
     mem,
     os::{raw::c_short, unix::io::RawFd},
-    io::Error as IoError,
 };
+use tokio::io::unix::AsyncFd;
 
 const TUNSETIFF: u64 = 0x4004_54ca;
 const CLONE_DEVICE_PATH: &[u8] = b"/dev/net/tun\0";
@@ -58,7 +59,7 @@ pub enum TunEvent {
 }
 
 pub struct Tun {
-    fd: RawFd,
+    fd: AsyncFd<RawFd>,
     pub status: TunStatus,
 }
 
@@ -66,7 +67,7 @@ pub struct TunStatus {
     events: Vec<TunEvent>,
     index: i32,
     name: IfName,
-    fd: RawFd,
+    fd: AsyncFd<RawFd>,
 }
 
 #[derive(Debug)]
@@ -77,6 +78,7 @@ pub enum TunError {
     GetMTUIoctlFailed(IoError),
     NetlinkFailure,
     Closed, // TODO
+    FailedToRegisterFd(IoError),
 }
 
 impl fmt::Display for TunError {
@@ -92,6 +94,9 @@ impl fmt::Display for TunError {
             TunError::Closed => write!(f, "The tunnel has been closed"),
             TunError::GetMTUIoctlFailed(err) => write!(f, "ifmtu ioctl failed - {}", err),
             TunError::NetlinkFailure => write!(f, "Netlink listener error"),
+            TunError::FailedToRegisterFd(err) => {
+                write!(f, "Failed to register fd to loop - {}", err)
+            }
         }
     }
 }
@@ -200,7 +205,7 @@ impl TunStatus {
                     TunEvent::Up(1500),
                 ],
                 index: get_ifindex(&name),
-                fd,
+                fd: AsyncFd::new(fd).map_err(TunError::FailedToRegisterFd)?,
                 name,
             })
         }
@@ -213,7 +218,7 @@ impl TunStatus {
         const HDR_SIZE: usize = mem::size_of::<libc::nlmsghdr>();
 
         let mut buf = [0u8; 1 << 12];
-        log::debug!("netlink, fetch event (fd = {})", self.fd);
+        log::debug!("netlink, fetch event (fd = {})", self.fd.get_ref());
         loop {
             // attempt to return a buffered event
             if let Some(event) = self.events.pop() {
@@ -222,7 +227,7 @@ impl TunStatus {
 
             // read message
             let size: libc::ssize_t =
-                unsafe { libc::recv(self.fd, mem::transmute(&mut buf), buf.len(), 0) };
+                unsafe { libc::recv(*self.fd.get_ref(), mem::transmute(&mut buf), buf.len(), 0) };
             if size < 0 {
                 break Err(TunError::NetlinkFailure);
             }
@@ -323,31 +328,44 @@ impl Tun {
             return Err(TunError::SetIFFIoctlFailed(IoError::last_os_error()));
         }
         let status = TunStatus::new(req.name)?;
+        let fd = AsyncFd::new(fd).map_err(TunError::FailedToRegisterFd)?;
 
         Ok(Self { fd, status })
     }
 
-    pub fn read(&self, buf: &mut [u8], offset: usize) -> Result<usize, TunError> {
-        /*
-        debug_assert!(
-            offset < buf.len(),
-            "There is no space for the body of the read"
-        );
-        */
-        let n: isize =
-            unsafe { libc::read(self.fd, buf[offset..].as_mut_ptr() as _, buf.len() - offset) };
-        if n < 0 {
-            Err(TunError::Closed)
-        } else {
-            // conversion is safe
-            Ok(n as usize)
+    pub async fn read(&self, buf: &mut [u8]) -> IoResult<usize> {
+        loop {
+            let mut guard = self.fd.readable().await?;
+            match guard.try_io(|fd| read_fd(fd.get_ref(), buf)) {
+                Ok(n) => break n,
+                Err(_) => continue,
+            }
         }
     }
 
-    pub fn write(&self, src: &[u8]) -> Result<(), TunError> {
-        match unsafe { libc::write(self.fd, src.as_ptr() as _, src.len() as _) } {
-            -1 => Err(TunError::Closed),
-            _ => Ok(()),
+    pub async fn write(&self, buf: &[u8]) -> IoResult<()> {
+        loop {
+            let mut guard = self.fd.writable().await?;
+            match guard.try_io(|fd| write_fd(fd.get_ref(), buf)) {
+                Ok(_) => break Ok(()),
+                Err(_) => continue,
+            }
         }
+    }
+}
+
+fn read_fd(fd: &RawFd, buf: &mut [u8]) -> IoResult<usize> {
+    let n = unsafe { libc::read(*fd, buf.as_mut_ptr() as _, buf.len()) };
+    if n < 0 {
+        Err(IoError::last_os_error())
+    } else {
+        Ok(n as usize)
+    }
+}
+
+fn write_fd(fd: &RawFd, buf: &[u8]) -> IoResult<()> {
+    match unsafe { libc::write(*fd, buf.as_ptr() as _, buf.len() as _) } {
+        -1 => Err(IoError::last_os_error()),
+        _ => Ok(()),
     }
 }

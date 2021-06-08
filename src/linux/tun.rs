@@ -76,6 +76,7 @@ pub enum TunError {
     FailedToOpenCloneDevice,
     SetIFFIoctlFailed(IoError),
     GetMTUIoctlFailed(IoError),
+    SetFlagsFcntlFailed(IoError),
     NetlinkFailure,
     Closed, // TODO
     FailedToRegisterFd(IoError),
@@ -90,6 +91,9 @@ impl fmt::Display for TunError {
             }
             TunError::SetIFFIoctlFailed(err) => {
                 write!(f, "set_iff ioctl failed - {}", err)
+            }
+            TunError::SetFlagsFcntlFailed(err) => {
+                write!(f, "f_setfl fcntl failed - {}", err)
             }
             TunError::Closed => write!(f, "The tunnel has been closed"),
             TunError::GetMTUIoctlFailed(err) => write!(f, "ifmtu ioctl failed - {}", err),
@@ -124,6 +128,19 @@ fn get_ifindex(name: &IfName) -> i32 {
         libc::if_nametoindex(ptr)
     };
     idx as i32
+}
+
+fn set_non_blocking(fd: RawFd) -> Result<(), TunError> {
+    let flags = match unsafe { libc::fcntl(fd, libc::F_GETFL) } {
+        -1 => 0,
+        n => n,
+    } | libc::O_NONBLOCK;
+    let n = unsafe { libc::fcntl(fd, libc::F_SETFL, flags) };
+    if n < 0 {
+        Err(TunError::SetFlagsFcntlFailed(IoError::last_os_error()))
+    } else {
+        Ok(())
+    }
 }
 
 fn get_mtu(name: &IfName) -> Result<usize, TunError> {
@@ -328,6 +345,8 @@ impl Tun {
             return Err(TunError::SetIFFIoctlFailed(IoError::last_os_error()));
         }
         let status = TunStatus::new(req.name)?;
+
+        set_non_blocking(fd)?;
         let fd = AsyncFd::new(fd).map_err(TunError::FailedToRegisterFd)?;
 
         Ok(Self { fd, status })

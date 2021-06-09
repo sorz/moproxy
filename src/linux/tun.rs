@@ -34,7 +34,7 @@ const CLONE_DEVICE_PATH: &[u8] = b"/dev/net/tun\0";
 type IfName = [u8; libc::IFNAMSIZ];
 
 #[repr(C)]
-struct Ifreq {
+pub struct Ifreq {
     name: IfName,
     flags: c_short,
     _pad: [u8; 64],
@@ -54,8 +54,8 @@ struct IfInfomsg {
 
 #[derive(Debug)]
 pub enum TunEvent {
-    Up(usize), // interface is up (supply MTU)
-    Down,      // interface is down
+    Up,   // interface is up
+    Down, // interface is down
 }
 
 pub struct Tun {
@@ -75,8 +75,8 @@ pub enum TunError {
     InvalidTunDeviceName,
     FailedToOpenCloneDevice,
     SetIFFIoctlFailed(IoError),
-    GetMTUIoctlFailed(IoError),
     SetFlagsFcntlFailed(IoError),
+    SetTunIfUpFailed,
     NetlinkFailure(IoError),
     Closed, // TODO
     FailedToRegisterFd(IoError),
@@ -96,7 +96,7 @@ impl fmt::Display for TunError {
                 write!(f, "f_setfl fcntl failed - {}", err)
             }
             TunError::Closed => write!(f, "The tunnel has been closed"),
-            TunError::GetMTUIoctlFailed(err) => write!(f, "ifmtu ioctl failed - {}", err),
+            TunError::SetTunIfUpFailed => write!(f, "Failed to set tun interface up"),
             TunError::NetlinkFailure(err) => write!(f, "Netlink error: {}", err),
             TunError::FailedToRegisterFd(err) => {
                 write!(f, "Failed to register fd to loop - {}", err)
@@ -143,43 +143,31 @@ fn set_non_blocking(fd: RawFd) -> Result<(), TunError> {
     }
 }
 
-fn get_mtu(name: &IfName) -> Result<usize, TunError> {
-    #[repr(C)]
-    struct arg {
-        name: IfName,
-        mtu: u32,
-    }
-
-    debug_assert_eq!(
-        name[libc::IFNAMSIZ - 1],
-        0,
-        "name buffer not null-terminated"
-    );
-
+fn set_if_up(name: &IfName) -> Result<(), TunError> {
     // create socket
     let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
     if fd < 0 {
-        return Err(TunError::GetMTUIoctlFailed(IoError::last_os_error()));
+        return Err(TunError::SetTunIfUpFailed);
     }
 
-    // do SIOCGIFMTU ioctl
-    let buf = arg {
+    let buf = Ifreq {
         name: *name,
-        mtu: 0,
+        flags: libc::IFF_UP as c_short,
+        _pad: [0u8; 64],
     };
-    let err = unsafe {
-        let ptr: &libc::c_void = &*(&buf as *const _ as *const libc::c_void);
-        libc::ioctl(fd, libc::SIOCGIFMTU, ptr)
-    };
-    // handle error from ioctl
-    if err != 0 {
-        unsafe { libc::close(fd) };
-        return Err(TunError::GetMTUIoctlFailed(IoError::last_os_error()));
-    }
+
+    // do SIOCSIFFLAGS ioctl
+    let err = unsafe { libc::ioctl(fd, libc::SIOCSIFFLAGS, &buf) };
+
+    // close socket
     unsafe { libc::close(fd) };
 
-    // upcast to usize
-    Ok(buf.mtu as usize)
+    // handle error from ioctl
+    if err != 0 {
+        return Err(TunError::SetTunIfUpFailed);
+    }
+
+    Ok(())
 }
 
 impl TunStatus {
@@ -308,9 +296,7 @@ impl TunStatus {
                         if info.ifi_index == self.index {
                             // handle up / down
                             if info.ifi_flags & (libc::IFF_UP as u32) != 0 {
-                                let mtu = get_mtu(&self.name)?;
-                                log::trace!("netlink, up event, mtu = {}", mtu);
-                                self.events.push(TunEvent::Up(mtu));
+                                self.events.push(TunEvent::Up);
                             } else {
                                 log::trace!("netlink, down event");
                                 self.events.push(TunEvent::Down);
@@ -355,6 +341,9 @@ impl Tun {
             return Err(TunError::SetIFFIoctlFailed(IoError::last_os_error()));
         }
         let status = TunStatus::new(req.name)?;
+
+        // set device up
+        set_if_up(&req.name).unwrap();
 
         set_non_blocking(fd)?;
         let fd = AsyncFd::new(fd).map_err(TunError::FailedToRegisterFd)?;

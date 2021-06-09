@@ -22,9 +22,7 @@
 // SOFTWARE.
 use std::{
     error::Error,
-    fmt,
-    io::{Error as IoError, ErrorKind, Result as IoResult},
-    mem,
+    fmt, io,
     os::{raw::c_short, unix::io::RawFd},
 };
 use tokio::io::unix::AsyncFd;
@@ -40,33 +38,7 @@ pub struct Ifreq {
     _pad: [u8; 64],
 }
 
-// man 7 rtnetlink
-// Layout from: https://elixir.bootlin.com/linux/latest/source/include/uapi/linux/rtnetlink.h#L516
-#[repr(C)]
-struct IfInfomsg {
-    ifi_family: libc::c_uchar,
-    __ifi_pad: libc::c_uchar,
-    ifi_type: libc::c_ushort,
-    ifi_index: libc::c_int,
-    ifi_flags: libc::c_uint,
-    ifi_change: libc::c_uint,
-}
-
-#[derive(Debug)]
-pub enum TunEvent {
-    Up,   // interface is up
-    Down, // interface is down
-}
-
 pub struct Tun {
-    fd: AsyncFd<RawFd>,
-    pub status: TunStatus,
-}
-
-pub struct TunStatus {
-    events: Vec<TunEvent>,
-    index: i32,
-    name: IfName,
     fd: AsyncFd<RawFd>,
 }
 
@@ -74,12 +46,11 @@ pub struct TunStatus {
 pub enum TunError {
     InvalidTunDeviceName,
     FailedToOpenCloneDevice,
-    SetIFFIoctlFailed(IoError),
-    SetFlagsFcntlFailed(IoError),
+    SetIFFIoctlFailed(io::Error),
+    SetFlagsFcntlFailed(io::Error),
     SetTunIfUpFailed,
-    NetlinkFailure(IoError),
     Closed, // TODO
-    FailedToRegisterFd(IoError),
+    FailedToRegisterFd(io::Error),
 }
 
 impl fmt::Display for TunError {
@@ -97,7 +68,6 @@ impl fmt::Display for TunError {
             }
             TunError::Closed => write!(f, "The tunnel has been closed"),
             TunError::SetTunIfUpFailed => write!(f, "Failed to set tun interface up"),
-            TunError::NetlinkFailure(err) => write!(f, "Netlink error: {}", err),
             TunError::FailedToRegisterFd(err) => {
                 write!(f, "Failed to register fd to loop - {}", err)
             }
@@ -115,21 +85,6 @@ impl Error for TunError {
     }
 }
 
-fn get_ifindex(name: &IfName) -> i32 {
-    debug_assert_eq!(
-        name[libc::IFNAMSIZ - 1],
-        0,
-        "name buffer not null-terminated"
-    );
-
-    let name = *name;
-    let idx = unsafe {
-        let ptr: *const libc::c_char = mem::transmute(&name);
-        libc::if_nametoindex(ptr)
-    };
-    idx as i32
-}
-
 fn set_non_blocking(fd: RawFd) -> Result<(), TunError> {
     let flags = match unsafe { libc::fcntl(fd, libc::F_GETFL) } {
         -1 => 0,
@@ -137,7 +92,7 @@ fn set_non_blocking(fd: RawFd) -> Result<(), TunError> {
     } | libc::O_NONBLOCK;
     let n = unsafe { libc::fcntl(fd, libc::F_SETFL, flags) };
     if n < 0 {
-        Err(TunError::SetFlagsFcntlFailed(IoError::last_os_error()))
+        Err(TunError::SetFlagsFcntlFailed(io::Error::last_os_error()))
     } else {
         Ok(())
     }
@@ -152,7 +107,7 @@ fn set_if_up(name: &IfName) -> Result<(), TunError> {
 
     let buf = Ifreq {
         name: *name,
-        flags: libc::IFF_UP as c_short,
+        flags: (libc::IFF_UP | libc::IFF_RUNNING) as c_short,
         _pad: [0u8; 64],
     };
 
@@ -168,149 +123,6 @@ fn set_if_up(name: &IfName) -> Result<(), TunError> {
     }
 
     Ok(())
-}
-
-impl TunStatus {
-    const RTNLGRP_LINK: libc::c_uint = 1;
-    const RTNLGRP_IPV4_IFADDR: libc::c_uint = 5;
-    const RTNLGRP_IPV6_IFADDR: libc::c_uint = 9;
-
-    fn new(name: IfName) -> Result<TunStatus, TunError> {
-        // create netlink socket
-        let fd = unsafe { libc::socket(libc::AF_NETLINK, libc::SOCK_RAW, libc::NETLINK_ROUTE) };
-        if fd < 0 {
-            return Err(TunError::Closed);
-        }
-
-        // prepare address (specify groups)
-        let groups = (1 << (Self::RTNLGRP_LINK - 1))
-            | (1 << (Self::RTNLGRP_IPV4_IFADDR - 1))
-            | (1 << (Self::RTNLGRP_IPV6_IFADDR - 1));
-
-        let mut sockaddr: libc::sockaddr_nl = unsafe { mem::zeroed() };
-        sockaddr.nl_family = libc::AF_NETLINK as u16;
-        sockaddr.nl_groups = groups;
-        sockaddr.nl_pid = 0;
-
-        // attempt to bind
-        let res = unsafe {
-            libc::bind(
-                fd,
-                mem::transmute(&mut sockaddr),
-                mem::size_of::<libc::sockaddr_nl>() as u32,
-            )
-        };
-        set_non_blocking(fd)?;
-
-        if res != 0 {
-            Err(TunError::Closed)
-        } else {
-            Ok(TunStatus {
-                events: vec![],
-                index: get_ifindex(&name),
-                fd: AsyncFd::new(fd).map_err(TunError::FailedToRegisterFd)?,
-                name,
-            })
-        }
-    }
-
-    async fn netlink_recv(&self, buf: &mut [u8]) -> IoResult<usize> {
-        loop {
-            let mut guard = self.fd.readable().await?;
-            match guard.try_io(|fd| recv_fd(fd.get_ref(), buf)) {
-                Ok(n) => break n,
-                Err(_) => continue,
-            }
-        }
-    }
-
-    pub async fn event(&mut self) -> Result<TunEvent, TunError> {
-        const DONE: u16 = libc::NLMSG_DONE as u16;
-        const ERROR: u16 = libc::NLMSG_ERROR as u16;
-        const INFO_SIZE: usize = mem::size_of::<IfInfomsg>();
-        const HDR_SIZE: usize = mem::size_of::<libc::nlmsghdr>();
-
-        let mut buf = [0u8; 1 << 12];
-        log::debug!("netlink, fetch event (fd = {})", self.fd.get_ref());
-        loop {
-            // attempt to return a buffered event
-            if let Some(event) = self.events.pop() {
-                return Ok(event);
-            }
-
-            // read message
-            let size = self
-                .netlink_recv(&mut buf)
-                .await
-                .map_err(|err| TunError::NetlinkFailure(err))?;
-
-            // cut buffer to size
-            let size: usize = size as usize;
-            let mut remain = &buf[..size];
-            log::debug!("netlink, received message ({} bytes)", size);
-
-            // handle messages
-            while remain.len() >= HDR_SIZE {
-                // extract the header
-                assert!(remain.len() > HDR_SIZE);
-                let hdr: libc::nlmsghdr = unsafe {
-                    let mut hdr = [0u8; HDR_SIZE];
-                    hdr.copy_from_slice(&remain[..HDR_SIZE]);
-                    mem::transmute(hdr)
-                };
-
-                // upcast length
-                let body: &[u8] = &remain[HDR_SIZE..];
-                let msg_len: usize = hdr.nlmsg_len as usize;
-                assert!(msg_len <= remain.len(), "malformed netlink message");
-
-                // handle message body
-                match hdr.nlmsg_type {
-                    DONE => break,
-                    ERROR => break,
-                    libc::RTM_NEWLINK => {
-                        // extract info struct
-                        if body.len() < INFO_SIZE {
-                            return Err(TunError::NetlinkFailure(IoError::new(
-                                ErrorKind::UnexpectedEof,
-                                "truncated message body",
-                            )));
-                        }
-                        let info: IfInfomsg = unsafe {
-                            let mut info = [0u8; INFO_SIZE];
-                            info.copy_from_slice(&body[..INFO_SIZE]);
-                            mem::transmute(info)
-                        };
-
-                        // trace log
-                        log::trace!(
-                            "netlink, IfInfomsg{{ family = {}, type = {}, index = {}, flags = {}, change = {}}}",
-                            info.ifi_family,
-                            info.ifi_type,
-                            info.ifi_index,
-                            info.ifi_flags,
-                            info.ifi_change,
-                        );
-                        debug_assert_eq!(info.__ifi_pad, 0);
-
-                        if info.ifi_index == self.index {
-                            // handle up / down
-                            if info.ifi_flags & (libc::IFF_UP as u32) != 0 {
-                                self.events.push(TunEvent::Up);
-                            } else {
-                                log::trace!("netlink, down event");
-                                self.events.push(TunEvent::Down);
-                            }
-                        }
-                    }
-                    _ => (),
-                };
-
-                // go to next message
-                remain = &remain[msg_len..];
-            }
-        }
-    }
 }
 
 impl Tun {
@@ -338,9 +150,8 @@ impl Tun {
 
         // create TUN device
         if unsafe { libc::ioctl(fd, TUNSETIFF as _, &req) } < 0 {
-            return Err(TunError::SetIFFIoctlFailed(IoError::last_os_error()));
+            return Err(TunError::SetIFFIoctlFailed(io::Error::last_os_error()));
         }
-        let status = TunStatus::new(req.name)?;
 
         // set device up
         set_if_up(&req.name).unwrap();
@@ -348,10 +159,10 @@ impl Tun {
         set_non_blocking(fd)?;
         let fd = AsyncFd::new(fd).map_err(TunError::FailedToRegisterFd)?;
 
-        Ok(Self { fd, status })
+        Ok(Self { fd })
     }
 
-    pub async fn read(&self, buf: &mut [u8]) -> IoResult<usize> {
+    pub async fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
         loop {
             let mut guard = self.fd.readable().await?;
             match guard.try_io(|fd| read_fd(fd.get_ref(), buf)) {
@@ -361,7 +172,7 @@ impl Tun {
         }
     }
 
-    pub async fn write(&self, buf: &[u8]) -> IoResult<()> {
+    pub async fn write(&self, buf: &[u8]) -> io::Result<()> {
         loop {
             let mut guard = self.fd.writable().await?;
             match guard.try_io(|fd| write_fd(fd.get_ref(), buf)) {
@@ -372,25 +183,18 @@ impl Tun {
     }
 }
 
-fn read_fd(fd: &RawFd, buf: &mut [u8]) -> IoResult<usize> {
+fn read_fd(fd: &RawFd, buf: &mut [u8]) -> io::Result<usize> {
     let n = unsafe { libc::read(*fd, buf.as_mut_ptr() as _, buf.len()) };
     if n < 0 {
-        Err(IoError::last_os_error())
+        Err(io::Error::last_os_error())
     } else {
         Ok(n as usize)
     }
 }
 
-fn write_fd(fd: &RawFd, buf: &[u8]) -> IoResult<()> {
+fn write_fd(fd: &RawFd, buf: &[u8]) -> io::Result<()> {
     match unsafe { libc::write(*fd, buf.as_ptr() as _, buf.len() as _) } {
-        -1 => Err(IoError::last_os_error()),
+        -1 => Err(io::Error::last_os_error()),
         _ => Ok(()),
-    }
-}
-
-fn recv_fd(fd: &RawFd, buf: &[u8]) -> IoResult<usize> {
-    match unsafe { libc::recv(*fd, buf.as_ptr() as _, buf.len() as _, 0) } {
-        -1 => Err(IoError::last_os_error()),
-        n => Ok(n as usize),
     }
 }

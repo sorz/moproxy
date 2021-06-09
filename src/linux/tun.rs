@@ -23,7 +23,7 @@
 use std::{
     error::Error,
     fmt,
-    io::{Error as IoError, Result as IoResult},
+    io::{Error as IoError, ErrorKind, Result as IoResult},
     mem,
     os::{raw::c_short, unix::io::RawFd},
 };
@@ -77,7 +77,7 @@ pub enum TunError {
     SetIFFIoctlFailed(IoError),
     GetMTUIoctlFailed(IoError),
     SetFlagsFcntlFailed(IoError),
-    NetlinkFailure,
+    NetlinkFailure(IoError),
     Closed, // TODO
     FailedToRegisterFd(IoError),
 }
@@ -97,7 +97,7 @@ impl fmt::Display for TunError {
             }
             TunError::Closed => write!(f, "The tunnel has been closed"),
             TunError::GetMTUIoctlFailed(err) => write!(f, "ifmtu ioctl failed - {}", err),
-            TunError::NetlinkFailure => write!(f, "Netlink listener error"),
+            TunError::NetlinkFailure(err) => write!(f, "Netlink error: {}", err),
             TunError::FailedToRegisterFd(err) => {
                 write!(f, "Failed to register fd to loop - {}", err)
             }
@@ -212,15 +212,13 @@ impl TunStatus {
                 mem::size_of::<libc::sockaddr_nl>() as u32,
             )
         };
+        set_non_blocking(fd)?;
 
         if res != 0 {
             Err(TunError::Closed)
         } else {
             Ok(TunStatus {
-                events: vec![
-                    #[cfg(feature = "start_up")]
-                    TunEvent::Up(1500),
-                ],
+                events: vec![],
                 index: get_ifindex(&name),
                 fd: AsyncFd::new(fd).map_err(TunError::FailedToRegisterFd)?,
                 name,
@@ -228,7 +226,17 @@ impl TunStatus {
         }
     }
 
-    pub fn event(&mut self) -> Result<TunEvent, TunError> {
+    async fn netlink_recv(&self, buf: &mut [u8]) -> IoResult<usize> {
+        loop {
+            let mut guard = self.fd.readable().await?;
+            match guard.try_io(|fd| recv_fd(fd.get_ref(), buf)) {
+                Ok(n) => break n,
+                Err(_) => continue,
+            }
+        }
+    }
+
+    pub async fn event(&mut self) -> Result<TunEvent, TunError> {
         const DONE: u16 = libc::NLMSG_DONE as u16;
         const ERROR: u16 = libc::NLMSG_ERROR as u16;
         const INFO_SIZE: usize = mem::size_of::<IfInfomsg>();
@@ -243,11 +251,10 @@ impl TunStatus {
             }
 
             // read message
-            let size: libc::ssize_t =
-                unsafe { libc::recv(*self.fd.get_ref(), mem::transmute(&mut buf), buf.len(), 0) };
-            if size < 0 {
-                break Err(TunError::NetlinkFailure);
-            }
+            let size = self
+                .netlink_recv(&mut buf)
+                .await
+                .map_err(|err| TunError::NetlinkFailure(err))?;
 
             // cut buffer to size
             let size: usize = size as usize;
@@ -276,7 +283,10 @@ impl TunStatus {
                     libc::RTM_NEWLINK => {
                         // extract info struct
                         if body.len() < INFO_SIZE {
-                            return Err(TunError::NetlinkFailure);
+                            return Err(TunError::NetlinkFailure(IoError::new(
+                                ErrorKind::UnexpectedEof,
+                                "truncated message body",
+                            )));
                         }
                         let info: IfInfomsg = unsafe {
                             let mut info = [0u8; INFO_SIZE];
@@ -386,5 +396,12 @@ fn write_fd(fd: &RawFd, buf: &[u8]) -> IoResult<()> {
     match unsafe { libc::write(*fd, buf.as_ptr() as _, buf.len() as _) } {
         -1 => Err(IoError::last_os_error()),
         _ => Ok(()),
+    }
+}
+
+fn recv_fd(fd: &RawFd, buf: &[u8]) -> IoResult<usize> {
+    match unsafe { libc::recv(*fd, buf.as_ptr() as _, buf.len() as _, 0) } {
+        -1 => Err(IoError::last_os_error()),
+        n => Ok(n as usize),
     }
 }

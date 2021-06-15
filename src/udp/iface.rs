@@ -2,7 +2,9 @@ use super::UdpData;
 use crate::linux::tun::Tun;
 use bytes::BytesMut;
 use log;
-use pnet_packet::{ip::IpNextHeaderProtocols, ipv6::Ipv6Packet, udp::UdpPacket, Packet};
+use pnet_packet::{
+    ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, ipv6::Ipv6Packet, udp::UdpPacket, Packet,
+};
 use std::io;
 
 pub struct UdpIface {
@@ -36,11 +38,23 @@ impl From<Tun> for UdpIface {
 }
 
 fn parse_udp_packet(buf: &[u8]) -> Option<UdpData> {
-    let ip_pkt = Ipv6Packet::new(&buf)?;
-    if ip_pkt.get_next_header() != IpNextHeaderProtocols::Udp {
-        log::debug!("Drop non-UDP packet");
-        return None;
+    match buf.first()? >> 4 {
+        6 => {
+            let ip_pkt = Ipv6Packet::new(&buf)?;
+            if ip_pkt.get_next_header() != IpNextHeaderProtocols::Udp {
+                return None;
+            }
+            let udp_pkt = UdpPacket::new(ip_pkt.payload())?;
+            Some((&ip_pkt, &udp_pkt).into())
+        }
+        4 => {
+            let ip_pkt = Ipv4Packet::new(&buf)?;
+            if ip_pkt.get_next_level_protocol() != IpNextHeaderProtocols::Udp {
+                return None;
+            }
+            let udp_pkt = UdpPacket::new(ip_pkt.payload())?;
+            Some((&ip_pkt, &udp_pkt).into())
+        }
+        _ => None,
     }
-    let udp_pkt = UdpPacket::new(ip_pkt.payload())?;
-    Some((&ip_pkt, &udp_pkt).into())
 }

@@ -1,5 +1,5 @@
 pub mod iface;
-use pnet_packet::{ipv6::Ipv6Packet, udp::UdpPacket, Packet};
+use pnet_packet::{ipv4::Ipv4Packet, ipv6::Ipv6Packet, udp::UdpPacket, Packet};
 use std::net::{SocketAddrV4, SocketAddrV6};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -44,6 +44,19 @@ impl From<(&Ipv6Packet<'_>, &UdpPacket<'_>)> for UdpData {
         let sockets = SocketPairV6 {
             src: SocketAddrV6::new(ip.get_source(), udp.get_source(), 0, 0),
             dst: SocketAddrV6::new(ip.get_destination(), udp.get_destination(), 0, 0),
+        }
+        .into();
+        let data = udp.payload().into();
+        Self { sockets, data }
+    }
+}
+
+impl From<(&Ipv4Packet<'_>, &UdpPacket<'_>)> for UdpData {
+    fn from(pkts: (&Ipv4Packet<'_>, &UdpPacket<'_>)) -> Self {
+        let (ip, udp) = pkts;
+        let sockets = SocketPairV4 {
+            src: SocketAddrV4::new(ip.get_source(), udp.get_source()),
+            dst: SocketAddrV4::new(ip.get_destination(), udp.get_destination()),
         }
         .into();
         let data = udp.payload().into();

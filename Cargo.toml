@@ -45,6 +45,7 @@ zip = { version = "0.5", optional = true, default-features = false, features = [
     "deflate"
 ] }
 base64 = "0.13.0"
+pnet_packet = { version = "0.28", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
@@ -57,7 +58,7 @@ web_console = ["hyper"]
 rich_web = ["web_console", "zip"]
 score_script = ["rlua"]
 systemd = ["sd-notify"]
-udp = []
+udp = ["pnet_packet"]
 
 [build-dependencies]
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "blocking"] }

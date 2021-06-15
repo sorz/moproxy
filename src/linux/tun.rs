@@ -126,7 +126,7 @@ fn set_if_up(name: &IfName) -> Result<(), TunError> {
 }
 
 impl Tun {
-    pub fn create(name: &str) -> Result<Self, TunError> {
+    pub fn new(name: &str) -> Result<Self, TunError> {
         // construct request struct
         let mut req = Ifreq {
             name: [0u8; libc::IFNAMSIZ],

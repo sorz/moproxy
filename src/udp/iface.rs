@@ -97,12 +97,14 @@ impl UdpIface {
 
         // Concat headers & payload
         let mut buf = [0u8; BUF_SIZE];
-        let mut pkg_to_send = &mut buf[..];
-        pkg_to_send.write(&ip_buf)?;
-        pkg_to_send.write(&udp_buf)?;
-        pkg_to_send.write(&pkt.data)?;
-
-        self.tun.write(&pkg_to_send).await
+        let size = buf.len() - {
+            let mut pos = &mut buf[..];
+            pos.write(&ip_buf)?;
+            pos.write(&udp_buf)?;
+            pos.write(&pkt.data)?;
+            pos.len()
+        };
+        self.tun.write(&buf[..size]).await
     }
 }
 

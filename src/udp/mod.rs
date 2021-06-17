@@ -1,6 +1,9 @@
 pub mod iface;
 use pnet_packet::{ipv4::Ipv4Packet, ipv6::Ipv6Packet, udp::UdpPacket, Packet};
-use std::net::{SocketAddrV4, SocketAddrV6};
+use std::{
+    mem,
+    net::{SocketAddrV4, SocketAddrV6},
+};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum SocketPair {
@@ -22,8 +25,8 @@ pub struct SocketPairV6 {
 
 #[derive(Debug, Clone)]
 pub struct UdpData {
-    sockets: SocketPair,
-    data: Box<[u8]>,
+    pub sockets: SocketPair,
+    pub data: Box<[u8]>,
 }
 
 impl From<SocketPairV6> for SocketPair {
@@ -61,5 +64,14 @@ impl From<(&Ipv4Packet<'_>, &UdpPacket<'_>)> for UdpData {
         .into();
         let data = udp.payload().into();
         Self { sockets, data }
+    }
+}
+
+impl SocketPair {
+    pub fn reverse(&mut self) {
+        match self {
+            SocketPair::V4(socks) => mem::swap(&mut socks.src, &mut socks.dst),
+            SocketPair::V6(socks) => mem::swap(&mut socks.src, &mut socks.dst),
+        }
     }
 }

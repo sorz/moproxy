@@ -50,7 +50,7 @@ where
 
 macro_rules! err {
     ($msg:expr) => {
-        return Err(io::Error::new(ErrorKind::Other, $msg));
+        return Err(io::Error::new(ErrorKind::Other, $msg))
     };
 }
 

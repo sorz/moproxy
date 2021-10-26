@@ -105,7 +105,7 @@ impl NewClient {
             let n_methods = left.read_u8().await?;
             let mut buf = vec![0u8; n_methods as usize];
             left.read_exact(&mut buf).await?;
-            if buf.iter().find(|&&m| m == 0).is_none() {
+            if !buf.iter().any(|&m| m == 0) {
                 return error_invalid_input("SOCKSv5: No auth is required");
             }
             // Select no auth

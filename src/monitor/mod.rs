@@ -214,7 +214,7 @@ async fn send_metrics(monitor: &Monitor, graphite: &mut Graphite) -> io::Result<
                 Some(r("conns.error", status.conn_error as u64)),
             ]
         })
-        .filter_map(|v| v)
+        .flatten()
         .collect(); // FIXME: avoid allocate large memory
     graphite.write_records(records).await
 }

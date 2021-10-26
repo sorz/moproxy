@@ -437,7 +437,7 @@ impl ProxyServer {
                 fake_handshaking,
                 user_pass_auth,
             } => {
-                socks5::handshake(&mut stream, &addr, data, *fake_handshaking, user_pass_auth)
+                socks5::handshake(&mut stream, addr, data, *fake_handshaking, user_pass_auth)
                     .await?
             }
             ProxyProto::Http {
@@ -446,7 +446,7 @@ impl ProxyServer {
             } => {
                 http::handshake(
                     &mut stream,
-                    &addr,
+                    addr,
                     data,
                     *connect_with_payload,
                     user_pass_auth,

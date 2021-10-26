@@ -144,7 +144,7 @@ async fn main() {
             #[cfg(unix)]
             {
                 if http_addr.starts_with('/') {
-                    let sock = web::AutoRemoveFile::new(&http_addr);
+                    let sock = web::AutoRemoveFile::new(http_addr);
                     let listener = UnixListener::bind(&sock).expect("fail to bind web server");
                     let serv = web::run_server(UnixListenerStream(listener), monitor.clone());
                     tokio::spawn(serv);

@@ -10,7 +10,6 @@ use std::{
     self,
     collections::{HashMap, HashSet},
     io,
-    iter::FromIterator,
     net::SocketAddr,
     sync::Arc,
     time::{Duration, SystemTime},

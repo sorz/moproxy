@@ -16,7 +16,7 @@ Features:
    first response)
  * Optional status web page (latency, traffic, etc. w/ curl-friendly output)
  * Optional [Graphite](https://graphite.readthedocs.io/) and
-   [Prometheus](https://prometheus.io/) support
+   OpenMetrics ([Prometheus](https://prometheus.io/)) support
    (to build fancy dashboard with [Grafana](https://grafana.com/) for example)
  * Customizable proxy selection algorithm with Lua script (see
    [conf/simple_scroe.lua](conf/simple_score.lua)).
@@ -125,7 +125,7 @@ given IP address and port number. It returns a HTML page for web browser,
 or a ASCII table for `curl`.
 
 The stats page only provides current metrics and a few aggregations. Graphite
-(via `--graphite`) or Prometheus (via `--stats-bind` then `\metrics`) should
+(via `--graphite`) or OpenMetrics (via `--stats-bind` then `\metrics`) should
 be used if you want a full history.
 
 Some examples of Prometheus query (Grafana variant):

@@ -7,6 +7,8 @@ use std::{
 use super::{ServerStatus, Status};
 use crate::{monitor::Monitor, proxy::Delay};
 
+const CONTENT_TYPE: &str = "application/openmetrics-text; version=1.0.0; charset=utf-8";
+
 fn new_metric(buf: &mut String, name: &str, metric_type: &str, help: &str) {
     writeln!(buf, "# HELP moproxy_{} {}", name, help).unwrap();
     writeln!(buf, "# TYPE moproxy_{} {}", name, metric_type).unwrap();
@@ -37,7 +39,6 @@ pub fn exporter(start_time: &Instant, monitor: &Monitor) -> Response<Body> {
         ($name:expr, $help:expr, $func:expr) => {
             new_metric(&mut buf, $name, "gauge", $help);
             each_server(&mut buf, $name, &status.servers, $func);
-            writeln!(&mut buf).unwrap();
         };
     }
 
@@ -80,8 +81,9 @@ pub fn exporter(start_time: &Instant, monitor: &Monitor) -> Response<Body> {
         |s| s.server.status_snapshot().score
     );
 
+    writeln!(buf, "# EOF").unwrap();
     Response::builder()
-        .header("Content-Type", "text/plain; charset=utf-8")
+        .header("Content-Type", CONTENT_TYPE)
         .body(buf.into())
         .unwrap()
 }

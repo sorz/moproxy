@@ -1,5 +1,5 @@
 mod helpers;
-mod prometheus;
+mod open_metrics;
 #[cfg(feature = "rich_web")]
 mod rich;
 use futures_core::Stream;
@@ -204,7 +204,7 @@ fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Res
                 .body(json.into())
                 .unwrap()
         }
-        "/metrics" => prometheus::exporter(start_time, monitor),
+        "/metrics" => open_metrics::exporter(start_time, monitor),
         path => {
             #[cfg(feature = "rich_web")]
             let resp = BUNDLE.get(path).map(|(mime, body)| {

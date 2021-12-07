@@ -65,6 +65,7 @@ impl UserPassAuthCredential {
     }
 }
 
+#[allow(clippy::mutable_key_type)]
 #[derive(Debug, Serialize)]
 pub struct ProxyServer {
     pub addr: SocketAddr,

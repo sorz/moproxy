@@ -27,7 +27,7 @@ impl ResourceBundle {
         file.read_to_end(&mut content)
             .expect("error on read moproxy-web bundle");
 
-        let name_ext = name.rsplitn(2, '.').next();
+        let name_ext = name.rsplit_once('.').map(|x| x.1);
         let mime = match name_ext {
             Some("html") => "text/html",
             Some("js") => "application/javascript",

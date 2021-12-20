@@ -16,8 +16,8 @@ tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 net2 = "0.2"
 clap = { version = "2", features = ["yaml", "color"] }
-log = "0.4"
-env_logger = "0.9"
+tracing = "0.1"
+tracing-subscriber = "0.3"
 serde = { version = "1.0", features = ["rc"] }
 serde_json = "1.0"
 serde_derive = "1.0"

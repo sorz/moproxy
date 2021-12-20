@@ -3,7 +3,6 @@ mod graphite;
 use rlua::prelude::*;
 mod alive_test;
 mod traffic;
-use log::{debug, warn};
 use parking_lot::Mutex;
 use rand::{self, Rng};
 use std::{
@@ -17,6 +16,7 @@ use std::{
 #[cfg(feature = "score_script")]
 use std::{error::Error, fs::File, io::Read};
 use tokio::time::{interval_at, Instant};
+use tracing::{debug, warn};
 
 pub use self::traffic::Throughput;
 use self::{

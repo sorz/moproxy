@@ -1,15 +1,8 @@
 use clap::{load_yaml, AppSettings};
 use futures_util::{stream, StreamExt};
 use ini::Ini;
-use log::{debug, error, info, warn, LevelFilter};
 use std::{
-    collections::HashSet,
-    env,
-    io::{self, Write},
-    net::SocketAddr,
-    str::FromStr,
-    sync::Arc,
-    time::Duration,
+    collections::HashSet, env, io, net::SocketAddr, str::FromStr, sync::Arc, time::Duration,
 };
 #[cfg(all(feature = "web_console", unix))]
 use tokio::net::UnixListener;
@@ -19,6 +12,7 @@ use tokio::{
     self,
     net::{TcpListener, TcpStream},
 };
+use tracing::{debug, error, info, warn, Level};
 
 #[cfg(all(unix, feature = "web_console"))]
 use moproxy::futures_stream::UnixListenerStream;
@@ -63,24 +57,14 @@ async fn main() {
         .setting(AppSettings::UnifiedHelpMessage)
         .get_matches();
 
-    let mut logger = env_logger::Builder::new();
-    if let Ok(env_log) = env::var("RUST_LOG") {
-        logger.parse_filters(&env_log);
-    }
-    let log_level = args
+    let log_level: Level = args
         .value_of("log-level")
         .unwrap_or("info")
         .parse()
         .expect("unknown log level");
-    logger
-        .filter(None, log_level)
-        .filter_module("tokio_executor", LevelFilter::Warn)
-        .filter_module("tokio_net", LevelFilter::Warn)
-        .filter_module("hyper", LevelFilter::Warn)
-        .filter_module("mio", LevelFilter::Warn)
-        .filter_module("ini", LevelFilter::Warn)
-        .target(env_logger::Target::Stdout)
-        .format(|buf, r| writeln!(buf, "[{}] {}", r.level(), r.args()))
+    tracing_subscriber::fmt()
+        .without_time()
+        .with_max_level(log_level)
         .init();
 
     let host = args

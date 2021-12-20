@@ -9,6 +9,7 @@ use tokio::{
     io::AsyncReadExt,
     time::{timeout, Instant},
 };
+use tracing::{debug, warn};
 
 use super::Monitor;
 #[cfg(all(feature = "systemd", target_os = "linux"))]
@@ -59,7 +60,7 @@ impl fmt::Display for TestProgress {
 }
 
 pub(crate) async fn test_all(monitor: &Monitor) {
-    log::debug!("testing all servers...");
+    debug!("testing all servers...");
     #[cfg(all(feature = "systemd", target_os = "linux"))]
     let progress = TestProgress::new(monitor.servers().len());
     #[cfg(all(feature = "systemd", target_os = "linux"))]
@@ -83,7 +84,7 @@ pub(crate) async fn test_all(monitor: &Monitor) {
                             .context(|ctx| server.update_delay_with_lua(delay, ctx))
                         {
                             Ok(()) => caculated = true,
-                            Err(err) => log::warn!("fail to update score w/ Lua script: {}", err),
+                            Err(err) => warn!("fail to update score w/ Lua script: {}", err),
                         }
                     }
                     if !caculated {
@@ -143,7 +144,7 @@ async fn alive_test(server: &ProxyServer) -> io::Result<Duration> {
 
     if req_tid == tid(&buf) {
         let t = now.elapsed();
-        log::debug!("[{}] delay {}ms", server.tag, t.as_millis());
+        debug!("[{}] delay {}ms", server.tag, t.as_millis());
         Ok(t)
     } else {
         Err(io::Error::new(io::ErrorKind::Other, "unknown response"))

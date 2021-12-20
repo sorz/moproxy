@@ -1,4 +1,3 @@
-use log::{debug, trace};
 use std::{
     cell::RefCell,
     cmp, fmt,
@@ -16,6 +15,7 @@ use tokio::{
     net::TcpStream,
     time::{sleep, Instant, Sleep},
 };
+use tracing::{debug, trace};
 
 use self::Side::{Left, Right};
 use crate::proxy::{ProxyServer, Traffic};

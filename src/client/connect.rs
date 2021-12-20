@@ -1,5 +1,4 @@
 use bytes::Bytes;
-use log::info;
 use std::{
     cmp,
     collections::VecDeque,
@@ -10,6 +9,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::{net::TcpStream, time::timeout};
+use tracing::info;
 
 use crate::proxy::{Destination, ProxyServer};
 

@@ -1,7 +1,7 @@
-use log::{info, trace, warn};
 use sd_notify::{notify, NotifyState};
 use std::{borrow::Cow, env, process, time::Duration};
 use tokio::time::sleep;
+use tracing::{info, trace, warn};
 
 fn notify_enabled() -> bool {
     env::var_os("NOTIFY_SOCKET").is_some()

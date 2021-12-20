@@ -1,7 +1,6 @@
 mod connect;
 mod tls_parser;
 use bytes::{Bytes, BytesMut};
-use log::{debug, info, warn};
 use std::{
     borrow::Cow, cmp, future::Future, io, net::SocketAddr, pin::Pin, sync::Arc, time::Duration,
 };
@@ -10,6 +9,7 @@ use tokio::{
     net::TcpStream,
     time::timeout,
 };
+use tracing::{debug, info, warn};
 
 #[cfg(target_os = "linux")]
 use crate::linux::tcp::{get_original_dest, get_original_dest6};

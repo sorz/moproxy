@@ -1,11 +1,11 @@
 use httparse::{Response, Status, EMPTY_HEADER};
-use log::{debug, trace};
 use std::io::{self, ErrorKind};
 use std::net::IpAddr;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
+use tracing::{debug, trace};
 
 use crate::proxy::{Address, Destination};
 

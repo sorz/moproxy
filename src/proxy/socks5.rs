@@ -1,11 +1,11 @@
 use crate::proxy::{Address, Destination};
-use log::trace;
 use std::io::{self, ErrorKind};
 use std::net::IpAddr;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
+use tracing::trace;
 
 use super::UserPassAuthCredential;
 

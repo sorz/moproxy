@@ -11,7 +11,6 @@ use hyper::{
 };
 #[cfg(feature = "rich_web")]
 use lazy_static::lazy_static;
-use log::warn;
 use prettytable::{cell, format::consts::FORMAT_NO_LINESEP_WITH_TITLE, row, Table};
 use serde_derive::Serialize;
 use std::{
@@ -26,6 +25,7 @@ use tokio::{
     self,
     io::{AsyncRead, AsyncWrite},
 };
+use tracing::warn;
 
 use crate::{
     monitor::{Monitor, Throughput},

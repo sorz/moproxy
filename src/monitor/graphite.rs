@@ -1,10 +1,10 @@
-use log::{debug, warn};
 use std::{
     io::{self, Write},
     net::SocketAddr,
     time::{Duration, SystemTime},
 };
 use tokio::{io::AsyncWriteExt, net::TcpStream, time::timeout};
+use tracing::{debug, warn};
 
 static GRAPHITE_TIMEOUT_SECS: u64 = 5;
 

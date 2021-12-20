@@ -3,7 +3,6 @@ pub mod http;
 #[cfg(feature = "score_script")]
 use rlua::prelude::*;
 pub mod socks5;
-use log::debug;
 use parking_lot::{Mutex, RwLock};
 use serde::{Serialize, Serializer};
 use std::{
@@ -19,6 +18,7 @@ use std::{
     time::Duration,
 };
 use tokio::net::TcpStream;
+use tracing::debug;
 
 const GRAPHITE_PATH_PREFIX: &str = "moproxy.proxy_servers";
 

@@ -9,7 +9,7 @@ use tokio::{
     io::AsyncReadExt,
     time::{timeout, Instant},
 };
-use tracing::{debug, warn};
+use tracing::{debug, instrument, warn};
 
 use super::Monitor;
 #[cfg(all(feature = "systemd", target_os = "linux"))]
@@ -59,8 +59,9 @@ impl fmt::Display for TestProgress {
     }
 }
 
+#[instrument(level = "debug", skip_all)]
 pub(crate) async fn test_all(monitor: &Monitor) {
-    debug!("testing all servers...");
+    debug!("Start testing all servers");
     #[cfg(all(feature = "systemd", target_os = "linux"))]
     let progress = TestProgress::new(monitor.servers().len());
     #[cfg(all(feature = "systemd", target_os = "linux"))]
@@ -101,6 +102,7 @@ pub(crate) async fn test_all(monitor: &Monitor) {
     monitor.resort();
 }
 
+#[instrument(level = "debug", skip_all, fields(proxy = %server.tag))]
 async fn alive_test(server: &ProxyServer) -> io::Result<Duration> {
     let request = [
         0,
@@ -144,7 +146,7 @@ async fn alive_test(server: &ProxyServer) -> io::Result<Duration> {
 
     if req_tid == tid(&buf) {
         let t = now.elapsed();
-        debug!("[{}] delay {}ms", server.tag, t.as_millis());
+        debug!("{}ms", t.as_millis());
         Ok(t)
     } else {
         Err(io::Error::new(io::ErrorKind::Other, "unknown response"))

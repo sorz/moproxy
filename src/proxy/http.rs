@@ -5,7 +5,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
-use tracing::{debug, trace};
+use tracing::{debug, instrument, trace};
 
 use crate::proxy::{Address, Destination};
 
@@ -24,6 +24,7 @@ macro_rules! ensure_200 {
 
 const BUF_LEN: usize = 1024;
 
+#[instrument(name = "http_handshake", level = "debug", skip_all)]
 pub async fn handshake<T>(
     stream: &mut TcpStream,
     addr: &Destination,

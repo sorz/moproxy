@@ -4,7 +4,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tokio::{io::AsyncWriteExt, net::TcpStream, time::timeout};
-use tracing::{debug, warn};
+use tracing::{debug, instrument, warn};
 
 static GRAPHITE_TIMEOUT_SECS: u64 = 5;
 
@@ -29,6 +29,7 @@ impl Graphite {
         }
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub async fn write_records(&mut self, records: Vec<Record>) -> io::Result<()> {
         let Graphite {
             ref server_addr,

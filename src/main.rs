@@ -12,7 +12,7 @@ use tokio::{
     self,
     net::{TcpListener, TcpStream},
 };
-use tracing::{debug, error, info, warn, Level};
+use tracing::{debug, error, info, instrument, warn, Level};
 
 #[cfg(all(unix, feature = "web_console"))]
 use moproxy::futures_stream::UnixListenerStream;
@@ -158,32 +158,7 @@ async fn main() {
     #[cfg(unix)]
     tokio::spawn(async move {
         while signals.recv().await.is_some() {
-            #[cfg(all(feature = "systemd", target_os = "linux"))]
-            systemd::notify_realoding();
-
-            // feature: check deadlocks on signal
-            let deadlocks = parking_lot::deadlock::check_deadlock();
-            if !deadlocks.is_empty() {
-                error!("{} deadlocks detected!", deadlocks.len());
-                for (i, threads) in deadlocks.iter().enumerate() {
-                    debug!("Deadlock #{}", i);
-                    for t in threads {
-                        debug!("Thread Id {:#?}", t.thread_id());
-                        debug!("{:#?}", t.backtrace());
-                    }
-                }
-            }
-
-            // actual reload
-            debug!("SIGHUP received, reload server list.");
-            match servers_cfg.load() {
-                Ok(servers) => monitor_.update_servers(servers),
-                Err(err) => error!("fail to reload servers: {}", err),
-            }
-            // TODO: reload lua script?
-
-            #[cfg(all(feature = "systemd", target_os = "linux"))]
-            systemd::notify_ready();
+            reload_daemon(&servers_cfg, &monitor_);
         }
     });
 
@@ -250,6 +225,37 @@ async fn main() {
     drop(sock_file);
 }
 
+#[instrument(level = "debug", skip_all)]
+fn reload_daemon(servers_cfg: &ServerListCfg, monitor: &Monitor) {
+    #[cfg(all(feature = "systemd", target_os = "linux"))]
+    systemd::notify_realoding();
+
+    // feature: check deadlocks on signal
+    let deadlocks = parking_lot::deadlock::check_deadlock();
+    if !deadlocks.is_empty() {
+        error!("{} deadlocks detected!", deadlocks.len());
+        for (i, threads) in deadlocks.iter().enumerate() {
+            debug!("Deadlock #{}", i);
+            for t in threads {
+                debug!("Thread Id {:#?}", t.thread_id());
+                debug!("{:#?}", t.backtrace());
+            }
+        }
+    }
+
+    // actual reload
+    debug!("SIGHUP received, reload server list.");
+    match servers_cfg.load() {
+        Ok(servers) => monitor.update_servers(servers),
+        Err(err) => error!("fail to reload servers: {}", err),
+    }
+    // TODO: reload lua script?
+
+    #[cfg(all(feature = "systemd", target_os = "linux"))]
+    systemd::notify_ready();
+}
+
+#[instrument(level = "debug", skip_all, fields(on_port=sock.local_addr()?.port(), peer=?sock.peer_addr()?))]
 async fn handle_client(
     sock: TcpStream,
     servers: ServerList,
@@ -260,7 +266,7 @@ async fn handle_client(
     let client = NewClient::from_socket(sock, servers).await?;
     let client = if remote_dns && client.dest.port == 443 {
         client
-            .retrive_dest()
+            .retrieve_dest_from_sni()
             .await?
             .connect_server(n_parallel)
             .await
@@ -338,6 +344,7 @@ impl ServerListCfg {
         }
     }
 
+    #[instrument(level = "debug", skip_all)]
     fn load(&self) -> Result<Vec<Arc<ProxyServer>>, &'static str> {
         let mut servers = self.cli_servers.clone();
         if let Some(path) = &self.path {

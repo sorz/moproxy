@@ -1,7 +1,7 @@
 use sd_notify::{notify, NotifyState};
 use std::{borrow::Cow, env, process, time::Duration};
 use tokio::time::sleep;
-use tracing::{info, trace, warn};
+use tracing::{info, instrument, trace, warn};
 
 fn notify_enabled() -> bool {
     env::var_os("NOTIFY_SOCKET").is_some()
@@ -43,6 +43,7 @@ pub fn watchdog_timeout() -> Option<Duration> {
     Some(Duration::from_micros(usec))
 }
 
+#[instrument(level = "debug", skip_all)]
 pub async fn watchdog_loop(timeout: Duration) -> ! {
     info!("Watchdog enabled, poke for every {}ms", timeout.as_millis());
     loop {

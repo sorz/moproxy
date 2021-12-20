@@ -18,7 +18,7 @@ use std::{
     time::Duration,
 };
 use tokio::net::TcpStream;
-use tracing::debug;
+use tracing::{debug, instrument};
 
 const GRAPHITE_PATH_PREFIX: &str = "moproxy.proxy_servers";
 
@@ -194,10 +194,20 @@ impl ToLua<'_> for &ProxyServer {
     }
 }
 
-#[derive(Hash, Clone, Debug)]
+#[derive(Hash, Clone)]
 pub enum Address {
     Ip(IpAddr),
     Domain(Box<str>),
+}
+
+impl fmt::Debug for Address {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Address::Domain(name) => write!(f, "{}", name),
+            Address::Ip(IpAddr::V4(addr)) => write!(f, "{}", addr),
+            Address::Ip(IpAddr::V6(addr)) => write!(f, "[{}]", addr),
+        }
+    }
 }
 
 impl From<[u8; 4]> for Address {
@@ -218,10 +228,16 @@ impl From<String> for Address {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Destination {
     pub host: Address,
     pub port: u16,
+}
+
+impl fmt::Debug for Destination {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}:{}", self.host, self.port)
+    }
 }
 
 impl From<SocketAddr> for Destination {
@@ -424,12 +440,13 @@ impl ProxyServer {
         listen_ports.is_empty() || listen_ports.contains(&port)
     }
 
+    #[instrument(level = "debug", skip_all)]
     pub async fn connect<T>(&self, addr: &Destination, data: Option<T>) -> io::Result<TcpStream>
     where
         T: AsRef<[u8]> + 'static,
     {
         let mut stream = TcpStream::connect(&self.addr).await?;
-        debug!("connected with {:?}", stream.peer_addr());
+        debug!(remote = %stream.peer_addr()?, "TCP established");
         stream.set_nodelay(true)?;
 
         match &self.proto {

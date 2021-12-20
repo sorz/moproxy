@@ -9,10 +9,11 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::{net::TcpStream, time::timeout};
-use tracing::info;
+use tracing::{info, instrument};
 
 use crate::proxy::{Destination, ProxyServer};
 
+#[instrument(level = "debug", skip_all, fields(proxy = %server.tag))]
 async fn try_connect(
     dest: Destination,
     server: Arc<ProxyServer>,
@@ -93,8 +94,8 @@ impl<'a> Future for TryConnectAll<'a> {
                 let (server, conn) = &mut self.connects[i];
                 match conn.as_mut().poll(cx) {
                     // error, stop trying, drop it.
-                    Poll::Ready(Err(e)) => {
-                        info!("connect {} via {} error: {}", dest, server, e);
+                    Poll::Ready(Err(err)) => {
+                        info!(proxy = %server.tag, ?err, "Failed");
                         drop(self.connects.remove(i));
                     }
                     // not ready, keep here, poll next one.

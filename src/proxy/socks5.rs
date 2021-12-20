@@ -5,10 +5,11 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
 };
-use tracing::trace;
+use tracing::{instrument, trace};
 
 use super::UserPassAuthCredential;
 
+#[instrument(name = "socks5_handshake", level = "debug", skip_all)]
 pub async fn handshake<T>(
     stream: &mut TcpStream,
     addr: &Destination,

@@ -25,7 +25,7 @@ use tokio::{
     self,
     io::{AsyncRead, AsyncWrite},
 };
-use tracing::warn;
+use tracing::{instrument, warn};
 
 use crate::{
     monitor::{Monitor, Throughput},
@@ -226,6 +226,7 @@ fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Res
     }
 }
 
+#[instrument(name = "web_server", level = "debug", skip_all)]
 pub async fn run_server<S, IO, E>(stream: S, monitor: Monitor)
 where
     S: Stream<Item = Result<IO, E>>,

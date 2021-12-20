@@ -16,7 +16,7 @@ use std::{
 #[cfg(feature = "score_script")]
 use std::{error::Error, fs::File, io::Read};
 use tokio::time::{interval_at, Instant};
-use tracing::{debug, warn};
+use tracing::{debug, instrument, warn};
 
 pub use self::traffic::Throughput;
 use self::{
@@ -138,6 +138,7 @@ impl Monitor {
 
     /// Start monitoring delays.
     /// Returned Future won't return unless error on timer.
+    #[instrument(level = "debug", skip_all)]
     pub async fn monitor_delay(self, probe: u64) {
         let mut graphite = self.graphite.map(Graphite::new);
         let interval = Duration::from_secs(probe);
@@ -186,7 +187,7 @@ fn info_stats(infos: &[Arc<ProxyServer>]) -> String {
     for info in infos.iter().take(5) {
         stats += &match info.score() {
             None => format!(" {}: --,", info.tag),
-            Some(t) => format!(" {}: {},", info.tag, t),
+            Some(t) => format!(" {}/{},", info.tag, t),
         };
     }
     stats.pop();
@@ -194,6 +195,7 @@ fn info_stats(infos: &[Arc<ProxyServer>]) -> String {
 }
 
 // send graphite metrics if need
+#[instrument(level = "debug", skip_all)]
 async fn send_metrics(monitor: &Monitor, graphite: &mut Graphite) -> io::Result<()> {
     let records = monitor
         .servers()

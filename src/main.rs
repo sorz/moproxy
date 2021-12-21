@@ -28,6 +28,7 @@ use moproxy::{
     monitor::{Monitor, ServerList},
     proxy::{ProxyProto, ProxyServer, UserPassAuthCredential},
 };
+use tracing_subscriber::prelude::*;
 
 trait FromOptionStr<E, T: FromStr<Err = E>> {
     fn parse(&self) -> Result<Option<T>, E>;
@@ -62,10 +63,29 @@ async fn main() {
         .unwrap_or("info")
         .parse()
         .expect("unknown log level");
-    tracing_subscriber::fmt()
-        .without_time()
-        .with_max_level(log_level)
-        .init();
+
+    #[cfg(all(feature = "systemd", target_os = "linux"))]
+    {
+        let mut use_journal = false;
+        if systemd::is_stderr_connected_to_journal() {
+            match tracing_journald::layer() {
+                Ok(layer) => {
+                    tracing_subscriber::registry().with(layer).init();
+                    use_journal = true;
+                    debug!("Use native journal protocol");
+                }
+                Err(err) => eprintln!(
+                    "Failed to connect systemd-journald: {}; fallback to STDERR.",
+                    err
+                ),
+            }
+        }
+        if !use_journal {
+            tracing_subscriber::fmt().with_max_level(log_level).init();
+        }
+    }
+    #[cfg(not(all(feature = "systemd", target_os = "linux")))]
+    tracing_subscriber::fmt().with_max_level(log_level).init();
 
     let host = args
         .value_of("host")

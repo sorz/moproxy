@@ -1,5 +1,6 @@
+use nix::sys::stat::fstat;
 use sd_notify::{notify, NotifyState};
-use std::{borrow::Cow, env, process, time::Duration};
+use std::{borrow::Cow, env, io, os::unix::prelude::AsRawFd, process, time::Duration};
 use tokio::time::sleep;
 use tracing::{info, instrument, trace, warn};
 
@@ -43,7 +44,7 @@ pub fn watchdog_timeout() -> Option<Duration> {
     Some(Duration::from_micros(usec))
 }
 
-#[instrument(level = "debug", skip_all)]
+#[instrument(skip_all)]
 pub async fn watchdog_loop(timeout: Duration) -> ! {
     info!("Watchdog enabled, poke for every {}ms", timeout.as_millis());
     loop {
@@ -53,4 +54,21 @@ pub async fn watchdog_loop(timeout: Duration) -> ! {
         }
         sleep(timeout).await;
     }
+}
+
+/// Try to read the device & inode number from environment variable `JOURNAL_STREAM`.
+fn get_journal_stream_dev_ino() -> Option<(u64, u64)> {
+    let stream_env = env::var_os("JOURNAL_STREAM")?;
+    let (dev, ino) = stream_env.to_str()?.split_once(':')?;
+    Some((dev.parse().ok()?, ino.parse().ok()?))
+}
+
+/// Check if STDERR is connected with systemd's journal service.
+pub fn is_stderr_connected_to_journal() -> bool {
+    if let Some((dev, ino)) = get_journal_stream_dev_ino() {
+        if let Ok(stat) = fstat(io::stderr().as_raw_fd()) {
+            return stat.st_dev == dev && stat.st_ino == ino;
+        }
+    }
+    false
 }

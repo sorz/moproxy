@@ -49,13 +49,14 @@ base64 = "0.13.0"
 libc = "0.2"
 nix = "0.23"
 sd-notify = { version = "0.3.0", optional = true }
+tracing-journald = { version = "0.2", optional = true }
 
 [features]
 default = ["web_console", "score_script", "systemd", "rich_web"]
 web_console = ["hyper"]
 rich_web = ["web_console", "zip"]
 score_script = ["rlua"]
-systemd = ["sd-notify"]
+systemd = ["sd-notify", "tracing-journald"]
 
 [build-dependencies]
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "blocking"] }

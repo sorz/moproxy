@@ -12,7 +12,7 @@ use tokio::{
     self,
     net::{TcpListener, TcpStream},
 };
-use tracing::{debug, error, info, instrument, warn, Level};
+use tracing::{debug, error, info, instrument, warn};
 
 #[cfg(all(unix, feature = "web_console"))]
 use moproxy::futures_stream::UnixListenerStream;
@@ -28,7 +28,7 @@ use moproxy::{
     monitor::{Monitor, ServerList},
     proxy::{ProxyProto, ProxyServer, UserPassAuthCredential},
 };
-use tracing_subscriber::prelude::*;
+use tracing_subscriber::{filter::LevelFilter, prelude::*};
 
 trait FromOptionStr<E, T: FromStr<Err = E>> {
     fn parse(&self) -> Result<Option<T>, E>;
@@ -58,20 +58,19 @@ async fn main() {
         .setting(AppSettings::UnifiedHelpMessage)
         .get_matches();
 
-    let log_level: Level = args
+    let log_level: LevelFilter = args
         .value_of("log-level")
         .unwrap_or("info")
         .parse()
         .expect("unknown log level");
+    let mut log_registry: Option<_> = tracing_subscriber::registry().with(log_level).into();
 
     #[cfg(all(feature = "systemd", target_os = "linux"))]
     {
-        let mut use_journal = false;
         if systemd::is_stderr_connected_to_journal() {
             match tracing_journald::layer() {
                 Ok(layer) => {
-                    tracing_subscriber::registry().with(layer).init();
-                    use_journal = true;
+                    log_registry.take().unwrap().with(layer).init();
                     debug!("Use native journal protocol");
                 }
                 Err(err) => eprintln!(
@@ -80,12 +79,10 @@ async fn main() {
                 ),
             }
         }
-        if !use_journal {
-            tracing_subscriber::fmt().with_max_level(log_level).init();
-        }
     }
-    #[cfg(not(all(feature = "systemd", target_os = "linux")))]
-    tracing_subscriber::fmt().with_max_level(log_level).init();
+    if let Some(registry) = log_registry {
+        registry.with(tracing_subscriber::fmt::layer()).init();
+    }
 
     let host = args
         .value_of("host")

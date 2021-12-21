@@ -440,7 +440,7 @@ impl ProxyServer {
         listen_ports.is_empty() || listen_ports.contains(&port)
     }
 
-    #[instrument(level = "debug", skip_all)]
+    #[instrument(skip_all)]
     pub async fn connect<T>(&self, addr: &Destination, data: Option<T>) -> io::Result<TcpStream>
     where
         T: AsRef<[u8]> + 'static,

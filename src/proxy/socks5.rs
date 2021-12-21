@@ -9,7 +9,7 @@ use tracing::{instrument, trace};
 
 use super::UserPassAuthCredential;
 
-#[instrument(name = "socks5_handshake", level = "debug", skip_all)]
+#[instrument(name = "socks5_handshake", skip_all)]
 pub async fn handshake<T>(
     stream: &mut TcpStream,
     addr: &Destination,

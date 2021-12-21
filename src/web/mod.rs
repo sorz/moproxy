@@ -226,7 +226,7 @@ fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Res
     }
 }
 
-#[instrument(name = "web_server", level = "debug", skip_all)]
+#[instrument(name = "web_server", skip_all)]
 pub async fn run_server<S, IO, E>(stream: S, monitor: Monitor)
 where
     S: Stream<Item = Result<IO, E>>,

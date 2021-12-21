@@ -72,7 +72,7 @@ fn normalize_socket_addr(socket: &SocketAddr) -> Cow<SocketAddr> {
     }
 }
 
-#[instrument(level = "debug", skip_all)]
+#[instrument(skip_all)]
 async fn accept_socks5(client: &mut TcpStream) -> io::Result<Destination> {
     // Not a NATed connection, treated as SOCKSv5
     // Parse version
@@ -129,7 +129,7 @@ async fn accept_socks5(client: &mut TcpStream) -> io::Result<Destination> {
 }
 
 impl NewClient {
-    #[instrument(level = "debug", name = "retrieve_dest", skip_all)]
+    #[instrument(name = "retrieve_dest", skip_all)]
     pub async fn from_socket(mut left: TcpStream, list: ServerList) -> io::Result<Self> {
         let src = left.peer_addr()?;
         let from_port = left.local_addr()?.port();
@@ -166,7 +166,7 @@ impl NewClient {
 }
 
 impl NewClient {
-    #[instrument(level = "debug", skip_all, fields(dest=?self.dest))]
+    #[instrument(skip_all, fields(dest=?self.dest))]
     pub async fn retrieve_dest_from_sni(self) -> io::Result<NewClientWithData> {
         let NewClient {
             mut left,
@@ -216,7 +216,7 @@ impl NewClient {
         })
     }
 
-    #[instrument(level = "debug", skip_all, fields(dest=?self.dest))]
+    #[instrument(skip_all, fields(dest=?self.dest))]
     async fn connect_server(
         self,
         n_parallel: usize,
@@ -278,7 +278,7 @@ impl Connectable for NewClientWithData {
 }
 
 impl FailedClient {
-    #[instrument(level = "debug", skip_all, fields(dest=?self.dest))]
+    #[instrument(skip_all, fields(dest=?self.dest))]
     pub async fn direct_connect(
         self,
         pseudo_server: Arc<ProxyServer>,
@@ -309,7 +309,7 @@ impl FailedClient {
 }
 
 impl ConnectedClient {
-    #[instrument(level = "debug", skip_all, fields(dest=?self.dest, proxy=%self.server.tag))]
+    #[instrument(skip_all, fields(dest=?self.dest, proxy=%self.server.tag))]
     pub async fn serve(self) -> io::Result<()> {
         let ConnectedClient {
             left,

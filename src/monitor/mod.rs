@@ -138,7 +138,7 @@ impl Monitor {
 
     /// Start monitoring delays.
     /// Returned Future won't return unless error on timer.
-    #[instrument(level = "debug", skip_all)]
+    #[instrument(skip_all)]
     pub async fn monitor_delay(self, probe: u64) {
         let mut graphite = self.graphite.map(Graphite::new);
         let interval = Duration::from_secs(probe);
@@ -195,7 +195,7 @@ fn info_stats(infos: &[Arc<ProxyServer>]) -> String {
 }
 
 // send graphite metrics if need
-#[instrument(level = "debug", skip_all)]
+#[instrument(skip_all)]
 async fn send_metrics(monitor: &Monitor, graphite: &mut Graphite) -> io::Result<()> {
     let records = monitor
         .servers()

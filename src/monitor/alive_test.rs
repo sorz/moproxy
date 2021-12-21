@@ -59,7 +59,7 @@ impl fmt::Display for TestProgress {
     }
 }
 
-#[instrument(level = "debug", skip_all)]
+#[instrument(skip_all)]
 pub(crate) async fn test_all(monitor: &Monitor) {
     debug!("Start testing all servers");
     #[cfg(all(feature = "systemd", target_os = "linux"))]
@@ -102,7 +102,7 @@ pub(crate) async fn test_all(monitor: &Monitor) {
     monitor.resort();
 }
 
-#[instrument(level = "debug", skip_all, fields(proxy = %server.tag))]
+#[instrument(skip_all, fields(proxy = %server.tag))]
 async fn alive_test(server: &ProxyServer) -> io::Result<Duration> {
     let request = [
         0,

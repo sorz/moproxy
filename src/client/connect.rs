@@ -13,7 +13,7 @@ use tracing::{info, instrument};
 
 use crate::proxy::{Destination, ProxyServer};
 
-#[instrument(level = "debug", skip_all, fields(proxy = %server.tag))]
+#[instrument(skip_all, fields(proxy = %server.tag))]
 async fn try_connect(
     dest: Destination,
     server: Arc<ProxyServer>,

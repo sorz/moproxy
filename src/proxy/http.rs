@@ -24,7 +24,7 @@ macro_rules! ensure_200 {
 
 const BUF_LEN: usize = 1024;
 
-#[instrument(name = "http_handshake", level = "debug", skip_all)]
+#[instrument(name = "http_handshake", skip_all)]
 pub async fn handshake<T>(
     stream: &mut TcpStream,
     addr: &Destination,

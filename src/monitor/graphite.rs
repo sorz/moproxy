@@ -29,7 +29,7 @@ impl Graphite {
         }
     }
 
-    #[instrument(level = "debug", skip_all)]
+    #[instrument(skip_all)]
     pub async fn write_records(&mut self, records: Vec<Record>) -> io::Result<()> {
         let Graphite {
             ref server_addr,

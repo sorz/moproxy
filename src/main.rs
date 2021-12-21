@@ -225,7 +225,7 @@ async fn main() {
     drop(sock_file);
 }
 
-#[instrument(level = "debug", skip_all)]
+#[instrument(skip_all)]
 fn reload_daemon(servers_cfg: &ServerListCfg, monitor: &Monitor) {
     #[cfg(all(feature = "systemd", target_os = "linux"))]
     systemd::notify_realoding();
@@ -255,7 +255,7 @@ fn reload_daemon(servers_cfg: &ServerListCfg, monitor: &Monitor) {
     systemd::notify_ready();
 }
 
-#[instrument(level = "debug", skip_all, fields(on_port=sock.local_addr()?.port(), peer=?sock.peer_addr()?))]
+#[instrument(skip_all, fields(on_port=sock.local_addr()?.port(), peer=?sock.peer_addr()?))]
 async fn handle_client(
     sock: TcpStream,
     servers: ServerList,
@@ -344,7 +344,7 @@ impl ServerListCfg {
         }
     }
 
-    #[instrument(level = "debug", skip_all)]
+    #[instrument(skip_all)]
     fn load(&self) -> Result<Vec<Arc<ProxyServer>>, &'static str> {
         let mut servers = self.cli_servers.clone();
         if let Some(path) = &self.path {

@@ -272,7 +272,7 @@ fn reload_daemon(servers_cfg: &ServerListCfg, monitor: &Monitor) {
     systemd::notify_ready();
 }
 
-#[instrument(skip_all, fields(on_port=sock.local_addr()?.port(), peer=?sock.peer_addr()?))]
+#[instrument(level = "error", skip_all, fields(on_port=sock.local_addr()?.port(), peer=?sock.peer_addr()?))]
 async fn handle_client(
     sock: TcpStream,
     servers: ServerList,

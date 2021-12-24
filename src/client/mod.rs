@@ -166,7 +166,7 @@ impl NewClient {
 }
 
 impl NewClient {
-    #[instrument(skip_all, fields(dest=?self.dest))]
+    #[instrument(level = "error", skip_all, fields(dest=?self.dest))]
     pub async fn retrieve_dest_from_sni(self) -> io::Result<NewClientWithData> {
         let NewClient {
             mut left,
@@ -216,7 +216,7 @@ impl NewClient {
         })
     }
 
-    #[instrument(skip_all, fields(dest=?self.dest))]
+    #[instrument(level = "error", skip_all, fields(dest=?self.dest))]
     async fn connect_server(
         self,
         n_parallel: usize,
@@ -278,7 +278,7 @@ impl Connectable for NewClientWithData {
 }
 
 impl FailedClient {
-    #[instrument(skip_all, fields(dest=?self.dest))]
+    #[instrument(level = "error", skip_all, fields(dest=?self.dest))]
     pub async fn direct_connect(
         self,
         pseudo_server: Arc<ProxyServer>,
@@ -309,7 +309,7 @@ impl FailedClient {
 }
 
 impl ConnectedClient {
-    #[instrument(skip_all, fields(dest=?self.dest, proxy=%self.server.tag))]
+    #[instrument(level = "error", skip_all, fields(dest=?self.dest, proxy=%self.server.tag))]
     pub async fn serve(self) -> io::Result<()> {
         let ConnectedClient {
             left,

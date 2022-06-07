@@ -21,7 +21,7 @@ pub fn notify_realoding() {
 }
 
 pub fn set_status(status: Cow<str>) {
-    if notify_enabled() && notify(false, &[NotifyState::Status(status.into_owned())]).is_err() {
+    if notify_enabled() && notify(false, &[NotifyState::Status(&status)]).is_err() {
         warn!("fail to notify systemd (set status)");
     }
 }

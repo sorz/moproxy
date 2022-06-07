@@ -1,9 +1,10 @@
-use clap::{load_yaml, AppSettings};
+mod cli;
+
+use clap::Parser;
+use cli::CliArgs;
 use futures_util::{stream, StreamExt};
 use ini::Ini;
-use std::{
-    collections::HashSet, env, io, net::SocketAddr, str::FromStr, sync::Arc, time::Duration,
-};
+use std::{collections::HashSet, io, net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
 #[cfg(all(feature = "web_console", unix))]
 use tokio::net::UnixListener;
 #[cfg(unix)]
@@ -28,7 +29,7 @@ use moproxy::{
     monitor::{Monitor, ServerList},
     proxy::{ProxyProto, ProxyServer, UserPassAuthCredential},
 };
-use tracing_subscriber::{filter::LevelFilter, prelude::*};
+use tracing_subscriber::prelude::*;
 
 trait FromOptionStr<E, T: FromStr<Err = E>> {
     fn parse(&self) -> Result<Option<T>, E>;
@@ -51,19 +52,8 @@ where
 
 #[tokio::main]
 async fn main() {
-    let yaml = load_yaml!("cli.yml");
-    let args = clap::App::from_yaml(yaml)
-        .version(env!("CARGO_PKG_VERSION"))
-        .setting(AppSettings::ColoredHelp)
-        .setting(AppSettings::UnifiedHelpMessage)
-        .get_matches();
-
-    let log_level: LevelFilter = args
-        .value_of("log-level")
-        .unwrap_or("info")
-        .parse()
-        .expect("unknown log level");
-    let mut log_registry: Option<_> = tracing_subscriber::registry().with(log_level).into();
+    let args = cli::CliArgs::parse();
+    let mut log_registry: Option<_> = tracing_subscriber::registry().with(args.log_level).into();
 
     #[cfg(all(feature = "systemd", target_os = "linux"))]
     {
@@ -84,33 +74,7 @@ async fn main() {
         registry.with(tracing_subscriber::fmt::layer()).init();
     }
 
-    let host = args
-        .value_of("host")
-        .expect("missing host")
-        .parse()
-        .expect("invalid address");
-    let ports: HashSet<u16> = args
-        .values_of("port")
-        .expect("missing port number")
-        .map(|p| p.parse().expect("invalid port number"))
-        .collect();
-    let probe = args
-        .value_of("probe-secs")
-        .expect("missing probe secs")
-        .parse()
-        .expect("not a vaild probe secs");
-    let remote_dns = args.is_present("remote-dns");
-    let n_parallel = args
-        .value_of("n-parallel")
-        .parse()
-        .expect("not a valid number")
-        .unwrap_or(0_usize);
-    let cong_local = args.value_of("cong-local");
-    let allow_direct = args.is_present("allow-direct");
-    let graphite = args
-        .value_of("graphite")
-        .parse()
-        .expect("not a valid address");
+    let graphite = args.graphite;
     let servers_cfg = ServerListCfg::new(&args);
     let servers = servers_cfg.load().expect("fail to load servers from file");
 
@@ -119,33 +83,25 @@ async fn main() {
     #[cfg(not(feature = "score_script"))]
     let monitor = Monitor::new(servers, graphite);
 
-    // Setup score script
-    if !cfg!(feature = "score_script") && args.is_present("score-script") {
-        panic!("score script has been disabled during compiling");
-    };
     #[cfg(feature = "score_script")]
     {
-        if let Some(path) = args.value_of("score-script") {
+        if let Some(path) = args.score_script {
             monitor
-                .load_score_script(path)
+                .load_score_script(&path)
                 .expect("fail to load Lua script");
         }
     }
 
-    // Setup web server
-    if !cfg!(feature = "web_console") && args.is_present("web-bind") {
-        panic!("web console has been disabled during compiling");
-    };
     #[cfg(all(feature = "web_console", unix))]
     let mut sock_file = None;
     #[cfg(feature = "web_console")]
     {
-        if let Some(http_addr) = args.value_of("web-bind") {
+        if let Some(http_addr) = &args.web_bind {
             info!("http run on {}", http_addr);
             #[cfg(unix)]
             {
                 if http_addr.starts_with('/') {
-                    let sock = web::AutoRemoveFile::new(http_addr);
+                    let sock = web::AutoRemoveFile::new(&http_addr);
                     let listener = UnixListener::bind(&sock).expect("fail to bind web server");
                     let serv = web::run_server(UnixListenerStream(listener), monitor.clone());
                     tokio::spawn(serv);
@@ -163,8 +119,8 @@ async fn main() {
     }
 
     // Setup monitor
-    if probe > 0 {
-        tokio::spawn(monitor.clone().monitor_delay(probe));
+    if args.probe_secs > 0 {
+        tokio::spawn(monitor.clone().monitor_delay(args.probe_secs));
     }
 
     // Setup signal listener for reloading server list
@@ -180,24 +136,22 @@ async fn main() {
     });
 
     // Optional direct connect
-    let direct_server = if allow_direct {
-        Some(Arc::new(ProxyServer::direct(parse_max_wait(&args))))
+    let direct_server = if args.allow_direct {
+        Some(Arc::new(ProxyServer::direct(args.max_wait)))
     } else {
         None
     };
 
     // Setup proxy server
+    let ports: HashSet<_> = args.port.into_iter().collect();
     let mut listeners = Vec::with_capacity(ports.len());
-    if cong_local.is_some() && cfg!(not(target_os = "linux")) {
-        panic!("--cong-local can only be used on Linux");
-    }
     for port in ports {
-        let addr = SocketAddr::new(host, port);
+        let addr = SocketAddr::new(args.host, port);
         let listener = TcpListener::bind(&addr).await.expect("cannot bind to port");
         info!("listen on {}", addr);
-        if let Some(alg) = cong_local {
+        #[cfg(target_os = "linux")]
+        if let Some(ref alg) = args.cong_local {
             info!("set {} on {}", alg, addr);
-            #[cfg(target_os = "linux")]
             set_congestion(&listener, alg).expect(
                 "fail to set tcp congestion algorithm. \
                 check tcp_allowed_congestion_control?",
@@ -219,6 +173,8 @@ async fn main() {
     systemd::notify_ready();
 
     // The proxy server
+    let remote_dns = args.remote_dns;
+    let n_parallel = args.n_parallel;
     let mut clients = stream::select_all(listeners.iter_mut());
     while let Some(sock) = clients.next().await {
         let direct = direct_server.clone();
@@ -310,48 +266,37 @@ struct ServerListCfg {
 }
 
 impl ServerListCfg {
-    fn new(args: &clap::ArgMatches) -> Self {
-        let default_test_dns = args
-            .value_of("test-dns")
-            .unwrap()
-            .parse()
-            .expect("not a valid socket address");
-        let default_max_wait = parse_max_wait(args);
+    fn new(args: &CliArgs) -> Self {
+        let default_test_dns = args.test_dns;
+        let default_max_wait = args.max_wait;
 
         let mut cli_servers = vec![];
-        if let Some(s) = args.values_of("socks5-servers") {
-            for s in s.map(parse_server) {
-                cli_servers.push(Arc::new(ProxyServer::new(
-                    s.expect("not a valid SOCKSv5 server"),
-                    ProxyProto::socks5(false),
-                    default_test_dns,
-                    default_max_wait,
-                    None,
-                    None,
-                    None,
-                )));
-            }
+        for addr in &args.socks5_servers {
+            cli_servers.push(Arc::new(ProxyServer::new(
+                addr.clone(),
+                ProxyProto::socks5(false),
+                default_test_dns,
+                default_max_wait,
+                None,
+                None,
+                None,
+            )));
         }
-        if let Some(s) = args.values_of("http-servers") {
-            for s in s.map(parse_server) {
-                cli_servers.push(Arc::new(ProxyServer::new(
-                    s.expect("not a valid HTTP server"),
-                    ProxyProto::http(false, None),
-                    default_test_dns,
-                    default_max_wait,
-                    None,
-                    None,
-                    None,
-                )));
-            }
-        }
-        let path = args.value_of("server-list").map(|s| s.to_string());
-        let listen_ports = args
-            .values_of("port")
-            .expect("missing port number")
-            .map(|p| p.parse().expect("invalid port number"))
-            .collect();
 
+        for addr in &args.http_servers {
+            cli_servers.push(Arc::new(ProxyServer::new(
+                addr.clone(),
+                ProxyProto::http(false, None),
+                default_test_dns,
+                default_max_wait,
+                None,
+                None,
+                None,
+            )));
+        }
+
+        let path = args.server_list.clone();
+        let listen_ports = args.port.iter().cloned().collect();
         ServerListCfg {
             default_test_dns,
             default_max_wait,
@@ -462,21 +407,4 @@ impl ServerListCfg {
         info!("total {} server(s) loaded", servers.len());
         Ok(servers)
     }
-}
-
-fn parse_server(addr: &str) -> Result<SocketAddr, &'static str> {
-    if addr.contains(':') {
-        addr.parse()
-    } else {
-        format!("127.0.0.1:{}", addr).parse()
-    }
-    .or(Err("not a valid server address"))
-}
-
-fn parse_max_wait(args: &clap::ArgMatches) -> Duration {
-    args.value_of("max-wait")
-        .parse()
-        .expect("not a valid number")
-        .map(Duration::from_secs)
-        .unwrap_or_else(|| Duration::from_secs(4))
 }

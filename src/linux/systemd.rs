@@ -1,3 +1,4 @@
+use libc::{dev_t as Dev, ino_t as Inode};
 use nix::sys::stat::fstat;
 use sd_notify::{notify, NotifyState};
 use std::{borrow::Cow, env, io, os::unix::prelude::AsRawFd, process, time::Duration};
@@ -57,7 +58,7 @@ pub async fn watchdog_loop(timeout: Duration) -> ! {
 }
 
 /// Try to read the device & inode number from environment variable `JOURNAL_STREAM`.
-fn get_journal_stream_dev_ino() -> Option<(u64, u64)> {
+fn get_journal_stream_dev_ino() -> Option<(Dev, Inode)> {
     let stream_env = env::var_os("JOURNAL_STREAM")?;
     let (dev, ino) = stream_env.to_str()?.split_once(':')?;
     Some((dev.parse().ok()?, ino.parse().ok()?))

@@ -659,7 +659,7 @@ dependencies = [
 
 [[package]]
 name = "moproxy"
-version = "0.3.11"
+version = "0.3.12"
 dependencies = [
  "base64",
  "bytes",

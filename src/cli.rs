@@ -17,15 +17,18 @@ pub(crate) struct CliArgs {
     /// Port number to bind on. Multiple ports may be given (will selected
     /// accroding to the SERVER-LIST ini config).
     #[clap(short = 'p', long, value_name = "PORT", required = true)]
+    #[clap(multiple_values = true)]
     pub(crate) port: Vec<u16>,
 
     /// SOCKSv5 server list. IP address can omit for localhost.
     #[clap(short = 's', long = "socks5", value_name = "SOCKS5-SERVERS")]
+    #[clap(multiple_values = true)]
     #[clap(parse(try_from_str = parse_socket_addr_default_on_localhost))]
     pub(crate) socks5_servers: Vec<SocketAddr>,
 
     /// HTTP proxy server list. IP address can omit for localhost.
     #[clap(short = 't', long = "http", value_name = "HTTP-SERVERS")]
+    #[clap(multiple_values = true)]
     #[clap(parse(try_from_str = parse_socket_addr_default_on_localhost))]
     pub(crate) http_servers: Vec<SocketAddr>,
 

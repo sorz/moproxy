@@ -5,7 +5,7 @@ use std::{
 };
 
 const ZIP_URL: &str = "https://github.com/sorz/moproxy-web/releases/download/{VERSION}/build.zip";
-const VERSION: &str = "v0.1.6";
+const VERSION: &str = "v0.1.7";
 
 fn main() {
     if env::var("CARGO_FEATURE_RICH_WEB").is_err() {

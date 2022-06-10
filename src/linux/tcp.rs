@@ -5,12 +5,56 @@ use nix::{
 };
 use std::{
     ffi::OsStr,
-    io, mem,
-    net::{SocketAddrV4, SocketAddrV6},
+    io::{self, ErrorKind},
+    mem,
+    net::{SocketAddr, SocketAddrV4, SocketAddrV6},
     os::unix::io::AsRawFd,
 };
+use tokio::net::{TcpListener, TcpStream};
 
-pub fn get_original_dest<F>(fd: &F) -> io::Result<SocketAddrV4>
+pub trait TcpStreamExt {
+    fn get_original_dest(&self) -> io::Result<Option<SocketAddr>>;
+}
+
+pub trait TcpListenerExt {
+    fn set_congestion<S: AsRef<OsStr>>(&self, alg: S) -> io::Result<()>;
+}
+
+impl TcpStreamExt for TcpStream {
+    fn get_original_dest(&self) -> io::Result<Option<SocketAddr>> {
+        match get_original_dest_v4(self) {
+            Ok(addr) => Ok(Some(SocketAddr::V4(addr))),
+            Err(err) if err.kind() == ErrorKind::NotFound => match get_original_dest_v6(self) {
+                Ok(addr) => Ok(Some(SocketAddr::V6(addr))),
+                Err(err) if err.kind() == ErrorKind::NotFound => Ok(None),
+                Err(err) => Err(err),
+            },
+            Err(err) => Err(err),
+        }
+    }
+}
+
+impl TcpListenerExt for TcpListener {
+    fn set_congestion<S: AsRef<OsStr>>(&self, alg: S) -> io::Result<()> {
+        let alg = alg.as_ref();
+        let ret = unsafe {
+            setsockopt(
+                self.as_raw_fd(),
+                IPPROTO_TCP,
+                TCP_CONGESTION,
+                alg as *const _ as *const c_void,
+                mem::size_of_val(alg) as socklen_t,
+            )
+        };
+        if ret == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+}
+
+fn get_original_dest_v4<F>(fd: &F) -> io::Result<SocketAddrV4>
 where
     F: AsRawFd,
 {
@@ -21,7 +65,7 @@ where
     ))
 }
 
-pub fn get_original_dest6<F>(fd: &F) -> io::Result<SocketAddrV6>
+fn get_original_dest_v6<F>(fd: &F) -> io::Result<SocketAddrV6>
 where
     F: AsRawFd,
 {
@@ -46,26 +90,4 @@ where
         sockaddr.sin6_scope_id,
     );
     Ok(addr)
-}
-
-pub fn set_congestion<F, S>(fd: &F, alg: S) -> io::Result<()>
-where
-    F: AsRawFd,
-    S: AsRef<OsStr>,
-{
-    let alg = alg.as_ref();
-    let ret = unsafe {
-        setsockopt(
-            fd.as_raw_fd(),
-            IPPROTO_TCP,
-            TCP_CONGESTION,
-            alg as *const _ as *const c_void,
-            mem::size_of_val(alg) as socklen_t,
-        )
-    };
-    if ret == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
 }

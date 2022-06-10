@@ -12,7 +12,7 @@ use tokio::{
 use tracing::{debug, info, instrument, warn};
 
 #[cfg(target_os = "linux")]
-use crate::linux::tcp::{get_original_dest, get_original_dest6};
+use crate::linux::tcp::TcpStreamExt;
 use crate::{
     client::connect::try_connect_all,
     monitor::ServerList,
@@ -61,14 +61,20 @@ fn error_invalid_input<T>(msg: &'static str) -> io::Result<T> {
     Err(io::Error::new(io::ErrorKind::InvalidInput, msg))
 }
 
-fn normalize_socket_addr(socket: &SocketAddr) -> Cow<SocketAddr> {
-    match socket {
-        SocketAddr::V4(sock) => {
-            let addr = sock.ip().to_ipv6_mapped();
-            let sock = SocketAddr::new(addr.into(), sock.port());
-            Cow::Owned(sock)
+trait SocketAddrExt {
+    fn normalize(&self) -> Cow<SocketAddr>;
+}
+
+impl SocketAddrExt for SocketAddr {
+    fn normalize(&self) -> Cow<SocketAddr> {
+        match self {
+            SocketAddr::V4(sock) => {
+                let addr = sock.ip().to_ipv6_mapped();
+                let sock = SocketAddr::new(addr.into(), sock.port());
+                Cow::Owned(sock)
+            }
+            _ => Cow::Borrowed(self),
         }
-        _ => Cow::Borrowed(socket),
     }
 }
 
@@ -137,17 +143,17 @@ impl NewClient {
 
         // Try to get original destination before NAT
         #[cfg(target_os = "linux")]
-        let dest = get_original_dest(&left)
-            .map(SocketAddr::V4)
-            .or_else(|_| get_original_dest6(&left).map(SocketAddr::V6))
-            .unwrap_or(local);
+        let dest = match left.get_original_dest()? {
+            // Redirecting to itself is possible. Treat it as non-redirect.
+            Some(dest) if dest.normalize() != local.normalize() => Some(dest),
+            _ => None,
+        };
 
-        // No NAT supported, always be our local address
+        // No NAT supported
         #[cfg(not(target_os = "linux"))]
-        let dest = local;
+        let dest = None;
 
-        let is_nated = normalize_socket_addr(&dest) != normalize_socket_addr(&local);
-        let dest = if cfg!(target_os = "linux") && is_nated {
+        let dest = if let Some(dest) = dest {
             debug!(?dest, "Retrived destination via NAT info");
             dest.into()
         } else {
@@ -155,6 +161,7 @@ impl NewClient {
             debug!(?dest, "Retrived destination via SOCKSv5");
             dest
         };
+
         Ok(NewClient {
             left,
             src,

@@ -20,7 +20,7 @@ use moproxy::futures_stream::UnixListenerStream;
 #[cfg(all(feature = "systemd", target_os = "linux"))]
 use moproxy::linux::systemd;
 #[cfg(target_os = "linux")]
-use moproxy::linux::tcp::set_congestion;
+use moproxy::linux::tcp::TcpListenerExt;
 #[cfg(feature = "web_console")]
 use moproxy::web;
 use moproxy::{
@@ -152,7 +152,7 @@ async fn main() {
         #[cfg(target_os = "linux")]
         if let Some(ref alg) = args.cong_local {
             info!("set {} on {}", alg, addr);
-            set_congestion(&listener, alg).expect(
+            listener.set_congestion(alg).expect(
                 "fail to set tcp congestion algorithm. \
                 check tcp_allowed_congestion_control?",
             );

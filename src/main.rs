@@ -263,6 +263,7 @@ struct ServerListCfg {
     cli_servers: Vec<Arc<ProxyServer>>,
     path: Option<String>,
     listen_ports: HashSet<u16>,
+    allow_direct: bool,
 }
 
 impl ServerListCfg {
@@ -303,6 +304,7 @@ impl ServerListCfg {
             cli_servers,
             path,
             listen_ports,
+            allow_direct: args.allow_direct,
         }
     }
 
@@ -401,7 +403,7 @@ impl ServerListCfg {
                 servers.push(Arc::new(server));
             }
         }
-        if servers.is_empty() {
+        if servers.is_empty() && !self.allow_direct {
             return Err("missing server list");
         }
         info!("total {} server(s) loaded", servers.len());

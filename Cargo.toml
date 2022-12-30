@@ -31,7 +31,7 @@ hyper = { version = "0.14", optional = true, features = [
 ] }
 parking_lot = { version = "0.12", features = ["serde", "deadlock_detection"] }
 http = "0.2"
-prettytable-rs = { version = "0.8", default-features = false }
+prettytable-rs = { version = "0.10", default-features = false }
 regex = "1"
 lazy_static = "1"
 number_prefix = "0.4"

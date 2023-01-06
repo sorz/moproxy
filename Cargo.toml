@@ -31,7 +31,7 @@ hyper = { version = "0.14", optional = true, features = [
 ] }
 parking_lot = { version = "0.12", features = ["serde", "deadlock_detection"] }
 http = "0.2"
-prettytable-rs = { version = "0.8", default-features = false }
+prettytable-rs = { version = "0.10", default-features = false }
 regex = "1"
 lazy_static = "1"
 number_prefix = "0.4"
@@ -43,11 +43,11 @@ bytes = "1"
 zip = { version = "0.6", optional = true, default-features = false, features = [
     "deflate"
 ] }
-base64 = "0.13.0"
+base64 = "0.20"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
-nix = "0.24"
+nix = "0.26"
 sd-notify = { version = "0.4", optional = true }
 tracing-journald = { version = "0.3", optional = true }
 

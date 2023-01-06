@@ -5,6 +5,7 @@ use rlua::prelude::*;
 pub mod socks5;
 use parking_lot::{Mutex, RwLock};
 use serde::{Serialize, Serializer};
+use serde_with::{serde_as, DisplayFromStr};
 use std::{
     cmp,
     collections::HashSet,
@@ -139,6 +140,7 @@ impl ToLua<'_> for Delay {
     }
 }
 
+#[serde_as]
 #[derive(Debug, Serialize, Clone, Copy, Default)]
 pub struct ProxyServerStatus {
     pub delay: Delay,
@@ -146,7 +148,7 @@ pub struct ProxyServerStatus {
     pub conn_alive: u32,
     pub conn_total: u32,
     pub conn_error: u32,
-    #[serde(with = "serde_with::rust::display_fromstr")]
+    #[serde_as(as = "DisplayFromStr")]
     pub close_history: u64,
 }
 

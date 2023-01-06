@@ -21,7 +21,7 @@ tracing-subscriber = "0.3"
 serde = { version = "1.0", features = ["rc"] }
 serde_json = "1.0"
 serde_derive = "1.0"
-serde_with = "1.6"
+serde_with = "2"
 rust-ini = "0.18"
 hyper = { version = "0.14", optional = true, features = [
     "http1",

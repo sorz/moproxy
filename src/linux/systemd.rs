@@ -46,7 +46,7 @@ pub fn watchdog_timeout() -> Option<Duration> {
 }
 
 #[instrument(skip_all)]
-pub async fn watchdog_loop(timeout: Duration) -> ! {
+pub async fn watchdog_loop(timeout: Duration) {
     info!("Watchdog enabled, poke for every {}ms", timeout.as_millis());
     loop {
         trace!("poke the watchdog");

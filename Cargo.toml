@@ -1,6 +1,6 @@
 [package]
 name = "moproxy"
-version = "0.4.0"
+version = "0.4.1"
 authors = ["sorz <me@sorz.org>"]
 edition = "2021"
 description = "Transparent TCP to SOCKSv5/HTTP proxy on Linux written in Rust"

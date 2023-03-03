@@ -139,19 +139,18 @@ impl NewClient {
     pub async fn from_socket(mut left: TcpStream, list: ServerList) -> io::Result<Self> {
         let src = left.peer_addr()?;
         let from_port = left.local_addr()?.port();
-        let local = left.local_addr()?;
 
         // Try to get original destination before NAT
         #[cfg(target_os = "linux")]
         let dest = match left.get_original_dest()? {
             // Redirecting to itself is possible. Treat it as non-redirect.
-            Some(dest) if dest.normalize() != local.normalize() => Some(dest),
+            Some(dest) if dest.normalize() != left.local_addr()?.normalize() => Some(dest),
             _ => None,
         };
 
         // No NAT supported
         #[cfg(not(target_os = "linux"))]
-        let dest = None;
+        let dest: Option<SocketAddr> = None;
 
         let dest = if let Some(dest) = dest {
             debug!(?dest, "Retrived destination via NAT info");

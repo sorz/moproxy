@@ -1,3 +1,4 @@
+use base64::prelude::{Engine, BASE64_STANDARD};
 use httparse::{Response, Status, EMPTY_HEADER};
 use std::io::{self, ErrorKind};
 use std::net::IpAddr;
@@ -110,7 +111,7 @@ fn build_request(addr: &Destination, user_pass_auth: &Option<UserPassAuthCredent
             username = user_pass_auth.username,
             password = user_pass_auth.password
         );
-        let basic_auth = base64::encode(&auth);
+        let basic_auth = BASE64_STANDARD.encode(&auth);
         format!(
             "CONNECT {host} HTTP/1.1\r\n\
              Host: {host}\r\n\

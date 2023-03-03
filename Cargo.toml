@@ -43,7 +43,7 @@ bytes = "1"
 zip = { version = "0.6", optional = true, default-features = false, features = [
     "deflate"
 ] }
-base64 = "0.20"
+base64 = "0.21"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

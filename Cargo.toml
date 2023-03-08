@@ -44,6 +44,7 @@ zip = { version = "0.6", optional = true, default-features = false, features = [
     "deflate"
 ] }
 base64 = "0.21"
+nom = { version = "7", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
@@ -52,11 +53,12 @@ sd-notify = { version = "0.4", optional = true }
 tracing-journald = { version = "0.3", optional = true }
 
 [features]
-default = ["web_console", "score_script", "systemd", "rich_web"]
+default = ["web_console", "score_script", "systemd", "rich_web", "route"]
 web_console = ["hyper"]
 rich_web = ["web_console", "zip"]
 score_script = ["rlua"]
 systemd = ["sd-notify", "tracing-journald"]
+route = ["nom"]
 
 [build-dependencies]
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "blocking"] }

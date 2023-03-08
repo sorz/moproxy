@@ -4,5 +4,7 @@ pub mod futures_stream;
 pub mod linux;
 pub mod monitor;
 pub mod proxy;
+#[cfg(feature = "route")]
+pub mod route;
 #[cfg(feature = "web_console")]
 pub mod web;

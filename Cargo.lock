@@ -374,6 +374,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "flexstr"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d50aef14619d336a54fca5a592d952eb39037b1a1e7e6afd9f91c892ac7ef65"
+dependencies = [
+ "static_assertions",
+]
+
+[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -787,6 +796,7 @@ dependencies = [
  "base64 0.21.0",
  "bytes",
  "clap",
+ "flexstr",
  "futures-core",
  "futures-util",
  "http",

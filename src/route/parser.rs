@@ -1,9 +1,9 @@
-use flexstr::LocalStr;
+use flexstr::{local_fmt, local_str, LocalStr};
 use nom::{
     branch::alt,
     bytes::complete::{tag_no_case, take_till1},
     character::complete::{char, line_ending, not_line_ending, space0, space1, u16},
-    combinator::{opt, verify},
+    combinator::{opt, recognize, verify},
     multi::{fold_many0, many1, separated_list1},
     sequence::tuple,
     IResult, Parser,
@@ -12,7 +12,7 @@ use nom::{
 #[derive(Debug, PartialEq, Eq)]
 pub enum RuleFilter {
     ListenPort(u16),
-    Sni(Vec<LocalStr>),
+    Sni(LocalStr),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -44,10 +44,16 @@ fn domain_name_root(input: &str) -> IResult<&str, ()> {
     char('.').map(|_| ()).parse(input)
 }
 
-fn domain_name(input: &str) -> IResult<&str, Vec<LocalStr>> {
+fn domain_name(input: &str) -> IResult<&str, LocalStr> {
     alt((
-        many1(domain_name_part),
-        domain_name_root.map(|_| Vec::new()),
+        recognize(many1(domain_name_part)).map(|n| {
+            if n.ends_with('.') {
+                (&n[..n.len() - 1]).into()
+            } else {
+                n.into()
+            }
+        }),
+        domain_name_root.map(|_| local_str!(".")),
     ))(input)
 }
 
@@ -119,27 +125,18 @@ pub fn document(input: &str) -> IResult<&str, Vec<Rule>> {
 fn test_parse_domain_name_root() {
     let (empty, parts) = domain_name(".").unwrap();
     assert!(empty.is_empty());
-    assert!(parts.is_empty());
+    assert_eq!(local_str!("."), parts);
 }
 
 #[test]
 fn test_parse_domain_name() {
-    use flexstr::local_str;
-
     let (rem, parts) = domain_name("test_-123.example.com.\n").unwrap();
     assert_eq!("\n", rem);
-    assert_eq!(
-        vec![
-            local_str!("test_-123"),
-            local_str!("example"),
-            local_str!("com")
-        ],
-        parts
-    );
+    assert_eq!(local_str!("test_-123.example.com"), parts);
 
     let (rem, parts) = domain_name("example\n").unwrap();
     assert_eq!("\n", rem);
-    assert_eq!(vec![local_str!("example")], parts);
+    assert_eq!(local_str!("example"), parts);
 }
 
 #[test]
@@ -153,7 +150,7 @@ fn test_listen_port_filter() {
 fn test_sni_filter() {
     let (rem, parts) = filter_sni("sni test\n").unwrap();
     assert_eq!("\n", rem);
-    assert_eq!(RuleFilter::Sni(vec!["test".into()]), parts);
+    assert_eq!(RuleFilter::Sni(local_str!("test")), parts);
 }
 
 #[test]

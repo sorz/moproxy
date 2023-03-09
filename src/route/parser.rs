@@ -22,8 +22,8 @@ pub enum RuleAction {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Rule {
-    filter: RuleFilter,
-    action: RuleAction,
+    pub filter: RuleFilter,
+    pub action: RuleAction,
 }
 
 fn port_number(input: &str) -> IResult<&str, u16> {
@@ -97,6 +97,12 @@ fn comment(input: &str) -> IResult<&str, ()> {
 pub fn line(input: &str) -> IResult<&str, Option<Rule>> {
     tuple((space0, opt(rule), space0, opt(comment), line_ending))
         .map(|(_, rule, _, _, _)| rule)
+        .parse(input)
+}
+
+pub fn line_no_ending(input: &str) -> IResult<&str, Option<Rule>> {
+    tuple((space0, opt(rule), space0, opt(comment)))
+        .map(|(_, rule, _, _)| rule)
         .parse(input)
 }
 

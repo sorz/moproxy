@@ -1,28 +1,37 @@
 use std::{
     collections::{HashMap, HashSet},
     io::{self, BufRead},
+    ops::{Add, AddAssign},
 };
 
 use flexstr::{SharedStr, ToSharedStr};
 
-use super::parser;
+use super::{capabilities::CapSet, parser};
 
 #[derive(Debug, Clone, Default)]
-struct CapRequirements(Vec<HashSet<SharedStr>>);
+struct CapRequirements(HashSet<CapSet>);
+
+impl Add for CapRequirements {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self(self.0.into_iter().chain(rhs.0.into_iter()).collect())
+    }
+}
+
+impl AddAssign for CapRequirements {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0.extend(rhs.0.into_iter())
+    }
+}
 
 impl CapRequirements {
-    fn add_caps<I, S>(&mut self, caps: I)
-    where
-        S: ToSharedStr,
-        I: Iterator<Item = S>,
-    {
-        self.0.push(caps.map(|c| c.to_shared_str()).collect());
+    fn add_caps(&mut self, caps: CapSet) {
+        self.0.insert(caps);
     }
 
-    fn meet(&self, caps: &HashSet<SharedStr>) -> bool {
-        self.0
-            .iter()
-            .all(|req| req.intersection(&caps).next().is_some())
+    fn meet(&self, caps: &CapSet) -> bool {
+        self.0.iter().all(|req| req.has_intersection(caps))
     }
 }
 
@@ -55,14 +64,11 @@ impl Router {
                 self.listen_port_caps
                     .entry(port)
                     .or_default()
-                    .add_caps(caps.into_iter());
+                    .add_caps(caps);
             }
             parser::RuleFilter::Sni(parts) => {
                 let parts = parts.to_shared_str();
-                self.sni_caps
-                    .entry(parts)
-                    .or_default()
-                    .add_caps(caps.into_iter());
+                self.sni_caps.entry(parts).or_default().add_caps(caps);
             }
         }
     }
@@ -72,6 +78,11 @@ impl Router {
             .values()
             .chain(self.sni_caps.values())
             .fold(0, |acc, v| acc + v.0.len())
+    }
+
+    fn get_sni_caps(&self, sni: &str) -> CapRequirements {
+        let caps = CapRequirements::default();
+        unimplemented!()
     }
 }
 
@@ -86,9 +97,9 @@ fn test_router_listen_port() {
     assert_eq!(3, router.rule_count());
     let p1 = router.listen_port_caps.get(&1).unwrap();
     let p2 = router.listen_port_caps.get(&2).unwrap();
-    let abc = HashSet::from_iter(["a", "b", "c"].into_iter().map(SharedStr::from));
-    let bc = HashSet::from_iter(["b", "c"].into_iter().map(SharedStr::from));
-    let c = HashSet::from_iter(["c"].into_iter().map(SharedStr::from));
+    let abc = CapSet::new(["a", "b", "c"].into_iter());
+    let bc = CapSet::new(["b", "c"].into_iter());
+    let c = CapSet::new(["c"].into_iter());
     assert!(p1.meet(&abc));
     assert!(!p1.meet(&bc));
     assert!(!p1.meet(&c));

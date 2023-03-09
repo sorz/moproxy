@@ -3,7 +3,7 @@ use std::{
     io::{self, BufRead},
 };
 
-use flexstr::{FlexStr, IntoSharedStr, SharedStr, ToSharedStr};
+use flexstr::{SharedStr, ToSharedStr};
 
 use super::parser;
 
@@ -29,7 +29,7 @@ impl CapRequirements {
 #[derive(Default)]
 pub struct Router {
     listen_port_caps: HashMap<u16, CapRequirements>,
-    sni_caps: HashMap<Box<[SharedStr]>, CapRequirements>,
+    sni_caps: HashMap<SharedStr, CapRequirements>,
 }
 
 impl Router {
@@ -58,7 +58,7 @@ impl Router {
                     .add_caps(caps.into_iter());
             }
             parser::RuleFilter::Sni(parts) => {
-                let parts = parts.into_iter().map(FlexStr::into_shared_str).collect();
+                let parts = parts.to_shared_str();
                 self.sni_caps
                     .entry(parts)
                     .or_default()

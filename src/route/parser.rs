@@ -1,4 +1,4 @@
-use flexstr::{local_fmt, local_str, LocalStr};
+use flexstr::{shared_str, SharedStr};
 use nom::{
     branch::alt,
     bytes::complete::{tag_no_case, take_till1},
@@ -9,15 +9,17 @@ use nom::{
     IResult, Parser,
 };
 
+use super::capabilities::CapSet;
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum RuleFilter {
     ListenPort(u16),
-    Sni(LocalStr),
+    Sni(SharedStr),
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum RuleAction {
-    Require(Vec<LocalStr>),
+    Require(CapSet),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -34,7 +36,7 @@ fn id_chars(input: &str) -> IResult<&str, &str> {
     take_till1(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')(input)
 }
 
-fn domain_name_part(input: &str) -> IResult<&str, LocalStr> {
+fn domain_name_part(input: &str) -> IResult<&str, SharedStr> {
     tuple((id_chars, opt(char('.'))))
         .map(|(name, _)| name.into())
         .parse(input)
@@ -44,7 +46,7 @@ fn domain_name_root(input: &str) -> IResult<&str, ()> {
     char('.').map(|_| ()).parse(input)
 }
 
-fn domain_name(input: &str) -> IResult<&str, LocalStr> {
+fn domain_name(input: &str) -> IResult<&str, SharedStr> {
     alt((
         recognize(many1(domain_name_part)).map(|n| {
             if n.ends_with('.') {
@@ -53,7 +55,7 @@ fn domain_name(input: &str) -> IResult<&str, LocalStr> {
                 n.into()
             }
         }),
-        domain_name_root.map(|_| local_str!(".")),
+        domain_name_root.map(|_| shared_str!(".")),
     ))(input)
 }
 
@@ -73,16 +75,16 @@ fn rule_filter(input: &str) -> IResult<&str, RuleFilter> {
     alt((filter_sni, filter_listen_port))(input)
 }
 
-fn caps1(input: &str) -> IResult<&str, Vec<LocalStr>> {
+fn caps1(input: &str) -> IResult<&str, Vec<SharedStr>> {
     separated_list1(
         tuple((space1, tag_no_case("or"), space1)),
-        id_chars.map(LocalStr::from),
+        id_chars.map(SharedStr::from),
     )(input)
 }
 
 fn action_require(input: &str) -> IResult<&str, RuleAction> {
     tuple((tag_no_case("require"), space1, caps1))
-        .map(|(_, _, caps)| RuleAction::Require(caps))
+        .map(|(_, _, caps)| RuleAction::Require(CapSet::new(caps.into_iter())))
         .parse(input)
 }
 
@@ -125,18 +127,18 @@ pub fn document(input: &str) -> IResult<&str, Vec<Rule>> {
 fn test_parse_domain_name_root() {
     let (empty, parts) = domain_name(".").unwrap();
     assert!(empty.is_empty());
-    assert_eq!(local_str!("."), parts);
+    assert_eq!(shared_str!("."), parts);
 }
 
 #[test]
 fn test_parse_domain_name() {
     let (rem, parts) = domain_name("test_-123.example.com.\n").unwrap();
     assert_eq!("\n", rem);
-    assert_eq!(local_str!("test_-123.example.com"), parts);
+    assert_eq!(shared_str!("test_-123.example.com"), parts);
 
     let (rem, parts) = domain_name("example\n").unwrap();
     assert_eq!("\n", rem);
-    assert_eq!(local_str!("example"), parts);
+    assert_eq!(shared_str!("example"), parts);
 }
 
 #[test]
@@ -150,14 +152,17 @@ fn test_listen_port_filter() {
 fn test_sni_filter() {
     let (rem, parts) = filter_sni("sni test\n").unwrap();
     assert_eq!("\n", rem);
-    assert_eq!(RuleFilter::Sni(local_str!("test")), parts);
+    assert_eq!(RuleFilter::Sni(shared_str!("test")), parts);
 }
 
 #[test]
 fn test_action_require() {
     let (rem, caps) = action_require("require a or b\n").unwrap();
     assert_eq!("\n", rem);
-    assert_eq!(RuleAction::Require(vec!["a".into(), "b".into()]), caps);
+    assert_eq!(
+        RuleAction::Require(CapSet::new(["a", "b"].into_iter())),
+        caps
+    );
 }
 
 #[test]
@@ -166,7 +171,7 @@ fn test_rule() {
     assert_eq!(
         Rule {
             filter: RuleFilter::ListenPort(1),
-            action: RuleAction::Require(vec!["a".into()])
+            action: RuleAction::Require(CapSet::new(["a"].into_iter()))
         },
         rule
     );

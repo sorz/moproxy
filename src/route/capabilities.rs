@@ -1,3 +1,5 @@
+use std::mem;
+
 use flexstr::SharedStr;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -17,6 +19,9 @@ impl CapSet {
     pub fn has_intersection(&self, other: &Self) -> bool {
         let mut a = &self.0[..];
         let mut b = &other.0[..];
+        if a.len() < b.len() {
+            mem::swap(&mut a, &mut b);
+        }
         while !(a.is_empty() || b.is_empty()) {
             match a.binary_search(&b[0]) {
                 Ok(_) => return true,

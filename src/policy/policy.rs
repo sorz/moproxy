@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    hash::Hash,
     io::{self, BufRead},
 };
 
@@ -8,29 +9,24 @@ use flexstr::{SharedStr, ToSharedStr};
 use super::{capabilities::CapSet, parser};
 
 #[derive(Default)]
-struct ListenPortRuleSet(HashMap<u16, HashSet<CapSet>>);
+struct RuleSet<K: Eq + Hash>(HashMap<K, HashSet<CapSet>>);
 
-#[derive(Default)]
-struct SniRuleSet(HashMap<SharedStr, HashSet<CapSet>>);
+type ListenPortRuleSet = RuleSet<u16>;
+type SniRuleSet = RuleSet<SharedStr>;
 
-impl ListenPortRuleSet {
-    fn add(&mut self, port: u16, caps: CapSet) {
+impl<K: Eq + Hash> RuleSet<K> {
+    fn add(&mut self, key: K, caps: CapSet) {
         // TODO: warning duplicated rules
-        self.0.entry(port).or_default().insert(caps);
+        self.0.entry(key).or_default().insert(caps);
     }
 
-    fn get<'a>(&'a self, port: &'a u16) -> impl Iterator<Item = &'a CapSet> {
-        self.0.get(&port).into_iter().flatten()
+    fn get<'a>(&'a self, key: &'a K) -> impl Iterator<Item = &'a CapSet> {
+        self.0.get(key).into_iter().flatten()
     }
 }
 
 impl SniRuleSet {
-    fn add(&mut self, sni: SharedStr, caps: CapSet) {
-        // TODO: warning duplicated rules
-        self.0.entry(sni).or_default().insert(caps);
-    }
-
-    fn get<'a>(&'a self, sni: &'a str) -> impl Iterator<Item = &'a CapSet> {
+    fn get_recursive<'a>(&'a self, sni: &'a str) -> impl Iterator<Item = &'a CapSet> {
         let mut skip = 0usize;
         sni.split_terminator('.')
             .map(move |part| {
@@ -92,7 +88,7 @@ impl Policy {
             rules.extend(self.listen_port_ruleset.get(&port).cloned());
         }
         if let Some(sni) = sni {
-            rules.extend(self.sni_ruleset.get(&sni).cloned());
+            rules.extend(self.sni_ruleset.get_recursive(&sni).cloned());
         }
         rules
     }
@@ -133,8 +129,11 @@ fn test_router_get_sni_caps_requirements() {
         .as_bytes(),
     )
     .unwrap();
-    assert_eq!(3, router.sni_ruleset.get("test.example.com").count());
-    assert_eq!(3, router.sni_ruleset.get("example.com").count());
-    assert_eq!(2, router.sni_ruleset.get("com").count());
-    assert_eq!(1, router.sni_ruleset.get("net").count());
+    assert_eq!(
+        3,
+        router.sni_ruleset.get_recursive("test.example.com").count()
+    );
+    assert_eq!(3, router.sni_ruleset.get_recursive("example.com").count());
+    assert_eq!(2, router.sni_ruleset.get_recursive("com").count());
+    assert_eq!(1, router.sni_ruleset.get_recursive("net").count());
 }

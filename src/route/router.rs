@@ -1,48 +1,53 @@
 use std::{
     collections::{HashMap, HashSet},
     io::{self, BufRead},
-    ops::{Add, AddAssign},
 };
 
-use flexstr::{shared_str, SharedStr, ToSharedStr};
+use flexstr::{SharedStr, ToSharedStr};
 
 use super::{capabilities::CapSet, parser};
 
-#[derive(Debug, Clone, Default)]
-struct CapRequirements(HashSet<CapSet>);
+#[derive(Default)]
+struct ListenPortRuleSet(HashMap<u16, HashSet<CapSet>>);
 
-impl Add for CapRequirements {
-    type Output = Self;
+#[derive(Default)]
+struct SniRuleSet(HashMap<SharedStr, HashSet<CapSet>>);
 
-    fn add(self, rhs: Self) -> Self::Output {
-        Self(self.0.into_iter().chain(rhs.0.into_iter()).collect())
+impl ListenPortRuleSet {
+    fn add(&mut self, port: u16, caps: CapSet) {
+        // TODO: warning duplicated rules
+        self.0.entry(port).or_default().insert(caps);
+    }
+
+    fn get<'a>(&'a self, port: &'a u16) -> impl Iterator<Item = &'a CapSet> {
+        self.0.get(&port).into_iter().flatten()
     }
 }
 
-impl AddAssign<&Self> for CapRequirements {
-    fn add_assign(&mut self, rhs: &Self) {
-        self.0.extend(rhs.0.iter().cloned())
-    }
-}
-
-impl CapRequirements {
-    fn add_caps(&mut self, caps: CapSet) {
-        self.0.insert(caps);
+impl SniRuleSet {
+    fn add(&mut self, sni: SharedStr, caps: CapSet) {
+        // TODO: warning duplicated rules
+        self.0.entry(sni).or_default().insert(caps);
     }
 
-    fn meet(&self, caps: &CapSet) -> bool {
-        self.0.iter().all(|req| req.has_intersection(caps))
-    }
-
-    fn len(&self) -> usize {
-        self.0.len()
+    fn get<'a>(&'a self, sni: &'a str) -> impl Iterator<Item = &'a CapSet> {
+        let mut skip = 0usize;
+        sni.split_terminator('.')
+            .map(move |part| {
+                let key = &sni[skip..];
+                skip += part.len() + 1;
+                key
+            })
+            .chain(["."])
+            .filter_map(|key| self.0.get(key))
+            .flatten()
     }
 }
 
 #[derive(Default)]
 pub struct Router {
-    listen_port_caps: HashMap<u16, CapRequirements>,
-    sni_caps: HashMap<SharedStr, CapRequirements>,
+    listen_port_ruleset: ListenPortRuleSet,
+    sni_ruleset: SniRuleSet,
 }
 
 impl Router {
@@ -65,53 +70,38 @@ impl Router {
         };
         match filter {
             parser::RuleFilter::ListenPort(port) => {
-                self.listen_port_caps
-                    .entry(port)
-                    .or_default()
-                    .add_caps(caps);
+                self.listen_port_ruleset.add(port, caps);
             }
             parser::RuleFilter::Sni(parts) => {
-                let parts = parts.to_shared_str();
-                self.sni_caps.entry(parts).or_default().add_caps(caps);
+                self.sni_ruleset.add(parts.to_shared_str(), caps);
             }
         }
     }
 
     fn rule_count(&self) -> usize {
-        self.listen_port_caps
+        self.listen_port_ruleset
+            .0
             .values()
-            .chain(self.sni_caps.values())
-            .fold(0, |acc, v| acc + v.0.len())
+            .chain(self.sni_ruleset.0.values())
+            .fold(0, |acc, v| acc + v.len())
     }
 
-    fn get_sni_caps_requirements(&self, sni: &str) -> CapRequirements {
-        let mut caps = CapRequirements::default();
-        let mut sub = &sni[..];
-        while !sub.is_empty() {
-            if let Some(new_caps) = self.sni_caps.get(sub) {
-                caps += new_caps;
-            }
-            match sub.find('.') {
-                Some(n) => sub = &sub[n..],
-                None => break,
-            }
+    fn get_rules(&self, listen_port: Option<u16>, sni: Option<SharedStr>) -> HashSet<CapSet> {
+        let mut rules = HashSet::new();
+        if let Some(port) = listen_port {
+            rules.extend(self.listen_port_ruleset.get(&port).cloned());
         }
-        if let Some(new_caps) = self.sni_caps.get(&shared_str!(".")) {
-            caps += new_caps;
+        if let Some(sni) = sni {
+            rules.extend(self.sni_ruleset.get(&sni).cloned());
         }
-        caps
-    }
-
-    fn get_listen_port_caps_requirements(&self, port: u16) -> CapRequirements {
-        self.listen_port_caps
-            .get(&port)
-            .cloned()
-            .unwrap_or_default()
+        rules
     }
 }
 
 #[test]
 fn test_router_listen_port() {
+    use super::capabilities::CheckAllCapsMeet;
+
     let rules = "
         listen-port 1 require a
         listen-port 2 require b
@@ -119,22 +109,22 @@ fn test_router_listen_port() {
     ";
     let router = Router::from_file(rules.as_bytes()).unwrap();
     assert_eq!(3, router.rule_count());
-    let p1 = router.listen_port_caps.get(&1).unwrap();
-    let p2 = router.listen_port_caps.get(&2).unwrap();
+    let p1 = router.get_rules(Some(1), None);
+    let p2 = router.get_rules(Some(2), None);
     let abc = CapSet::new(["a", "b", "c"].into_iter());
     let bc = CapSet::new(["b", "c"].into_iter());
     let c = CapSet::new(["c"].into_iter());
-    assert!(p1.meet(&abc));
-    assert!(!p1.meet(&bc));
-    assert!(!p1.meet(&c));
-    assert!(p2.meet(&abc));
-    assert!(p2.meet(&bc));
-    assert!(!p2.meet(&c));
+    assert!(p1.all_meet_by(&abc));
+    assert!(!p1.all_meet_by(&bc));
+    assert!(!p1.all_meet_by(&c));
+    assert!(p2.all_meet_by(&abc));
+    assert!(p2.all_meet_by(&bc));
+    assert!(!p2.all_meet_by(&c));
 }
 
 #[test]
 fn test_router_get_sni_caps_requirements() {
-    let route = Router::from_file(
+    let router = Router::from_file(
         "
         sni . require root
         sni com. require com
@@ -143,8 +133,8 @@ fn test_router_get_sni_caps_requirements() {
         .as_bytes(),
     )
     .unwrap();
-    assert_eq!(3, route.get_sni_caps_requirements("test.example.com").len());
-    assert_eq!(3, route.get_sni_caps_requirements("example.com").len());
-    assert_eq!(2, route.get_sni_caps_requirements("com").len());
-    assert_eq!(1, route.get_sni_caps_requirements("net").len());
+    assert_eq!(3, router.sni_ruleset.get("test.example.com").count());
+    assert_eq!(3, router.sni_ruleset.get("example.com").count());
+    assert_eq!(2, router.sni_ruleset.get("com").count());
+    assert_eq!(1, router.sni_ruleset.get("net").count());
 }

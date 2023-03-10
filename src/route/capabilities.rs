@@ -35,6 +35,19 @@ impl CapSet {
     }
 }
 
+pub trait CheckAllCapsMeet {
+    fn all_meet_by(self, caps: &CapSet) -> bool;
+}
+
+impl<'a, T> CheckAllCapsMeet for T
+where
+    T: IntoIterator<Item = &'a CapSet>,
+{
+    fn all_meet_by(self, caps: &CapSet) -> bool {
+        self.into_iter().all(|req| req.has_intersection(&caps))
+    }
+}
+
 #[test]
 fn test_capset_intersection() {
     let abc = CapSet::new(["a", "b", "c"].into_iter());

@@ -54,12 +54,12 @@ sd-notify = { version = "0.4", optional = true }
 tracing-journald = { version = "0.3", optional = true }
 
 [features]
-default = ["web_console", "score_script", "systemd", "rich_web", "route"]
+default = ["web_console", "score_script", "systemd", "rich_web", "policy"]
 web_console = ["hyper"]
 rich_web = ["web_console", "zip"]
 score_script = ["rlua"]
 systemd = ["sd-notify", "tracing-journald"]
-route = ["nom"]
+policy = ["nom"]
 
 [build-dependencies]
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "blocking"] }

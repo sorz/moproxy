@@ -45,12 +45,12 @@ impl SniRuleSet {
 }
 
 #[derive(Default)]
-pub struct Router {
+pub struct Policy {
     listen_port_ruleset: ListenPortRuleSet,
     sni_ruleset: SniRuleSet,
 }
 
-impl Router {
+impl Policy {
     pub fn from_file<R: BufRead>(read: R) -> io::Result<Self> {
         let mut router: Self = Default::default();
         for line in read.lines() {
@@ -107,7 +107,7 @@ fn test_router_listen_port() {
         listen-port 2 require b
         listen-port 2 require c or d
     ";
-    let router = Router::from_file(rules.as_bytes()).unwrap();
+    let router = Policy::from_file(rules.as_bytes()).unwrap();
     assert_eq!(3, router.rule_count());
     let p1 = router.get_rules(Some(1), None);
     let p2 = router.get_rules(Some(2), None);
@@ -124,7 +124,7 @@ fn test_router_listen_port() {
 
 #[test]
 fn test_router_get_sni_caps_requirements() {
-    let router = Router::from_file(
+    let router = Policy::from_file(
         "
         sni . require root
         sni com. require com

@@ -1,4 +1,4 @@
-use flexstr::{shared_str, SharedStr};
+use flexstr::{shared_str, SharedStr, ToCase};
 use nom::{
     branch::alt,
     bytes::complete::{tag_no_case, take_till1},
@@ -50,10 +50,11 @@ fn domain_name(input: &str) -> IResult<&str, SharedStr> {
     alt((
         recognize(many1(domain_name_part)).map(|n| {
             if n.ends_with('.') {
-                (&n[..n.len() - 1]).into()
+                SharedStr::from(&n[..n.len() - 1])
             } else {
                 n.into()
             }
+            .to_lower()
         }),
         domain_name_root.map(|_| shared_str!(".")),
     ))(input)
@@ -132,7 +133,7 @@ fn test_parse_domain_name_root() {
 
 #[test]
 fn test_parse_domain_name() {
-    let (rem, parts) = domain_name("test_-123.example.com.\n").unwrap();
+    let (rem, parts) = domain_name("Test_-123.Example.Com.\n").unwrap();
     assert_eq!("\n", rem);
     assert_eq!(shared_str!("test_-123.example.com"), parts);
 

@@ -4,7 +4,7 @@ use std::{
     ops::{Add, AddAssign},
 };
 
-use flexstr::{SharedStr, ToSharedStr};
+use flexstr::{shared_str, SharedStr, ToSharedStr};
 
 use super::{capabilities::CapSet, parser};
 
@@ -19,9 +19,9 @@ impl Add for CapRequirements {
     }
 }
 
-impl AddAssign for CapRequirements {
-    fn add_assign(&mut self, rhs: Self) {
-        self.0.extend(rhs.0.into_iter())
+impl AddAssign<&Self> for CapRequirements {
+    fn add_assign(&mut self, rhs: &Self) {
+        self.0.extend(rhs.0.iter().cloned())
     }
 }
 
@@ -32,6 +32,10 @@ impl CapRequirements {
 
     fn meet(&self, caps: &CapSet) -> bool {
         self.0.iter().all(|req| req.has_intersection(caps))
+    }
+
+    fn len(&self) -> usize {
+        self.0.len()
     }
 }
 
@@ -80,9 +84,29 @@ impl Router {
             .fold(0, |acc, v| acc + v.0.len())
     }
 
-    fn get_sni_caps(&self, sni: &str) -> CapRequirements {
-        let caps = CapRequirements::default();
-        unimplemented!()
+    fn get_sni_caps_requirements(&self, sni: &str) -> CapRequirements {
+        let mut caps = CapRequirements::default();
+        let mut sub = &sni[..];
+        while !sub.is_empty() {
+            if let Some(new_caps) = self.sni_caps.get(sub) {
+                caps += new_caps;
+            }
+            match sub.find('.') {
+                Some(n) => sub = &sub[n..],
+                None => break,
+            }
+        }
+        if let Some(new_caps) = self.sni_caps.get(&shared_str!(".")) {
+            caps += new_caps;
+        }
+        caps
+    }
+
+    fn get_listen_port_caps_requirements(&self, port: u16) -> CapRequirements {
+        self.listen_port_caps
+            .get(&port)
+            .cloned()
+            .unwrap_or_default()
     }
 }
 
@@ -106,4 +130,21 @@ fn test_router_listen_port() {
     assert!(p2.meet(&abc));
     assert!(p2.meet(&bc));
     assert!(!p2.meet(&c));
+}
+
+#[test]
+fn test_router_get_sni_caps_requirements() {
+    let route = Router::from_file(
+        "
+        sni . require root
+        sni com. require com
+        sni example.com require example
+    "
+        .as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(3, route.get_sni_caps_requirements("test.example.com").len());
+    assert_eq!(3, route.get_sni_caps_requirements("example.com").len());
+    assert_eq!(2, route.get_sni_caps_requirements("com").len());
+    assert_eq!(1, route.get_sni_caps_requirements("net").len());
 }

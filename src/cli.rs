@@ -23,11 +23,13 @@ pub(crate) struct CliArgs {
     /// SOCKSv5 server list. IP address can omit for localhost.
     #[arg(short = 's', long = "socks5", value_name = "SOCKS5-SERVERS")]
     #[arg(value_parser = parse_socket_addr_default_on_localhost)]
+    #[arg(num_args = 0..)]
     pub(crate) socks5_servers: Vec<SocketAddr>,
 
     /// HTTP proxy server list. IP address can omit for localhost.
     #[arg(short = 't', long = "http", value_name = "HTTP-SERVERS")]
     #[arg(value_parser = parse_socket_addr_default_on_localhost)]
+    #[arg(num_args = 0..)]
     pub(crate) http_servers: Vec<SocketAddr>,
 
     /// INI file contains list of proxy servers.

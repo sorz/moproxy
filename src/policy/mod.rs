@@ -18,7 +18,7 @@ use tracing::info;
 struct RuleSet<K: Eq + Hash>(HashMap<K, HashSet<CapSet>>);
 
 type ListenPortRuleSet = RuleSet<u16>;
-type SniRuleSet = RuleSet<SharedStr>;
+type DstDomainRuleSet = RuleSet<SharedStr>;
 
 impl<K: Eq + Hash> RuleSet<K> {
     fn add(&mut self, key: K, caps: CapSet) {
@@ -31,12 +31,12 @@ impl<K: Eq + Hash> RuleSet<K> {
     }
 }
 
-impl SniRuleSet {
-    fn get_recursive<'a>(&'a self, sni: &'a str) -> impl Iterator<Item = &'a CapSet> {
+impl DstDomainRuleSet {
+    fn get_recursive<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a CapSet> {
         let mut skip = 0usize;
-        sni.split_terminator('.')
+        name.split_terminator('.')
             .map(move |part| {
-                let key = &sni[skip..];
+                let key = &name[skip..];
                 skip += part.len() + 1;
                 key
             })
@@ -49,7 +49,7 @@ impl SniRuleSet {
 #[derive(Default)]
 pub struct Policy {
     listen_port_ruleset: ListenPortRuleSet,
-    sni_ruleset: SniRuleSet,
+    dst_domain_ruleset: DstDomainRuleSet,
 }
 
 impl Policy {
@@ -83,7 +83,7 @@ impl Policy {
                 self.listen_port_ruleset.add(port, caps);
             }
             parser::RuleFilter::Sni(parts) => {
-                self.sni_ruleset.add(parts.to_shared_str(), caps);
+                self.dst_domain_ruleset.add(parts.to_shared_str(), caps);
             }
         }
     }
@@ -92,17 +92,21 @@ impl Policy {
         self.listen_port_ruleset
             .0
             .values()
-            .chain(self.sni_ruleset.0.values())
+            .chain(self.dst_domain_ruleset.0.values())
             .fold(0, |acc, v| acc + v.len())
     }
 
-    pub fn matches(&self, listen_port: Option<u16>, sni: Option<SharedStr>) -> HashSet<CapSet> {
+    pub fn matches(
+        &self,
+        listen_port: Option<u16>,
+        dst_domain: Option<SharedStr>,
+    ) -> HashSet<CapSet> {
         let mut rules = HashSet::new();
         if let Some(port) = listen_port {
             rules.extend(self.listen_port_ruleset.get(&port).cloned());
         }
-        if let Some(sni) = sni {
-            rules.extend(self.sni_ruleset.get_recursive(&sni).cloned());
+        if let Some(name) = dst_domain {
+            rules.extend(self.dst_domain_ruleset.get_recursive(&name).cloned());
         }
         rules
     }
@@ -133,21 +137,30 @@ fn test_router_listen_port() {
 }
 
 #[test]
-fn test_router_get_sni_caps_requirements() {
+fn test_router_get_domain_caps_requirements() {
     let router = Policy::load(
         "
-        sni . require root
-        sni com. require com
-        sni example.com require example
+        dst domain . require root
+        dst domain com. require com
+        dst domain example.com require example
     "
         .as_bytes(),
     )
     .unwrap();
     assert_eq!(
         3,
-        router.sni_ruleset.get_recursive("test.example.com").count()
+        router
+            .dst_domain_ruleset
+            .get_recursive("test.example.com")
+            .count()
     );
-    assert_eq!(3, router.sni_ruleset.get_recursive("example.com").count());
-    assert_eq!(2, router.sni_ruleset.get_recursive("com").count());
-    assert_eq!(1, router.sni_ruleset.get_recursive("net").count());
+    assert_eq!(
+        3,
+        router
+            .dst_domain_ruleset
+            .get_recursive("example.com")
+            .count()
+    );
+    assert_eq!(2, router.dst_domain_ruleset.get_recursive("com").count());
+    assert_eq!(1, router.dst_domain_ruleset.get_recursive("net").count());
 }

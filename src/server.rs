@@ -12,7 +12,7 @@ use moproxy::policy::Policy;
 use moproxy::{
     client::{Connectable, NewClient},
     futures_stream::TcpListenerStream,
-    monitor::{Monitor, ServerList},
+    monitor::Monitor,
     proxy::{ProxyProto, ProxyServer, UserPassAuthCredential},
     web::{self, AutoRemoveFile},
 };
@@ -22,8 +22,9 @@ pub(crate) struct MoProxy {
     cli_args: Arc<CliArgs>,
     server_list_config: Arc<ServerListConfig>,
     monitor: Monitor,
+    direct_server: Option<Arc<ProxyServer>>,
     #[cfg(feature = "policy")]
-    policy: Option<Arc<RwLock<Policy>>>,
+    policy: Arc<RwLock<Policy>>,
     #[cfg(all(feature = "web_console", unix))]
     _sock_file: Arc<Option<AutoRemoveFile<String>>>,
 }
@@ -38,15 +39,18 @@ impl MoProxy {
         // Load proxy server list
         let server_list_config = ServerListConfig::new(&args);
         let servers = server_list_config.load().context("fail to load servers")?;
+        let direct_server = args
+            .allow_direct
+            .then(|| Arc::new(ProxyServer::direct(args.max_wait)));
 
         // Load policy
         #[cfg(feature = "policy")]
         let policy = {
             if let Some(ref path) = args.policy {
                 let policy = Policy::load_from_file(path).context("cannot to load policy")?;
-                Some(Arc::new(RwLock::new(policy)))
+                Arc::new(RwLock::new(policy))
             } else {
-                None
+                Default::default()
             }
         };
 
@@ -102,6 +106,7 @@ impl MoProxy {
         Ok(Self {
             cli_args: Arc::new(args),
             server_list_config: Arc::new(server_list_config),
+            direct_server,
             monitor,
             #[cfg(feature = "policy")]
             policy,
@@ -114,20 +119,17 @@ impl MoProxy {
         let servers = self.server_list_config.load()?;
         // Load policy
         #[cfg(feature = "policy")]
-        let policies = match (&self.cli_args.policy, &self.policy) {
-            (Some(path), Some(policy)) => {
-                let new_policy = Policy::load_from_file(path).context("cannot to load policy")?;
-                Some((new_policy, policy))
-            }
-            _ => None,
+        let policy = match &self.cli_args.policy {
+            Some(path) => Policy::load_from_file(path).context("cannot to load policy")?,
+            _ => Default::default(),
         };
         // TODO: reload lua script
 
         // Apply only if no error occur
         self.monitor.update_servers(servers);
         #[cfg(feature = "policy")]
-        if let Some((new_policy, policy)) = policies {
-            *policy.write() = new_policy;
+        {
+            *self.policy.write() = policy;
         }
         Ok(())
     }
@@ -158,26 +160,59 @@ impl MoProxy {
             listeners,
         })
     }
+
+    fn servers_with_policy(&self, client: &NewClient) -> Vec<Arc<ProxyServer>> {
+        let from_port = client.from_port;
+        let caps = self
+            .policy
+            .read()
+            .matches(Some(from_port), client.dest.host.domain());
+        self.monitor
+            .servers()
+            .into_iter()
+            .filter(|s| s.serve_port(from_port))
+            .filter(|s| caps.iter().all(|c| c.has_intersection(&s.capabilities)))
+            .collect()
+    }
+
+    #[instrument(level = "error", skip_all, fields(on_port=sock.local_addr()?.port(), peer=?sock.peer_addr()?))]
+    async fn handle_client(&self, sock: TcpStream) -> io::Result<()> {
+        let client = NewClient::from_socket(sock).await?;
+        let args = &self.cli_args;
+
+        let client = if (args.remote_dns || args.n_parallel > 1) && client.dest.port == 443 {
+            // Try parse TLS client hello
+            let mut client = client.retrieve_dest_from_sni().await?;
+            if args.remote_dns {
+                client.override_dest_with_sni();
+            }
+            let servers = self.servers_with_policy(&client.client);
+            client.connect_server(servers, args.n_parallel).await
+        } else {
+            let servers = self.servers_with_policy(&client);
+            client.connect_server(servers, 1).await
+        };
+        match client {
+            Ok(client) => client.serve().await?,
+            Err(client) => {
+                if let Some(ref server) = self.direct_server {
+                    client.direct_connect(server.clone()).await?.serve().await?
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl MoProxyListener {
     pub(crate) async fn handle_forever(mut self) {
-        let args = self.moproxy.cli_args;
-        let remote_dns = args.remote_dns;
-        let n_parallel = args.n_parallel;
-        let direct_server = args
-            .allow_direct
-            .then(|| Arc::new(ProxyServer::direct(args.max_wait)));
         let mut clients = stream::select_all(self.listeners.iter_mut());
         while let Some(sock) = clients.next().await {
-            let direct = direct_server.clone();
-            let servers = self.moproxy.monitor.servers();
+            let moproxy = self.moproxy.clone();
             match sock {
                 Ok(sock) => {
                     tokio::spawn(async move {
-                        let result =
-                            handle_client(sock, servers, remote_dns, n_parallel, direct).await;
-                        if let Err(e) = result {
+                        if let Err(e) = moproxy.handle_client(sock).await {
                             info!("error on hanle client: {}", e);
                         }
                     });
@@ -186,35 +221,6 @@ impl MoProxyListener {
             }
         }
     }
-}
-
-#[instrument(level = "error", skip_all, fields(on_port=sock.local_addr()?.port(), peer=?sock.peer_addr()?))]
-async fn handle_client(
-    sock: TcpStream,
-    servers: ServerList,
-    remote_dns: bool,
-    n_parallel: usize,
-    direct_server: Option<Arc<ProxyServer>>,
-) -> io::Result<()> {
-    let client = NewClient::from_socket(sock, servers).await?;
-    let client = if remote_dns && client.dest.port == 443 {
-        client
-            .retrieve_dest_from_sni()
-            .await?
-            .connect_server(n_parallel)
-            .await
-    } else {
-        client.connect_server(0).await
-    };
-    match client {
-        Ok(client) => client.serve().await?,
-        Err(client) => {
-            if let Some(server) = direct_server {
-                client.direct_connect(server).await?.serve().await?
-            }
-        }
-    }
-    Ok(())
 }
 
 struct ServerListConfig {

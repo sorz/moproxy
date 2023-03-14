@@ -385,6 +385,7 @@ version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4d50aef14619d336a54fca5a592d952eb39037b1a1e7e6afd9f91c892ac7ef65"
 dependencies = [
+ "serde",
  "static_assertions",
 ]
 

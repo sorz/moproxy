@@ -1,6 +1,7 @@
 mod connect;
 mod tls_parser;
 use bytes::{Bytes, BytesMut};
+use flexstr::SharedStr;
 use std::{
     borrow::Cow, cmp, future::Future, io, net::SocketAddr, pin::Pin, sync::Arc, time::Duration,
 };
@@ -15,7 +16,6 @@ use tracing::{debug, info, instrument, warn};
 use crate::linux::tcp::TcpStreamExt;
 use crate::{
     client::connect::try_connect_all,
-    monitor::ServerList,
     proxy::{copy::pipe, Traffic},
     proxy::{Address, Destination, ProxyServer},
 };
@@ -25,15 +25,15 @@ pub struct NewClient {
     left: TcpStream,
     src: SocketAddr,
     pub dest: Destination,
-    list: ServerList,
-    from_port: u16,
+    pub from_port: u16,
 }
 
 #[derive(Debug)]
 pub struct NewClientWithData {
-    client: NewClient,
+    pub client: NewClient,
     pending_data: Option<Bytes>,
     has_full_tls_hello: bool,
+    pub sni: Option<SharedStr>,
 }
 
 #[derive(Debug)]
@@ -54,7 +54,7 @@ pub struct FailedClient {
 type ConnectServer = Pin<Box<dyn Future<Output = Result<ConnectedClient, FailedClient>> + Send>>;
 
 pub trait Connectable {
-    fn connect_server(self, n_parallel: usize) -> ConnectServer;
+    fn connect_server(self, proxies: Vec<Arc<ProxyServer>>, n_parallel: usize) -> ConnectServer;
 }
 
 fn error_invalid_input<T>(msg: &'static str) -> io::Result<T> {
@@ -136,7 +136,7 @@ async fn accept_socks5(client: &mut TcpStream) -> io::Result<Destination> {
 
 impl NewClient {
     #[instrument(name = "retrieve_dest", skip_all)]
-    pub async fn from_socket(mut left: TcpStream, list: ServerList) -> io::Result<Self> {
+    pub async fn from_socket(mut left: TcpStream) -> io::Result<Self> {
         let src = left.peer_addr()?;
         let from_port = left.local_addr()?.port();
 
@@ -165,7 +165,6 @@ impl NewClient {
             left,
             src,
             dest,
-            list,
             from_port,
         })
     }
@@ -177,8 +176,7 @@ impl NewClient {
         let NewClient {
             mut left,
             src,
-            mut dest,
-            list,
+            dest,
             from_port,
         } = self;
         let wait = Duration::from_millis(500);
@@ -187,6 +185,7 @@ impl NewClient {
         //   2. --n-parallel: need the whole request to be forwarded
         let mut has_full_tls_hello = false;
         let mut pending_data = None;
+        let mut sni = None;
         let mut buf = BytesMut::with_capacity(2048);
         buf.resize(buf.capacity(), 0);
         if let Ok(len) = timeout(wait, left.read(&mut buf)).await {
@@ -197,7 +196,7 @@ impl NewClient {
                 Ok(hello) => {
                     has_full_tls_hello = true;
                     if let Some(name) = hello.server_name {
-                        dest = (name, dest.port).into();
+                        sni = Some(name.into());
                         debug!(sni = name, "SNI found");
                     }
                     if hello.early_data {
@@ -214,10 +213,10 @@ impl NewClient {
                 left,
                 src,
                 dest,
-                list,
                 from_port,
             },
             has_full_tls_hello,
+            sni,
             pending_data,
         })
     }
@@ -225,23 +224,13 @@ impl NewClient {
     #[instrument(level = "error", skip_all, fields(dest=?self.dest))]
     async fn connect_server(
         self,
+        proxies: Vec<Arc<ProxyServer>>,
         n_parallel: usize,
         wait_response: bool,
         pending_data: Option<Bytes>,
     ) -> Result<ConnectedClient, FailedClient> {
-        let NewClient {
-            left,
-            dest,
-            list,
-            from_port,
-            ..
-        } = self;
-        let list = list
-            .iter()
-            .filter(|s| s.serve_port(from_port))
-            .cloned()
-            .collect();
-        let result = try_connect_all(&dest, list, n_parallel, wait_response, pending_data).await;
+        let NewClient { left, dest, .. } = self;
+        let result = try_connect_all(&dest, proxies, n_parallel, wait_response, pending_data).await;
         if let Some((server, right)) = result {
             info!(proxy = %server.tag, "Proxy connected");
             Ok(ConnectedClient {
@@ -261,25 +250,39 @@ impl NewClient {
     }
 }
 
+impl NewClientWithData {
+    pub fn override_dest_with_sni(&mut self) -> bool {
+        match (&mut self.client.dest.host, &self.sni) {
+            (Address::Domain(_), _) => false,
+            (_, None) => false,
+            (dst, Some(host)) => {
+                *dst = Address::Domain(host.to_string().into_boxed_str());
+                true
+            }
+        }
+    }
+}
+
 impl Connectable for NewClient {
-    fn connect_server(self, _n_parallel: usize) -> ConnectServer {
-        Box::pin(self.connect_server(1, false, None))
+    fn connect_server(self, proxies: Vec<Arc<ProxyServer>>, _n_parallel: usize) -> ConnectServer {
+        Box::pin(self.connect_server(proxies, 1, false, None))
     }
 }
 
 impl Connectable for NewClientWithData {
-    fn connect_server(self, n_parallel: usize) -> ConnectServer {
+    fn connect_server(self, proxies: Vec<Arc<ProxyServer>>, n_parallel: usize) -> ConnectServer {
         let NewClientWithData {
             client,
             pending_data,
             has_full_tls_hello,
+            ..
         } = self;
         let n_parallel = if has_full_tls_hello {
-            cmp::min(client.list.len(), n_parallel)
+            cmp::min(proxies.len(), n_parallel)
         } else {
             1
         };
-        Box::pin(client.connect_server(n_parallel, has_full_tls_hello, pending_data))
+        Box::pin(client.connect_server(proxies, n_parallel, has_full_tls_hello, pending_data))
     }
 }
 

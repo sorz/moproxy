@@ -69,34 +69,21 @@ http_proxy=socks5h://localhost:2080 curl ifconfig.co
 ```
 
 ### Server list file
-You may list all proxy servers in a text file to avoid messy CLI arguments.
+Put upstream proxies on a file to avoid messy CLI arguments and enable features
+like priority (score base), username/password auth, capabilities, etc.
 
-```ini
-[server-1]
-address=127.0.0.1:2001 ;required
-protocol=socks5 ;required
+[See proxy.ini example](conf/proxy.ini) for details.
 
-[server-2]
-address=127.0.0.1:2002
-protocol=http
-test dns=127.0.0.53:53 ;use remote's local dns server to caculate delay
-listen ports=8001
+Pass file path to `moproxy` via `--list` argument.
 
-[server-3]
-address=127.0.0.1:2003
-protocol=http
-; server-3 serves for port 8001 & 8002, while server-2 is only for
-; port 8001. server-1 accepts connections coming from any ports specified
-; by CLI argument --port.
-listen ports=8001,8002
+Signal `SIGHUP` will trigger the program to reload the list.
 
-[backup]
-address=127.0.0.1:2002
-protocol=socks5
-score base=5000 ;add 5k to pull away from preferred server.
-```
+### Policy file
+Let specified connections use only a subset of upstream proxies.
 
-Pass the file path to `moproxy` via `--list` argument.
+[See policy.rules example](conf/policy.rules) for details.
+
+Pass file path to `moproxy` via `--policy` argument.
 
 Signal `SIGHUP` will trigger the program to reload the list.
 

@@ -10,7 +10,7 @@ WatchdogSec=5
 Restart=on-failure
 
 EnvironmentFile=/etc/moproxy/config.env
-ExecStart=/usr/bin/moproxy -h $HOST -p $PORT --list $PROXY_LIST $DAEMON_ARGS
+ExecStart=/usr/bin/moproxy -b $HOST -p $PORT --list $PROXY_LIST $DAEMON_ARGS
 ExecReload=/usr/bin/kill -HUP $MAINPID
 
 LimitNOFILE=32768

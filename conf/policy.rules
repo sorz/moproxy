@@ -1,0 +1,12 @@
+## Example of moproxy policy rulesets
+
+# One rule per line, comment starts with a hashtag.
+
+# Connection to TCP 8001 requires "cap1" on proxy's capabilities,
+# TCP 8002 requires "cap1" or "cap2".
+listen-port 8001 require cap1
+listen-port 8002 require cap1 or cap2
+
+# *.netflix.com goes to proxies with BOTH "streaming" AND "us".
+dst domain netflix.com require streaming
+dst domain netflix.com require us

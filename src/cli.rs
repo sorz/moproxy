@@ -1,5 +1,6 @@
 use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
+    path::PathBuf,
     time::Duration,
 };
 
@@ -34,7 +35,7 @@ pub(crate) struct CliArgs {
 
     /// INI file contains list of proxy servers.
     #[arg(short = 'l', long = "list", value_name = "SERVER-LIST")]
-    pub(crate) server_list: Option<String>,
+    pub(crate) server_list: Option<PathBuf>,
 
     /// Period of time to make one probe.
     #[arg(short = 'i', long = "probe", value_name = "SECONDS")]
@@ -84,10 +85,10 @@ pub(crate) struct CliArgs {
     #[arg(default_value = "info")]
     pub(crate) log_level: LevelFilter,
 
-    /// Level of verbosity
+    /// Lua script that customize proxy score
     #[cfg(feature = "score_script")]
     #[arg(long, value_name = "LUA-SCRIPT")]
-    pub(crate) score_script: Option<String>,
+    pub(crate) score_script: Option<PathBuf>,
 
     /// Max waiting time in seconds for connection establishment before
     /// timeout. Applied for both probe & normal proxy connections.

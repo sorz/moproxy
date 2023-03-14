@@ -255,25 +255,25 @@ where
 }
 
 /// File on this path will be removed on `drop()`.
-pub struct AutoRemoveFile<'a> {
-    path: &'a str,
+pub struct AutoRemoveFile<T: AsRef<Path>> {
+    path: T,
 }
 
-impl<'a> AutoRemoveFile<'a> {
-    pub fn new(path: &'a str) -> Self {
+impl<T: AsRef<Path>> AutoRemoveFile<T> {
+    pub fn new(path: T) -> Self {
         AutoRemoveFile { path }
     }
 }
 
-impl<'a> Drop for AutoRemoveFile<'a> {
+impl<T: AsRef<Path>> Drop for AutoRemoveFile<T> {
     fn drop(&mut self) {
         if let Err(err) = fs::remove_file(&self.path) {
-            warn!("fail to remove {}: {}", self.path, err);
+            warn!("fail to remove {}: {}", self.path.as_ref().display(), err);
         }
     }
 }
 
-impl<'a> AsRef<Path> for &'a AutoRemoveFile<'a> {
+impl<T: AsRef<Path>> AsRef<Path> for AutoRemoveFile<T> {
     fn as_ref(&self) -> &Path {
         self.path.as_ref()
     }

@@ -59,8 +59,8 @@ fn domain_name(input: &str) -> IResult<&str, SharedStr> {
     ))(input)
 }
 
-fn filter_sni(input: &str) -> IResult<&str, RuleFilter> {
-    tuple((tag_no_case("sni"), space1, domain_name))
+fn filter_dst_domain(input: &str) -> IResult<&str, RuleFilter> {
+    tuple((tag_no_case("dst domain"), space1, domain_name))
         .map(|(_, _, parts)| RuleFilter::Sni(parts))
         .parse(input)
 }
@@ -72,7 +72,7 @@ fn filter_listen_port(input: &str) -> IResult<&str, RuleFilter> {
 }
 
 fn rule_filter(input: &str) -> IResult<&str, RuleFilter> {
-    alt((filter_sni, filter_listen_port))(input)
+    alt((filter_dst_domain, filter_listen_port))(input)
 }
 
 fn caps1(input: &str) -> IResult<&str, Vec<SharedStr>> {
@@ -149,8 +149,8 @@ fn test_listen_port_filter() {
 }
 
 #[test]
-fn test_sni_filter() {
-    let (rem, parts) = filter_sni("sni test\n").unwrap();
+fn test_dst_domain_filter() {
+    let (rem, parts) = filter_dst_domain("domain test\n").unwrap();
     assert_eq!("\n", rem);
     assert_eq!(RuleFilter::Sni(shared_str!("test")), parts);
 }
@@ -202,11 +202,11 @@ fn test_empty_line() {
 fn test_document() {
     let (_, rules) = document(
         "
-        sni test require a # test\n\n\n
+        dst domain test require a # test\n\n\n
         # comment\n\
         # comment
         listen-port 123 require a or b   \n\
-        sni test require b
+        dst domain test require b
         # end
     ",
     )

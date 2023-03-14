@@ -1,5 +1,6 @@
 pub mod copy;
 pub mod http;
+use flexstr::SharedStr;
 #[cfg(feature = "score_script")]
 use rlua::prelude::*;
 pub mod socks5;
@@ -20,6 +21,8 @@ use std::{
 };
 use tokio::net::TcpStream;
 use tracing::{debug, instrument};
+
+use crate::policy::capabilities::CapSet;
 
 const GRAPHITE_PATH_PREFIX: &str = "moproxy.proxy_servers";
 
@@ -72,6 +75,7 @@ pub struct ProxyServer {
     pub addr: SocketAddr,
     pub proto: ProxyProto,
     pub tag: Box<str>,
+    pub capabilities: CapSet,
     config: RwLock<ProxyServerConfig>,
     status: Mutex<ProxyServerStatus>,
     traffic: AtomicTraffic,
@@ -200,6 +204,19 @@ impl ToLua<'_> for &ProxyServer {
 pub enum Address {
     Ip(IpAddr),
     Domain(Box<str>),
+}
+
+impl Address {
+    pub fn is_domain(&self) -> bool {
+        matches!(self, Address::Domain(_))
+    }
+
+    pub fn domain(&self) -> Option<SharedStr> {
+        match self {
+            Self::Ip(_) => None,
+            Self::Domain(name) => Some(SharedStr::from(name.as_ref())),
+        }
+    }
 }
 
 impl fmt::Debug for Address {
@@ -414,6 +431,7 @@ impl ProxyServer {
             }
             .into_boxed_str(),
             config: ProxyServerConfig::new(test_dns, score_base, listen_ports, max_wait).into(),
+            capabilities: Default::default(), // TODO
             status: Default::default(),
             traffic: Default::default(),
         }
@@ -427,6 +445,7 @@ impl ProxyServer {
             tag: "__DIRECT__".into(),
             config: ProxyServerConfig::new(stub_addr, None, None, max_wait).into(),
             status: Default::default(),
+            capabilities: Default::default(),
             traffic: Default::default(),
         }
     }

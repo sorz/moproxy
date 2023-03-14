@@ -1,8 +1,9 @@
 use std::mem;
 
 use flexstr::SharedStr;
+use serde::Serialize;
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Default, Serialize)]
 pub struct CapSet(Box<[SharedStr]>);
 
 impl CapSet {

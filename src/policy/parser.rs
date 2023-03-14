@@ -4,7 +4,7 @@ use nom::{
     bytes::complete::{tag_no_case, take_till1},
     character::complete::{char, line_ending, not_line_ending, space0, space1, u16},
     combinator::{opt, recognize, verify},
-    multi::{fold_many0, many1, separated_list1},
+    multi::{fold_many0, many1, separated_list0, separated_list1},
     sequence::tuple,
     IResult, Parser,
 };
@@ -75,11 +75,12 @@ fn rule_filter(input: &str) -> IResult<&str, RuleFilter> {
     alt((filter_dst_domain, filter_listen_port))(input)
 }
 
+fn cap_name(input: &str) -> IResult<&str, SharedStr> {
+    id_chars.map(SharedStr::from).parse(input)
+}
+
 fn caps1(input: &str) -> IResult<&str, Vec<SharedStr>> {
-    separated_list1(
-        tuple((space1, tag_no_case("or"), space1)),
-        id_chars.map(SharedStr::from),
-    )(input)
+    separated_list1(tuple((space1, tag_no_case("or"), space1)), cap_name)(input)
 }
 
 fn action_require(input: &str) -> IResult<&str, RuleAction> {
@@ -102,10 +103,19 @@ fn comment(input: &str) -> IResult<&str, ()> {
     tuple((char('#'), not_line_ending)).map(|_| ()).parse(input)
 }
 
-pub fn line(input: &str) -> IResult<&str, Option<Rule>> {
+fn line(input: &str) -> IResult<&str, Option<Rule>> {
     tuple((space0, opt(rule), space0, opt(comment), line_ending))
         .map(|(_, rule, _, _, _)| rule)
         .parse(input)
+}
+
+pub fn capabilities(input: &str) -> IResult<&str, CapSet> {
+    separated_list0(
+        alt((recognize(tuple((space0, tag_no_case(","), space0))), space1)),
+        cap_name,
+    )
+    .map(|caps| CapSet::new(caps.into_iter()))
+    .parse(input)
 }
 
 pub fn line_no_ending(input: &str) -> IResult<&str, Option<Rule>> {
@@ -212,4 +222,20 @@ fn test_document() {
     )
     .unwrap();
     assert_eq!(3, rules.len());
+}
+
+#[test]
+fn test_capabilities() {
+    let (_, caps) = capabilities("a b  c ").unwrap();
+    assert_eq!(
+        CapSet::new(["a", "b", "c"].into_iter().map(SharedStr::from)),
+        caps
+    );
+    let (_, caps) = capabilities("a, b  ,c,d,").unwrap();
+    assert_eq!(
+        CapSet::new("abcd".chars().into_iter().map(SharedStr::from)),
+        caps
+    );
+    let (_, caps) = capabilities("  ").unwrap();
+    assert!(caps.is_empty());
 }

@@ -4,14 +4,14 @@ use ini::Ini;
 use parking_lot::RwLock;
 use std::{collections::HashSet, io, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::net::{TcpListener, TcpStream};
-use tracing::{info, instrument, warn};
+use tracing::{error, info, instrument, warn};
 
 use crate::{cli::CliArgs, FromOptionStr};
 use moproxy::{
     client::{Connectable, NewClient},
     futures_stream::TcpListenerStream,
     monitor::Monitor,
-    policy::Policy,
+    policy::{parser, Policy},
     proxy::{ProxyProto, ProxyServer, UserPassAuthCredential},
     web::{self, AutoRemoveFile},
 };
@@ -162,8 +162,7 @@ impl MoProxy {
         self.monitor
             .servers()
             .into_iter()
-            .filter(|s| s.serve_port(from_port))
-            .filter(|s| caps.iter().all(|c| c.has_intersection(&s.capabilities)))
+            .filter(|s| caps.iter().all(|c| s.capable_anyof(c)))
             .collect()
     }
 
@@ -220,7 +219,6 @@ struct ServerListConfig {
     default_max_wait: Duration,
     cli_servers: Vec<Arc<ProxyServer>>,
     path: Option<PathBuf>,
-    listen_ports: HashSet<u16>,
     allow_direct: bool,
 }
 
@@ -232,7 +230,7 @@ impl ServerListConfig {
         let mut cli_servers = vec![];
         for addr in &args.socks5_servers {
             cli_servers.push(Arc::new(ProxyServer::new(
-                addr.clone(),
+                *addr,
                 ProxyProto::socks5(false),
                 default_test_dns,
                 default_max_wait,
@@ -244,7 +242,7 @@ impl ServerListConfig {
 
         for addr in &args.http_servers {
             cli_servers.push(Arc::new(ProxyServer::new(
-                addr.clone(),
+                *addr,
                 ProxyProto::http(false, None),
                 default_test_dns,
                 default_max_wait,
@@ -255,13 +253,11 @@ impl ServerListConfig {
         }
 
         let path = args.server_list.clone();
-        let listen_ports = args.port.iter().cloned().collect();
         Self {
             default_test_dns,
             default_max_wait,
             cli_servers,
             path,
-            listen_ports,
             allow_direct: args.allow_direct,
         }
     }
@@ -293,23 +289,14 @@ impl ServerListConfig {
                     .context("not a valid number")?
                     .map(Duration::from_secs)
                     .unwrap_or(self.default_max_wait);
-                let listen_ports = if let Some(ports) = props.get("listen ports") {
-                    let ports = ports
-                        .split(|c| c == ' ' || c == ',')
-                        .filter(|s| !s.is_empty());
-                    let mut port_set = HashSet::new();
-                    for port in ports {
-                        let port = port.parse().context("not a valid port number")?;
-                        port_set.insert(port);
-                    }
-                    let surplus_ports: Vec<_> = port_set.difference(&self.listen_ports).collect();
-                    if !surplus_ports.is_empty() {
-                        warn!("{:?}: Surplus listen ports {:?}", addr, surplus_ports);
-                    }
-                    Some(port_set)
-                } else {
-                    None
-                };
+                if props.get("listen ports").is_some() {
+                    // TODO: add a link to how-to --policy
+                    error!("`listen ports` is not longer supported, use --policy instead");
+                }
+                let (_, capabilities) =
+                    parser::capabilities(props.get("capabilities").unwrap_or_default())
+                        .map_err(|e| e.to_owned())
+                        .context("not a valid list of capabilities")?;
                 let proto = match props
                     .get("protocol")
                     .context("protocol not specified")?
@@ -356,8 +343,15 @@ impl ServerListConfig {
                     }
                     _ => bail!("unknown proxy protocol"),
                 };
-                let server =
-                    ProxyServer::new(addr, proto, test_dns, max_wait, listen_ports, tag, base);
+                let server = ProxyServer::new(
+                    addr,
+                    proto,
+                    test_dns,
+                    max_wait,
+                    Some(capabilities),
+                    tag,
+                    base,
+                );
                 servers.push(Arc::new(server));
             }
         }

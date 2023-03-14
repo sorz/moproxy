@@ -24,7 +24,7 @@ fn main() {
 
 fn download_zip(path: &Path) {
     let url = ZIP_URL.replace("{VERSION}", VERSION);
-    let mut resp = reqwest::blocking::get(&url)
+    let mut resp = reqwest::blocking::get(url)
         .expect("error on get moproxy-web bundle")
         .error_for_status()
         .expect("unexpect HTTP response");

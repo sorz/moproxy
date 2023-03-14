@@ -44,7 +44,7 @@ where
     T: IntoIterator<Item = &'a CapSet>,
 {
     fn all_meet_by(self, caps: &CapSet) -> bool {
-        self.into_iter().all(|req| req.has_intersection(&caps))
+        self.into_iter().all(|req| req.has_intersection(caps))
     }
 }
 

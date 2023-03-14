@@ -37,6 +37,10 @@ pub(crate) struct CliArgs {
     #[arg(short = 'l', long = "list", value_name = "SERVER-LIST")]
     pub(crate) server_list: Option<PathBuf>,
 
+    #[cfg(feature = "policy")]
+    #[arg(short = 'l', long = "list", value_name = "POLICY")]
+    pub(crate) policy: Option<PathBuf>,
+
     /// Period of time to make one probe.
     #[arg(short = 'i', long = "probe", value_name = "SECONDS")]
     #[arg(default_value_t = 30)]

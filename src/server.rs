@@ -1,11 +1,14 @@
 use anyhow::{anyhow, bail, Context};
 use futures_util::{stream, StreamExt};
 use ini::Ini;
+use parking_lot::RwLock;
 use std::{collections::HashSet, io, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{info, instrument, warn};
 
 use crate::{cli::CliArgs, FromOptionStr};
+#[cfg(feature = "policy")]
+use moproxy::policy::Policy;
 use moproxy::{
     client::{Connectable, NewClient},
     futures_stream::TcpListenerStream,
@@ -19,6 +22,8 @@ pub(crate) struct MoProxy {
     cli_args: Arc<CliArgs>,
     server_list_config: Arc<ServerListConfig>,
     monitor: Monitor,
+    #[cfg(feature = "policy")]
+    policy: Option<Arc<RwLock<Policy>>>,
     #[cfg(all(feature = "web_console", unix))]
     _sock_file: Arc<Option<AutoRemoveFile<String>>>,
 }
@@ -33,6 +38,17 @@ impl MoProxy {
         // Load proxy server list
         let server_list_config = ServerListConfig::new(&args);
         let servers = server_list_config.load().context("fail to load servers")?;
+
+        // Load policy
+        #[cfg(feature = "policy")]
+        let policy = {
+            if let Some(ref path) = args.policy {
+                let policy = Policy::load_from_file(path).context("cannot to load policy")?;
+                Some(Arc::new(RwLock::new(policy)))
+            } else {
+                None
+            }
+        };
 
         // Setup proxy monitor
         let graphite = args.graphite;
@@ -87,6 +103,8 @@ impl MoProxy {
             cli_args: Arc::new(args),
             server_list_config: Arc::new(server_list_config),
             monitor,
+            #[cfg(feature = "policy")]
+            policy,
             _sock_file: Arc::new(sock_file),
         })
     }
@@ -94,12 +112,23 @@ impl MoProxy {
     pub(crate) fn reload(&self) -> anyhow::Result<()> {
         // Load proxy server list
         let servers = self.server_list_config.load()?;
-
-        // TODO: reload policy
+        // Load policy
+        #[cfg(feature = "policy")]
+        let policies = match (&self.cli_args.policy, &self.policy) {
+            (Some(path), Some(policy)) => {
+                let new_policy = Policy::load_from_file(path).context("cannot to load policy")?;
+                Some((new_policy, policy))
+            }
+            _ => None,
+        };
         // TODO: reload lua script
 
         // Apply only if no error occur
         self.monitor.update_servers(servers);
+        #[cfg(feature = "policy")]
+        if let Some((new_policy, policy)) = policies {
+            *policy.write() = new_policy;
+        }
         Ok(())
     }
 

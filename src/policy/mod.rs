@@ -75,9 +75,7 @@ impl Policy {
 
     fn add_rule(&mut self, rule: parser::Rule) {
         let parser::Rule { filter, action } = rule;
-        let caps = match action {
-            parser::RuleAction::Require(caps) => caps,
-        };
+        let parser::RuleAction::Require(caps) = action;
         match filter {
             parser::RuleFilter::ListenPort(port) => {
                 self.listen_port_ruleset.add(port, caps);

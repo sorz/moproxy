@@ -8,9 +8,7 @@ use parking_lot::{Mutex, RwLock};
 use serde::{Serialize, Serializer};
 use serde_with::{serde_as, DisplayFromStr};
 use std::{
-    cmp,
-    collections::HashSet,
-    fmt,
+    cmp, fmt,
     hash::{Hash, Hasher},
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -75,7 +73,6 @@ pub struct ProxyServer {
     pub addr: SocketAddr,
     pub proto: ProxyProto,
     pub tag: Box<str>,
-    pub capabilities: CapSet,
     config: RwLock<ProxyServerConfig>,
     status: Mutex<ProxyServerStatus>,
     traffic: AtomicTraffic,
@@ -85,7 +82,7 @@ pub struct ProxyServer {
 pub struct ProxyServerConfig {
     pub test_dns: SocketAddr,
     pub max_wait: Duration,
-    listen_ports: HashSet<u16>,
+    pub capabilities: CapSet,
     score_base: i32,
 }
 
@@ -100,17 +97,12 @@ impl ToLua<'_> for ProxyServerConfig {
     }
 }
 
-#[derive(Debug, Serialize, Clone, Copy)]
+#[derive(Debug, Serialize, Clone, Copy, Default)]
 pub enum Delay {
+    #[default]
     Unknown,
     Some(Duration),
     TimedOut,
-}
-
-impl Default for Delay {
-    fn default() -> Self {
-        Delay::Unknown
-    }
 }
 
 impl Delay {
@@ -391,13 +383,13 @@ impl ProxyServerConfig {
     fn new(
         test_dns: SocketAddr,
         score_base: Option<i32>,
-        listen_ports: Option<HashSet<u16>>,
+        capabilities: Option<CapSet>,
         max_wait: Duration,
     ) -> Self {
         Self {
             test_dns,
             max_wait,
-            listen_ports: listen_ports.unwrap_or_default(),
+            capabilities: capabilities.unwrap_or_default(),
             score_base: score_base.unwrap_or(0),
         }
     }
@@ -409,7 +401,7 @@ impl ProxyServer {
         proto: ProxyProto,
         test_dns: SocketAddr,
         max_wait: Duration,
-        listen_ports: Option<HashSet<u16>>,
+        capabilities: Option<CapSet>,
         tag: Option<&str>,
         score_base: Option<i32>,
     ) -> ProxyServer {
@@ -430,8 +422,7 @@ impl ProxyServer {
                 }
             }
             .into_boxed_str(),
-            config: ProxyServerConfig::new(test_dns, score_base, listen_ports, max_wait).into(),
-            capabilities: Default::default(), // TODO
+            config: ProxyServerConfig::new(test_dns, score_base, capabilities, max_wait).into(),
             status: Default::default(),
             traffic: Default::default(),
         }
@@ -445,7 +436,6 @@ impl ProxyServer {
             tag: "__DIRECT__".into(),
             config: ProxyServerConfig::new(stub_addr, None, None, max_wait).into(),
             status: Default::default(),
-            capabilities: Default::default(),
             traffic: Default::default(),
         }
     }
@@ -454,11 +444,6 @@ impl ProxyServer {
         if !std::ptr::eq(&from.config, &self.config) {
             *self.config.write() = from.config.read().clone();
         }
-    }
-
-    pub fn serve_port(&self, port: u16) -> bool {
-        let listen_ports = &self.config.read().listen_ports;
-        listen_ports.is_empty() || listen_ports.contains(&port)
     }
 
     #[instrument(skip_all)]
@@ -596,6 +581,10 @@ impl ProxyServer {
             self.tag.replace('.', "_"),
             suffix
         )
+    }
+
+    pub fn capable_anyof(&self, caps: &CapSet) -> bool {
+        self.config.read().capabilities.has_intersection(caps)
     }
 }
 

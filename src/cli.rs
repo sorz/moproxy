@@ -37,7 +37,6 @@ pub(crate) struct CliArgs {
     #[arg(short = 'l', long = "list", value_name = "SERVER-LIST")]
     pub(crate) server_list: Option<PathBuf>,
 
-    #[cfg(feature = "policy")]
     #[arg(short = 'l', long = "list", value_name = "POLICY")]
     pub(crate) policy: Option<PathBuf>,
 

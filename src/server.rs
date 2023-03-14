@@ -7,12 +7,11 @@ use tokio::net::{TcpListener, TcpStream};
 use tracing::{info, instrument, warn};
 
 use crate::{cli::CliArgs, FromOptionStr};
-#[cfg(feature = "policy")]
-use moproxy::policy::Policy;
 use moproxy::{
     client::{Connectable, NewClient},
     futures_stream::TcpListenerStream,
     monitor::Monitor,
+    policy::Policy,
     proxy::{ProxyProto, ProxyServer, UserPassAuthCredential},
     web::{self, AutoRemoveFile},
 };
@@ -23,7 +22,6 @@ pub(crate) struct MoProxy {
     server_list_config: Arc<ServerListConfig>,
     monitor: Monitor,
     direct_server: Option<Arc<ProxyServer>>,
-    #[cfg(feature = "policy")]
     policy: Arc<RwLock<Policy>>,
     #[cfg(all(feature = "web_console", unix))]
     _sock_file: Arc<Option<AutoRemoveFile<String>>>,
@@ -44,7 +42,6 @@ impl MoProxy {
             .then(|| Arc::new(ProxyServer::direct(args.max_wait)));
 
         // Load policy
-        #[cfg(feature = "policy")]
         let policy = {
             if let Some(ref path) = args.policy {
                 let policy = Policy::load_from_file(path).context("cannot to load policy")?;
@@ -108,7 +105,6 @@ impl MoProxy {
             server_list_config: Arc::new(server_list_config),
             direct_server,
             monitor,
-            #[cfg(feature = "policy")]
             policy,
             _sock_file: Arc::new(sock_file),
         })
@@ -118,7 +114,6 @@ impl MoProxy {
         // Load proxy server list
         let servers = self.server_list_config.load()?;
         // Load policy
-        #[cfg(feature = "policy")]
         let policy = match &self.cli_args.policy {
             Some(path) => Policy::load_from_file(path).context("cannot to load policy")?,
             _ => Default::default(),
@@ -127,10 +122,7 @@ impl MoProxy {
 
         // Apply only if no error occur
         self.monitor.update_servers(servers);
-        #[cfg(feature = "policy")]
-        {
-            *self.policy.write() = policy;
-        }
+        *self.policy.write() = policy;
         Ok(())
     }
 

@@ -14,7 +14,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 #[cfg(feature = "score_script")]
-use std::{error::Error, fs::File, io::Read};
+use std::{fs::File, io::Read, path::Path};
 use tokio::time::{interval_at, Instant};
 use tracing::{debug, instrument, warn};
 
@@ -69,25 +69,27 @@ impl Monitor {
     }
 
     #[cfg(feature = "score_script")]
-    pub fn load_score_script(&mut self, path: &str) -> Result<(), Box<dyn Error>> {
+    pub fn load_score_script<T: AsRef<Path>>(&mut self, path: T) -> anyhow::Result<()> {
+        use anyhow::{bail, Context};
+
         let mut buf = Vec::new();
         File::open(path)?.take(2u64.pow(26)).read_to_end(&mut buf)?;
 
         let lua = Lua::new();
-        lua.context(|ctx| -> LuaResult<Result<(), &'static str>> {
+        lua.context(|ctx| -> anyhow::Result<()> {
             let globals = ctx.globals();
-            ctx.load(&buf).exec()?;
+            ctx.load(&buf).exec().context("failed to load Lua script")?;
             if !globals.contains_key("calc_score")? {
-                return Ok(Err("calc_score() not found in Lua globals"));
+                bail!("calc_score() not found in Lua globals");
             }
             let _: LuaFunction = match globals.get("calc_score") {
                 Err(LuaError::FromLuaConversionError { .. }) => {
-                    return Ok(Err("calc_score is not a function"))
+                    bail!("calc_score is not a function");
                 }
                 other => other,
             }?;
-            Ok(Ok(()))
-        })??;
+            Ok(())
+        })?;
 
         self.lua.replace(Arc::new(Mutex::new(lua)));
         Ok(())

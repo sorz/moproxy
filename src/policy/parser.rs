@@ -49,10 +49,9 @@ fn domain_name_root(input: &str) -> IResult<&str, ()> {
 fn domain_name(input: &str) -> IResult<&str, SharedStr> {
     alt((
         recognize(many1(domain_name_part)).map(|n| {
-            if n.ends_with('.') {
-                SharedStr::from(&n[..n.len() - 1])
-            } else {
-                n.into()
+            match n.strip_suffix('.') {
+                Some(n) => SharedStr::from(n),
+                None => n.into(),
             }
             .to_lower()
         }),

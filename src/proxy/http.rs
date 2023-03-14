@@ -69,7 +69,7 @@ where
                     return Err(io::Error::new(ErrorKind::Other, "response too large"));
                 }
                 // Drop peeked data from socket buffer
-                stream.read(&mut sink[..peek_len]).await?;
+                stream.read_exact(&mut sink[..peek_len]).await?;
             }
             Ok(Status::Complete(bytes_request)) => {
                 trace!(
@@ -79,7 +79,7 @@ where
                 );
                 ensure_200!(response.code.unwrap());
                 let len = peek_len - (bytes_read - bytes_request);
-                stream.read(&mut sink[..len]).await?;
+                stream.read_exact(&mut sink[..len]).await?;
                 break;
             }
         }
@@ -111,7 +111,7 @@ fn build_request(addr: &Destination, user_pass_auth: &Option<UserPassAuthCredent
             username = user_pass_auth.username,
             password = user_pass_auth.password
         );
-        let basic_auth = BASE64_STANDARD.encode(&auth);
+        let basic_auth = BASE64_STANDARD.encode(auth);
         format!(
             "CONNECT {host} HTTP/1.1\r\n\
              Host: {host}\r\n\

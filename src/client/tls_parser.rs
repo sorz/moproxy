@@ -34,7 +34,7 @@ fn drop_before(data: &[u8], len_pos: Range<usize>) -> Result<&[u8], &'static str
     Ok(&data[len_pos.end + len..])
 }
 
-fn parse_tls_record<'a>(data: &'a [u8]) -> Result<TlsRecord<'a>, &'static str> {
+fn parse_tls_record(data: &[u8]) -> Result<TlsRecord, &'static str> {
     let fragment = truncate(data, 3..5)?;
     Ok(TlsRecord {
         content_type: &data[0],
@@ -44,7 +44,7 @@ fn parse_tls_record<'a>(data: &'a [u8]) -> Result<TlsRecord<'a>, &'static str> {
     })
 }
 
-pub fn parse_client_hello<'a>(data: &'a [u8]) -> Result<TlsClientHello<'a>, &'static str> {
+pub fn parse_client_hello(data: &[u8]) -> Result<TlsClientHello, &'static str> {
     let TlsRecord {
         content_type: &ctype,
         version_major: &version,
@@ -59,12 +59,12 @@ pub fn parse_client_hello<'a>(data: &'a [u8]) -> Result<TlsClientHello<'a>, &'st
     }
 
     // 0: handshake type
-    if fragment.get(0) != Some(&1) {
+    if fragment.first() != Some(&1) {
         return Err("not client hello");
     }
     let hello = truncate(fragment, 1..4)?;
     // 0..2: client version
-    if hello.get(0) != Some(&3) {
+    if hello.first() != Some(&3) {
         return Err("unsupported client version");
     }
     // 2..34: 32-bytes random, dropped

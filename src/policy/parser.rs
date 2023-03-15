@@ -2,9 +2,9 @@ use flexstr::{shared_str, SharedStr, ToCase};
 use nom::{
     branch::alt,
     bytes::complete::{tag_no_case, take_till1},
-    character::complete::{char, line_ending, not_line_ending, space0, space1, u16},
-    combinator::{opt, recognize, verify},
-    multi::{fold_many0, many1, separated_list0, separated_list1},
+    character::complete::{char, not_line_ending, space0, space1, u16},
+    combinator::{eof, opt, recognize, verify},
+    multi::{many1, separated_list0, separated_list1},
     sequence::tuple,
     IResult, Parser,
 };
@@ -103,12 +103,6 @@ fn comment(input: &str) -> IResult<&str, ()> {
     tuple((char('#'), not_line_ending)).map(|_| ()).parse(input)
 }
 
-fn line(input: &str) -> IResult<&str, Option<Rule>> {
-    tuple((space0, opt(rule), space0, opt(comment), line_ending))
-        .map(|(_, rule, _, _, _)| rule)
-        .parse(input)
-}
-
 pub fn capabilities(input: &str) -> IResult<&str, CapSet> {
     separated_list0(
         alt((recognize(tuple((space0, tag_no_case(","), space0))), space1)),
@@ -119,18 +113,9 @@ pub fn capabilities(input: &str) -> IResult<&str, CapSet> {
 }
 
 pub fn line_no_ending(input: &str) -> IResult<&str, Option<Rule>> {
-    tuple((space0, opt(rule), space0, opt(comment)))
-        .map(|(_, rule, _, _)| rule)
+    tuple((space0, opt(rule), space0, opt(comment), eof))
+        .map(|(_, rule, _, _, _)| rule)
         .parse(input)
-}
-
-pub fn document(input: &str) -> IResult<&str, Vec<Rule>> {
-    fold_many0(line, Vec::new, |mut acc, item| {
-        if let Some(rule) = item {
-            acc.push(rule);
-        }
-        acc
-    })(input)
 }
 
 #[test]
@@ -160,7 +145,7 @@ fn test_listen_port_filter() {
 
 #[test]
 fn test_dst_domain_filter() {
-    let (rem, parts) = filter_dst_domain("domain test\n").unwrap();
+    let (rem, parts) = filter_dst_domain("dst domain test\n").unwrap();
     assert_eq!("\n", rem);
     assert_eq!(RuleFilter::Sni(shared_str!("test")), parts);
 }
@@ -194,34 +179,24 @@ fn test_comment() {
 }
 
 #[test]
-fn test_empty_line() {
-    let (rem, rule) = line("\n").unwrap();
-    assert!(rem.is_empty());
-    assert_eq!(None, rule);
-    let (_, rule) = line("  \n").unwrap();
-    assert_eq!(None, rule);
-    let (_, rule) = line("# test\n").unwrap();
-    assert_eq!(None, rule);
-    let (_, rule) = line("  # test\n").unwrap();
-    assert_eq!(None, rule);
-    let (_, rule) = line("#\n").unwrap();
-    assert_eq!(None, rule);
+fn test_line_no_ending() {
+    let (_, rules) = line_no_ending("").unwrap();
+    assert!(rules.is_none());
+    let (_, rules) = line_no_ending("  \t ").unwrap();
+    assert!(rules.is_none());
+    let (_, rules) = line_no_ending("#").unwrap();
+    assert!(rules.is_none());
+    let (_, rules) = line_no_ending(" # test ").unwrap();
+    assert!(rules.is_none());
+    let (_, rules) = line_no_ending("dst domain test require a #1").unwrap();
+    assert!(rules.is_some());
 }
 
 #[test]
-fn test_document() {
-    let (_, rules) = document(
-        "
-        dst domain test require a # test\n\n\n
-        # comment\n\
-        # comment
-        listen-port 123 require a or b   \n\
-        dst domain test require b
-        # end
-    ",
-    )
-    .unwrap();
-    assert_eq!(3, rules.len());
+fn test_line_no_ending_error() {
+    assert!(line_no_ending("dst").is_err());
+    assert!(line_no_ending("dst domain test error").is_err());
+    assert!(line_no_ending("dst domain require a b").is_err());
 }
 
 #[test]

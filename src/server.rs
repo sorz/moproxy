@@ -21,7 +21,7 @@ pub(crate) struct MoProxy {
     cli_args: Arc<CliArgs>,
     server_list_config: Arc<ServerListConfig>,
     monitor: Monitor,
-    direct_server: Option<Arc<ProxyServer>>,
+    direct_server: Arc<ProxyServer>,
     policy: Arc<RwLock<Policy>>,
     #[cfg(all(feature = "web_console", unix))]
     _sock_file: Arc<Option<AutoRemoveFile<String>>>,
@@ -37,9 +37,7 @@ impl MoProxy {
         // Load proxy server list
         let server_list_config = ServerListConfig::new(&args);
         let servers = server_list_config.load().context("fail to load servers")?;
-        let direct_server = args
-            .allow_direct
-            .then(|| Arc::new(ProxyServer::direct(args.max_wait)));
+        let direct_server = Arc::new(ProxyServer::direct(args.max_wait));
 
         // Load policy
         let policy = {
@@ -185,11 +183,14 @@ impl MoProxy {
         };
         match client {
             Ok(client) => client.serve().await?,
-            Err(client) => {
-                if let Some(ref server) = self.direct_server {
-                    client.direct_connect(server.clone()).await?.serve().await?
-                }
+            Err(client) if args.allow_direct => {
+                client
+                    .direct_connect(self.direct_server.clone())
+                    .await?
+                    .serve()
+                    .await?
             }
+            Err(_) => (),
         }
         Ok(())
     }

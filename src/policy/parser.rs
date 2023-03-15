@@ -113,9 +113,11 @@ pub fn capabilities(input: &str) -> IResult<&str, CapSet> {
 }
 
 pub fn line_no_ending(input: &str) -> IResult<&str, Option<Rule>> {
-    tuple((space0, opt(rule), space0, opt(comment), eof))
-        .map(|(_, rule, _, _, _)| rule)
-        .parse(input)
+    alt((
+        tuple((space0, opt(comment), space0, eof)).map(|_| None),
+        tuple((space0, rule, space0, opt(comment), eof)).map(|(_, rule, _, _, _)| Some(rule)),
+    ))
+    .parse(input)
 }
 
 #[test]

@@ -1,6 +1,15 @@
 ## Example of moproxy policy rulesets
 
 # One rule per line, comment starts with a hashtag.
+# Each rule are composited by two parts, FILTER and ACTION.
+# 
+# Supported filters:
+# - listen-port <port-number>
+# - dst domain <domain-name>
+# 
+# Supported actions:
+# - require <cap1> [or <cap2>|...]
+# - (TODO) direct
 
 # Connection to TCP 8001 requires "cap1" on proxy's capabilities,
 # TCP 8002 requires "cap1" or "cap2".
@@ -10,3 +19,17 @@ listen-port 8002 require cap1 or cap2
 # *.netflix.com goes to proxies with BOTH "streaming" AND "us".
 dst domain netflix.com require streaming
 dst domain netflix.com require us
+
+# *.cn will not use any proxy
+# `direct` always override `require` actions
+dst domain cn direct
+
+# *.edu.au will match both rules, and require proxies with BOTH "us" AND "edu"
+# If that connection come via port 8001, it also requires "cap1" as the first
+# `listen-port` rule also apply.
+dst domain au require us
+dst domain edu.au require edu
+
+# `dst domain` lookup for SOCKSv5 hostname if it exists, or TLS SNI if
+# `--remote-dns` is enabled. Explicit SOCKSv5 hostname get the priority.
+# `dst domain .` will match any domain (but not for connection w/o domain).

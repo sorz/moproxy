@@ -33,7 +33,7 @@ use crate::{
 };
 
 #[cfg(feature = "rich_web")]
-static BUNDLE: Lazy<rich::ResourceBundle> = Lazy::new(|| rich::ResourceBundle::new());
+static BUNDLE: Lazy<rich::ResourceBundle> = Lazy::new(rich::ResourceBundle::new);
 
 #[derive(Debug, Serialize)]
 struct ServerStatus {

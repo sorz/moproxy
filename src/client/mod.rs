@@ -115,10 +115,11 @@ async fn accept_socks5(client: &mut TcpStream) -> io::Result<Destination> {
             let len = client.read_u8().await? as usize;
             buf.resize(len, 0);
             client.read_exact(&mut buf).await?;
-            let domain = String::from_utf8(buf).map_err(|_| {
+
+            let domain = std::str::from_utf8(&buf).map_err(|_| {
                 io::Error::new(io::ErrorKind::InvalidInput, "SOCKSv5: Invalid domain name")
             })?;
-            domain.into()
+            Address::Domain(domain.into())
         }
         0x04 => {
             // IPv6
@@ -256,7 +257,7 @@ impl NewClientWithData {
             (Address::Domain(_), _) => false,
             (_, None) => false,
             (dst, Some(host)) => {
-                *dst = Address::Domain(host.to_string().into_boxed_str());
+                *dst = Address::Domain(host.clone());
                 true
             }
         }

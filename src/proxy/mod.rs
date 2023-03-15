@@ -1,6 +1,6 @@
 pub mod copy;
 pub mod http;
-use flexstr::SharedStr;
+use flexstr::{shared_fmt, SharedStr};
 #[cfg(feature = "score_script")]
 use rlua::prelude::*;
 pub mod socks5;
@@ -53,9 +53,9 @@ pub enum ProxyProto {
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug, Serialize)]
 pub struct UserPassAuthCredential {
-    username: String,
+    username: SharedStr,
     #[serde(skip_serializing)]
-    password: String,
+    password: SharedStr,
 }
 
 impl UserPassAuthCredential {
@@ -72,7 +72,7 @@ impl UserPassAuthCredential {
 pub struct ProxyServer {
     pub addr: SocketAddr,
     pub proto: ProxyProto,
-    pub tag: Box<str>,
+    pub tag: SharedStr,
     config: RwLock<ProxyServerConfig>,
     status: Mutex<ProxyServerStatus>,
     traffic: AtomicTraffic,
@@ -195,7 +195,7 @@ impl ToLua<'_> for &ProxyServer {
 #[derive(Hash, Clone)]
 pub enum Address {
     Ip(IpAddr),
-    Domain(Box<str>),
+    Domain(SharedStr),
 }
 
 impl Address {
@@ -233,12 +233,6 @@ impl From<[u8; 16]> for Address {
     }
 }
 
-impl From<String> for Address {
-    fn from(s: String) -> Self {
-        Address::Domain(s.into_boxed_str())
-    }
-}
-
 #[derive(Clone)]
 pub struct Destination {
     pub host: Address,
@@ -262,9 +256,8 @@ impl From<SocketAddr> for Destination {
 
 impl<'a> From<(&'a str, u16)> for Destination {
     fn from(addr: (&'a str, u16)) -> Self {
-        let host = String::from(addr.0).into_boxed_str();
         Destination {
-            host: Address::Domain(host),
+            host: Address::Domain(addr.0.into()),
             port: addr.1,
         }
     }
@@ -409,7 +402,7 @@ impl ProxyServer {
             addr,
             proto,
             tag: match tag {
-                None => format!("{}", addr.port()),
+                None => shared_fmt!("{}", addr.port()),
                 Some(s) => {
                     if !s.is_ascii() || s.contains(' ') || s.contains('\n') {
                         panic!(
@@ -418,10 +411,9 @@ impl ProxyServer {
                             s
                         );
                     }
-                    String::from(s)
+                    SharedStr::from(s)
                 }
-            }
-            .into_boxed_str(),
+            },
             config: ProxyServerConfig::new(test_dns, score_base, capabilities, max_wait).into(),
             status: Default::default(),
             traffic: Default::default(),

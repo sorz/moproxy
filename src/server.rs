@@ -11,7 +11,7 @@ use moproxy::{
     client::{Connectable, NewClient},
     futures_stream::TcpListenerStream,
     monitor::Monitor,
-    policy::{parser, Policy},
+    policy::{parser, Action, Policy},
     proxy::{ProxyProto, ProxyServer, UserPassAuthCredential},
     web::{self, AutoRemoveFile},
 };
@@ -153,15 +153,19 @@ impl MoProxy {
 
     fn servers_with_policy(&self, client: &NewClient) -> Vec<Arc<ProxyServer>> {
         let from_port = client.from_port;
-        let caps = self
+        let action = self
             .policy
             .read()
             .matches(Some(from_port), client.dest.host.domain());
-        self.monitor
-            .servers()
-            .into_iter()
-            .filter(|s| caps.iter().all(|c| s.capable_anyof(c)))
-            .collect()
+        match action {
+            Action::Direct => vec![self.direct_server.clone()],
+            Action::Require(caps) => self
+                .monitor
+                .servers()
+                .into_iter()
+                .filter(|s| caps.iter().all(|c| s.capable_anyof(c)))
+                .collect(),
+        }
     }
 
     #[instrument(level = "error", skip_all, fields(on_port=sock.local_addr()?.port(), peer=?sock.peer_addr()?))]
@@ -184,6 +188,7 @@ impl MoProxy {
         match client {
             Ok(client) => client.serve().await?,
             Err(client) if args.allow_direct => {
+                // FIXME: skip this if it's already a direct connection
                 client
                     .direct_connect(self.direct_server.clone())
                     .await?

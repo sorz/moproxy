@@ -20,6 +20,7 @@ pub enum RuleFilter {
 #[derive(Debug, PartialEq, Eq)]
 pub enum RuleAction {
     Require(CapSet),
+    Direct,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -89,8 +90,14 @@ fn action_require(input: &str) -> IResult<&str, RuleAction> {
         .parse(input)
 }
 
+fn action_direct(input: &str) -> IResult<&str, RuleAction> {
+    tag_no_case("direct")
+        .map(|_| RuleAction::Direct)
+        .parse(input)
+}
+
 fn rule_action(input: &str) -> IResult<&str, RuleAction> {
-    action_require(input)
+    alt((action_require, action_direct)).parse(input)
 }
 
 fn rule(input: &str) -> IResult<&str, Rule> {
@@ -153,13 +160,15 @@ fn test_dst_domain_filter() {
 }
 
 #[test]
-fn test_action_require() {
-    let (rem, caps) = action_require("require a or b\n").unwrap();
+fn test_action() {
+    let (rem, action) = rule_action("require a or b\n").unwrap();
     assert_eq!("\n", rem);
     assert_eq!(
         RuleAction::Require(CapSet::new(["a", "b"].into_iter())),
-        caps
+        action
     );
+    let (_, action) = rule_action("direct\n").unwrap();
+    assert_eq!(RuleAction::Direct, action);
 }
 
 #[test]

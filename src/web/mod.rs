@@ -10,7 +10,7 @@ use hyper::{
     Body, Method, Request, Response, StatusCode,
 };
 #[cfg(feature = "rich_web")]
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use prettytable::{cell, format::consts::FORMAT_NO_LINESEP_WITH_TITLE, row, Table};
 use serde_derive::Serialize;
 use std::{
@@ -33,9 +33,7 @@ use crate::{
 };
 
 #[cfg(feature = "rich_web")]
-lazy_static! {
-    static ref BUNDLE: rich::ResourceBundle = rich::ResourceBundle::new();
-}
+static BUNDLE: Lazy<rich::ResourceBundle> = Lazy::new(|| rich::ResourceBundle::new());
 
 #[derive(Debug, Serialize)]
 struct ServerStatus {

@@ -33,7 +33,7 @@ parking_lot = { version = "0.12", features = ["serde", "deadlock_detection"] }
 http = "0.2"
 prettytable-rs = { version = "0.10", default-features = false }
 regex = "1"
-lazy_static = "1"
+once_cell = "1"
 number_prefix = "0.4"
 futures-core  = "0.3"
 futures-util  = "0.3"

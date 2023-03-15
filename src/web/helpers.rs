@@ -1,6 +1,6 @@
 use hyper::Request;
-use lazy_static::lazy_static;
 use number_prefix::NumberPrefix::{self, Prefixed, Standalone};
+use once_cell::sync::Lazy;
 use regex::Regex;
 use std::{fmt::Write, time::Duration};
 
@@ -18,9 +18,8 @@ impl<T> RequestExt for Request<T> {
             }
         }
 
-        lazy_static! {
-            static ref RE: Regex = Regex::new(r"(^(curl|Lynx)/|PowerShell/[\d\.]+$)").unwrap();
-        }
+        static RE: Lazy<Regex> =
+            Lazy::new(|| Regex::new(r"(^(curl|Lynx)/|PowerShell/[\d\.]+$)").unwrap());
         if let Some(ua) = self
             .headers()
             .get("user-agent")

@@ -9,7 +9,7 @@
 # 
 # Supported actions:
 # - require <cap1> [or <cap2>|...]
-# - (TODO) direct
+# - direct
 
 # Connection to TCP 8001 requires "cap1" on proxy's capabilities,
 # TCP 8002 requires "cap1" or "cap2".

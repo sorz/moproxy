@@ -4,12 +4,13 @@
 # Each rule are composited by two parts, FILTER and ACTION.
 # 
 # Supported filters:
-# - listen-port <port-number>
-# - dst domain <domain-name>
+# - default (matches everything / no filter)
+# - listen-port <port-number> (moproxy's TCP listen port number)
+# - dst domain <domain-name> (domain name in TLS SNI or SOCKSv5 request)
 # 
 # Supported actions:
-# - require <cap1> [or <cap2>|...]
-# - direct
+# - require <cap1> [or <cap2>|...] (limit avaiable upstream proxies)
+# - direct (do not use proxy, go direct, even if --allow-direct unset)
 
 # Connection to TCP 8001 requires "cap1" on proxy's capabilities,
 # TCP 8002 requires "cap1" or "cap2".
@@ -25,8 +26,6 @@ dst domain netflix.com require us
 dst domain cn direct
 
 # *.edu.au will match both rules, and require proxies with BOTH "us" AND "edu"
-# If that connection come via port 8001, it also requires "cap1" as the first
-# `listen-port` rule also apply.
 dst domain au require us
 dst domain edu.au require edu
 

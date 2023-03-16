@@ -14,7 +14,7 @@ use flexstr::{SharedStr, ToSharedStr};
 use capabilities::CapSet;
 use tracing::info;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Action {
     Require(HashSet<CapSet>),
     Direct,
@@ -94,6 +94,7 @@ impl DstDomainRuleSet {
 
 #[derive(Default)]
 pub struct Policy {
+    default_action: Action,
     listen_port_ruleset: ListenPortRuleSet,
     dst_domain_ruleset: DstDomainRuleSet,
 }
@@ -122,6 +123,10 @@ impl Policy {
     fn add_rule(&mut self, rule: parser::Rule) {
         let parser::Rule { filter, action } = rule;
         match filter {
+            parser::RuleFilter::Default => match action {
+                parser::RuleAction::Require(caps) => self.default_action.add_require(caps),
+                parser::RuleAction::Direct => self.default_action.set_direct(),
+            },
             parser::RuleFilter::ListenPort(port) => {
                 self.listen_port_ruleset.add(port, action);
             }
@@ -140,7 +145,7 @@ impl Policy {
     }
 
     pub fn matches(&self, listen_port: Option<u16>, dst_domain: Option<SharedStr>) -> Action {
-        let mut action: Action = Default::default();
+        let mut action: Action = self.default_action.clone();
         if let Some(port) = listen_port {
             self.listen_port_ruleset
                 .get(&port)
@@ -215,15 +220,18 @@ fn test_policy_get_domain_caps_requirements() {
 }
 
 #[test]
-fn test_policy_action_direct() {
+fn test_policy_action() {
     let rules = "
+        default require def
         listen-port 1 require a
         listen-port 1 direct
         dst domain test require c
     ";
     let policy = Policy::load(rules.as_bytes()).unwrap();
     let direct = policy.matches(Some(1), Some("test".into()));
-    let require = policy.matches(Some(2), Some("test".into()));
+    let require1 = policy.matches(Some(2), Some("abcd".into()));
+    let require2 = policy.matches(None, Some("test".into()));
     assert!(matches!(direct, Action::Direct));
-    assert!(matches!(require, Action::Require(_)));
+    assert!(matches!(require1, Action::Require(a) if a.len() == 1));
+    assert!(matches!(require2, Action::Require(a) if a.len() == 2));
 }

@@ -13,6 +13,7 @@ use super::capabilities::CapSet;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum RuleFilter {
+    Default,
     ListenPort(u16),
     Sni(SharedStr),
 }
@@ -72,8 +73,14 @@ fn filter_listen_port(input: &str) -> IResult<&str, RuleFilter> {
         .parse(input)
 }
 
+fn filter_default(input: &str) -> IResult<&str, RuleFilter> {
+    tag_no_case("default")
+        .map(|_| RuleFilter::Default)
+        .parse(input)
+}
+
 fn rule_filter(input: &str) -> IResult<&str, RuleFilter> {
-    alt((filter_dst_domain, filter_listen_port))(input)
+    alt((filter_dst_domain, filter_listen_port, filter_default))(input)
 }
 
 fn cap_name(input: &str) -> IResult<&str, SharedStr> {
@@ -157,6 +164,13 @@ fn test_dst_domain_filter() {
     let (rem, parts) = filter_dst_domain("dst domain test\n").unwrap();
     assert_eq!("\n", rem);
     assert_eq!(RuleFilter::Sni(shared_str!("test")), parts);
+}
+
+#[test]
+fn test_dst_default_filter() {
+    let (rem, parts) = filter_default("default\n").unwrap();
+    assert_eq!("\n", rem);
+    assert_eq!(RuleFilter::Default, parts);
 }
 
 #[test]

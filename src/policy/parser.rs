@@ -22,6 +22,7 @@ pub enum RuleFilter {
 pub enum RuleAction {
     Require(CapSet),
     Direct,
+    Reject,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -103,8 +104,14 @@ fn action_direct(input: &str) -> IResult<&str, RuleAction> {
         .parse(input)
 }
 
+fn action_reject(input: &str) -> IResult<&str, RuleAction> {
+    tag_no_case("reject")
+        .map(|_| RuleAction::Reject)
+        .parse(input)
+}
+
 fn rule_action(input: &str) -> IResult<&str, RuleAction> {
-    alt((action_require, action_direct)).parse(input)
+    alt((action_require, action_direct, action_reject)).parse(input)
 }
 
 fn rule(input: &str) -> IResult<&str, Rule> {
@@ -183,6 +190,8 @@ fn test_action() {
     );
     let (_, action) = rule_action("direct\n").unwrap();
     assert_eq!(RuleAction::Direct, action);
+    let (_, action) = rule_action("reject\n").unwrap();
+    assert_eq!(RuleAction::Reject, action);
 }
 
 #[test]

@@ -2,9 +2,7 @@ mod connect;
 mod tls_parser;
 use bytes::{Bytes, BytesMut};
 use flexstr::SharedStr;
-use std::{
-    borrow::Cow, cmp, future::Future, io, net::SocketAddr, pin::Pin, sync::Arc, time::Duration,
-};
+use std::{borrow::Cow, cmp, io, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -20,41 +18,38 @@ use crate::{
     proxy::{Address, Destination, ProxyServer},
 };
 
-#[derive(Debug)]
-pub struct NewClient {
-    left: TcpStream,
-    src: SocketAddr,
-    pub dest: Destination,
-    pub from_port: u16,
-}
-
-#[derive(Debug)]
-pub struct NewClientWithData {
-    pub client: NewClient,
+#[derive(Debug, Default)]
+pub struct TlsData {
     pending_data: Option<Bytes>,
     has_full_tls_hello: bool,
     pub sni: Option<SharedStr>,
 }
 
 #[derive(Debug)]
-pub struct ConnectedClient {
+pub struct NewClient {
     left: TcpStream,
+    pub dest: Destination,
+    pub from_port: u16,
+    pub tls: Option<TlsData>,
+}
+
+#[derive(Debug)]
+pub struct ConnectedClient {
+    orig: NewClient,
     right: TcpStream,
-    dest: Destination,
     server: Arc<ProxyServer>,
 }
 
 #[derive(Debug)]
-pub struct FailedClient {
-    left: TcpStream,
-    dest: Destination,
-    pending_data: Option<Bytes>,
+pub enum FailedClient {
+    Recoverable(NewClient),
+    Unrecoverable(io::Error),
 }
 
-type ConnectServer = Pin<Box<dyn Future<Output = Result<ConnectedClient, FailedClient>> + Send>>;
-
-pub trait Connectable {
-    fn connect_server(self, proxies: Vec<Arc<ProxyServer>>, n_parallel: usize) -> ConnectServer;
+impl From<io::Error> for FailedClient {
+    fn from(value: io::Error) -> Self {
+        Self::Unrecoverable(value)
+    }
 }
 
 fn error_invalid_input<T>(msg: &'static str) -> io::Result<T> {
@@ -138,7 +133,6 @@ async fn accept_socks5(client: &mut TcpStream) -> io::Result<Destination> {
 impl NewClient {
     #[instrument(name = "retrieve_dest", skip_all)]
     pub async fn from_socket(mut left: TcpStream) -> io::Result<Self> {
-        let src = left.peer_addr()?;
         let from_port = left.local_addr()?.port();
 
         // Try to get original destination before NAT
@@ -164,96 +158,21 @@ impl NewClient {
 
         Ok(NewClient {
             left,
-            src,
             dest,
             from_port,
-        })
-    }
-}
-
-impl NewClient {
-    #[instrument(level = "error", skip_all, fields(dest=?self.dest))]
-    pub async fn retrieve_dest_from_sni(self) -> io::Result<NewClientWithData> {
-        let NewClient {
-            mut left,
-            src,
-            dest,
-            from_port,
-        } = self;
-        let wait = Duration::from_millis(500);
-        // try to read TLS ClientHello for
-        //   1. --remote-dns: parse host name from SNI
-        //   2. --n-parallel: need the whole request to be forwarded
-        let mut has_full_tls_hello = false;
-        let mut pending_data = None;
-        let mut sni = None;
-        let mut buf = BytesMut::with_capacity(2048);
-        buf.resize(buf.capacity(), 0);
-        if let Ok(len) = timeout(wait, left.read(&mut buf)).await {
-            buf.truncate(len?);
-            // only TLS is safe to duplicate requests.
-            match tls_parser::parse_client_hello(&buf) {
-                Err(err) => info!("fail to parse hello: {}", err),
-                Ok(hello) => {
-                    has_full_tls_hello = true;
-                    if let Some(name) = hello.server_name {
-                        sni = Some(name.into());
-                        debug!(sni = name, "SNI found");
-                    }
-                    if hello.early_data {
-                        debug!("TLS with early data");
-                    }
-                }
-            }
-            pending_data = Some(buf.freeze());
-        } else {
-            info!("no tls request received before timeout");
-        }
-        Ok(NewClientWithData {
-            client: NewClient {
-                left,
-                src,
-                dest,
-                from_port,
-            },
-            has_full_tls_hello,
-            sni,
-            pending_data,
+            tls: None,
         })
     }
 
-    #[instrument(level = "error", skip_all, fields(dest=?self.dest))]
-    async fn connect_server(
-        self,
-        proxies: Vec<Arc<ProxyServer>>,
-        n_parallel: usize,
-        wait_response: bool,
-        pending_data: Option<Bytes>,
-    ) -> Result<ConnectedClient, FailedClient> {
-        let NewClient { left, dest, .. } = self;
-        let result = try_connect_all(&dest, proxies, n_parallel, wait_response, pending_data).await;
-        if let Some((server, right)) = result {
-            info!(proxy = %server.tag, "Proxy connected");
-            Ok(ConnectedClient {
-                left,
-                right,
-                dest,
-                server,
-            })
-        } else {
-            warn!("No avaiable proxy");
-            Err(FailedClient {
-                left,
-                dest,
-                pending_data: None,
-            })
-        }
+    fn pending_data(&self) -> Option<Bytes> {
+        Some(self.tls.as_ref()?.pending_data.as_ref()?.clone())
     }
-}
 
-impl NewClientWithData {
     pub fn override_dest_with_sni(&mut self) -> bool {
-        match (&mut self.client.dest.host, &self.sni) {
+        match (
+            &mut self.dest.host,
+            &self.tls.as_ref().and_then(|tls| tls.sni.clone()),
+        ) {
             (Address::Domain(_), _) => false,
             (_, None) => false,
             (dst, Some(host)) => {
@@ -262,67 +181,112 @@ impl NewClientWithData {
             }
         }
     }
-}
 
-impl Connectable for NewClient {
-    fn connect_server(self, proxies: Vec<Arc<ProxyServer>>, _n_parallel: usize) -> ConnectServer {
-        Box::pin(self.connect_server(proxies, 1, false, None))
-    }
-}
-
-impl Connectable for NewClientWithData {
-    fn connect_server(self, proxies: Vec<Arc<ProxyServer>>, n_parallel: usize) -> ConnectServer {
-        let NewClientWithData {
-            client,
-            pending_data,
-            has_full_tls_hello,
-            ..
-        } = self;
-        let n_parallel = if has_full_tls_hello {
-            cmp::min(proxies.len(), n_parallel)
-        } else {
-            1
-        };
-        Box::pin(client.connect_server(proxies, n_parallel, has_full_tls_hello, pending_data))
-    }
-}
-
-impl FailedClient {
     #[instrument(level = "error", skip_all, fields(dest=?self.dest))]
     pub async fn direct_connect(
         self,
         pseudo_server: Arc<ProxyServer>,
     ) -> io::Result<ConnectedClient> {
-        let Self {
-            left,
-            dest,
-            pending_data,
-        } = self;
-        let mut right = match dest.host {
-            Address::Ip(addr) => TcpStream::connect((addr, dest.port)).await?,
-            Address::Domain(ref name) => TcpStream::connect((name.as_ref(), dest.port)).await?,
+        let mut right = match self.dest.host {
+            Address::Ip(addr) => TcpStream::connect((addr, self.dest.port)).await?,
+            Address::Domain(ref name) => {
+                TcpStream::connect((name.as_ref(), self.dest.port)).await?
+            }
         };
         right.set_nodelay(true)?;
 
-        if let Some(data) = pending_data {
+        if let Some(data) = self.pending_data() {
             right.write_all(&data).await?;
         }
 
         info!(remote = %right.peer_addr()?, "Connected w/o proxy");
         Ok(ConnectedClient {
-            left,
+            orig: self,
             right,
-            dest,
             server: pseudo_server,
         })
+    }
+
+    #[instrument(level = "error", skip_all, fields(dest=?self.dest))]
+    pub async fn retrieve_dest_from_sni(&mut self) -> io::Result<()> {
+        if self.tls.is_some() {
+            return Ok(());
+        }
+        let mut tls = TlsData::default();
+        let wait = Duration::from_millis(500);
+        let mut buf = BytesMut::with_capacity(2048);
+        buf.resize(buf.capacity(), 0);
+        if let Ok(len) = timeout(wait, self.left.read(&mut buf)).await {
+            buf.truncate(len?);
+            // only TLS is safe to duplicate requests.
+            match tls_parser::parse_client_hello(&buf) {
+                Err(err) => info!("fail to parse hello: {}", err),
+                Ok(hello) => {
+                    tls.has_full_tls_hello = true;
+                    if let Some(name) = hello.server_name {
+                        tls.sni = Some(name.into());
+                        debug!(sni = name, "SNI found");
+                    }
+                    if hello.early_data {
+                        debug!("TLS with early data");
+                    }
+                }
+            }
+            tls.pending_data = Some(buf.freeze());
+        } else {
+            info!("no tls request received before timeout");
+        }
+        self.tls = Some(tls);
+        Ok(())
+    }
+
+    #[instrument(level = "error", skip_all, fields(dest=?self.dest))]
+    pub async fn connect_server(
+        self,
+        proxies: Vec<Arc<ProxyServer>>,
+        n_parallel: usize,
+    ) -> Result<ConnectedClient, FailedClient> {
+        let (n_parallel, wait_response) = match self.tls {
+            Some(ref tls) if tls.has_full_tls_hello => (cmp::min(proxies.len(), n_parallel), true),
+            _ => (1, false),
+        };
+
+        let result = try_connect_all(
+            &self.dest,
+            proxies,
+            n_parallel,
+            wait_response,
+            self.pending_data(),
+        )
+        .await;
+        if let Some((server, right)) = result {
+            info!(proxy = %server.tag, "Proxy connected");
+            Ok(ConnectedClient {
+                orig: self,
+                right,
+                server,
+            })
+        } else {
+            warn!("No avaiable proxy");
+            Err(FailedClient::Recoverable(self))
+        }
+    }
+}
+
+impl FailedClient {
+    pub fn recovery(self) -> io::Result<NewClient> {
+        match self {
+            Self::Recoverable(client) => Ok(client),
+            Self::Unrecoverable(err) => Err(err),
+        }
     }
 }
 
 impl ConnectedClient {
-    #[instrument(level = "error", skip_all, fields(dest=?self.dest, proxy=%self.server.tag))]
+    #[instrument(level = "error", skip_all, fields(dest=?self.orig.dest, proxy=%self.server.tag))]
     pub async fn serve(self) -> io::Result<()> {
         let ConnectedClient {
-            left,
+            orig,
             right,
             server,
             ..
@@ -342,7 +306,7 @@ impl ConnectedClient {
         }
         */
         server.update_stats_conn_open();
-        match pipe(left, right, server.clone()).await {
+        match pipe(orig.left, right, server.clone()).await {
             Ok(Traffic { tx_bytes, rx_bytes }) => {
                 server.update_stats_conn_close(false);
                 debug!(tx_bytes, rx_bytes, "Closed");

@@ -8,7 +8,7 @@ use tracing::{error, info, instrument, warn};
 
 use crate::{cli::CliArgs, FromOptionStr};
 use moproxy::{
-    client::{Connectable, NewClient},
+    client::{FailedClient, NewClient},
     futures_stream::TcpListenerStream,
     monitor::Monitor,
     policy::{parser, Action, Policy},
@@ -30,6 +30,13 @@ pub(crate) struct MoProxy {
 pub(crate) struct MoProxyListener {
     moproxy: MoProxy,
     listeners: Vec<TcpListenerStream>,
+}
+
+#[derive(Debug)]
+enum PolicyResult {
+    Filtered(Vec<Arc<ProxyServer>>),
+    Direct,
+    Reject,
 }
 
 impl MoProxy {
@@ -151,53 +158,60 @@ impl MoProxy {
         })
     }
 
-    fn servers_with_policy(&self, client: &NewClient) -> Vec<Arc<ProxyServer>> {
+    fn apply_policy(&self, client: &NewClient) -> PolicyResult {
         let from_port = client.from_port;
         let action = self
             .policy
             .read()
             .matches(Some(from_port), client.dest.host.domain());
         match action {
-            Action::Direct => vec![self.direct_server.clone()],
-            Action::Require(caps) => self
-                .monitor
-                .servers()
-                .into_iter()
-                .filter(|s| caps.iter().all(|c| s.capable_anyof(c)))
-                .collect(),
+            Action::Reject => PolicyResult::Reject,
+            Action::Direct => PolicyResult::Direct,
+            Action::Require(caps) => {
+                let servers = self
+                    .monitor
+                    .servers()
+                    .into_iter()
+                    .filter(|s| caps.iter().all(|c| s.capable_anyof(c)))
+                    .collect();
+                PolicyResult::Filtered(servers)
+            }
         }
     }
 
     #[instrument(level = "error", skip_all, fields(on_port=sock.local_addr()?.port(), peer=?sock.peer_addr()?))]
     async fn handle_client(&self, sock: TcpStream) -> io::Result<()> {
-        let client = NewClient::from_socket(sock).await?;
+        let mut client = NewClient::from_socket(sock).await?;
         let args = &self.cli_args;
 
-        let client = if (args.remote_dns || args.n_parallel > 1) && client.dest.port == 443 {
+        if (args.remote_dns || args.n_parallel > 1) && client.dest.port == 443 {
             // Try parse TLS client hello
-            let mut client = client.retrieve_dest_from_sni().await?;
+            client.retrieve_dest_from_sni().await?;
             if args.remote_dns {
                 client.override_dest_with_sni();
             }
-            let servers = self.servers_with_policy(&client.client);
-            client.connect_server(servers, args.n_parallel).await
-        } else {
-            let servers = self.servers_with_policy(&client);
-            client.connect_server(servers, 1).await
-        };
-        match client {
-            Ok(client) => client.serve().await?,
-            Err(client) if args.allow_direct => {
-                // FIXME: skip this if it's already a direct connection
-                client
-                    .direct_connect(self.direct_server.clone())
-                    .await?
-                    .serve()
-                    .await?
-            }
-            Err(_) => (),
         }
-        Ok(())
+        let result = match self.apply_policy(&client) {
+            PolicyResult::Reject => {
+                info!("rejected by policy");
+                return Ok(());
+            }
+            PolicyResult::Direct => client
+                .direct_connect(self.direct_server.clone())
+                .await
+                .map_err(|err| err.into()),
+            PolicyResult::Filtered(proxies) => {
+                client.connect_server(proxies, args.n_parallel).await
+            }
+        };
+        let client = match result {
+            Ok(client) => client,
+            Err(FailedClient::Recoverable(client)) if args.allow_direct => {
+                client.direct_connect(self.direct_server.clone()).await?
+            }
+            Err(_) => return Ok(()),
+        };
+        client.serve().await
     }
 }
 

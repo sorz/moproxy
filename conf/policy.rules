@@ -11,6 +11,7 @@
 # Supported actions:
 # - require <cap1> [or <cap2>|...] (limit avaiable upstream proxies)
 # - direct (do not use proxy, go direct, even if --allow-direct unset)
+# - reject (close connection immediately)
 
 # Connection to TCP 8001 requires "cap1" on proxy's capabilities,
 # TCP 8002 requires "cap1" or "cap2".

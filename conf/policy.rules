@@ -21,9 +21,10 @@ listen-port 8002 require cap1 or cap2
 dst domain netflix.com require streaming
 dst domain netflix.com require us
 
-# *.cn will not use any proxy
-# `direct` always override `require` actions
+# *.cn will not use any proxy, expect *.edu.cn require proxies with "edu"
+# more specific match override less specific one
 dst domain cn direct
+dst domain edu.cn require edu
 
 # *.edu.au will match both rules, and require proxies with BOTH "us" AND "edu"
 dst domain au require us

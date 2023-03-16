@@ -11,7 +11,7 @@ use moproxy::{
     client::{FailedClient, NewClient},
     futures_stream::TcpListenerStream,
     monitor::Monitor,
-    policy::{parser, Action, Policy},
+    policy::{parser, ActionType, Policy},
     proxy::{ProxyProto, ProxyServer, UserPassAuthCredential},
     web::{self, AutoRemoveFile},
 };
@@ -164,10 +164,10 @@ impl MoProxy {
             .policy
             .read()
             .matches(Some(from_port), client.dest.host.domain());
-        match action {
-            Action::Reject => PolicyResult::Reject,
-            Action::Direct => PolicyResult::Direct,
-            Action::Require(caps) => {
+        match action.action {
+            ActionType::Reject => PolicyResult::Reject,
+            ActionType::Direct => PolicyResult::Direct,
+            ActionType::Require(caps) => {
                 let servers = self
                     .monitor
                     .servers()

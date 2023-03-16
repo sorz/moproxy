@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use flexstr::{shared_str, SharedStr, ToCase};
 use nom::{
     branch::alt,
@@ -9,26 +11,19 @@ use nom::{
     IResult, Parser,
 };
 
-use super::capabilities::CapSet;
+use super::{capabilities::CapSet, Action, ActionType};
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum RuleFilter {
+pub enum Filter {
     Default,
     ListenPort(u16),
     Sni(SharedStr),
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum RuleAction {
-    Require(CapSet),
-    Direct,
-    Reject,
-}
-
-#[derive(Debug, PartialEq, Eq)]
 pub struct Rule {
-    pub filter: RuleFilter,
-    pub action: RuleAction,
+    pub filter: Filter,
+    pub action: Action,
 }
 
 fn port_number(input: &str) -> IResult<&str, u16> {
@@ -62,25 +57,23 @@ fn domain_name(input: &str) -> IResult<&str, SharedStr> {
     ))(input)
 }
 
-fn filter_dst_domain(input: &str) -> IResult<&str, RuleFilter> {
+fn filter_dst_domain(input: &str) -> IResult<&str, Filter> {
     tuple((tag_no_case("dst domain"), space1, domain_name))
-        .map(|(_, _, parts)| RuleFilter::Sni(parts))
+        .map(|(_, _, parts)| Filter::Sni(parts))
         .parse(input)
 }
 
-fn filter_listen_port(input: &str) -> IResult<&str, RuleFilter> {
+fn filter_listen_port(input: &str) -> IResult<&str, Filter> {
     tuple((tag_no_case("listen port"), space1, port_number))
-        .map(|(_, _, n)| RuleFilter::ListenPort(n))
+        .map(|(_, _, n)| Filter::ListenPort(n))
         .parse(input)
 }
 
-fn filter_default(input: &str) -> IResult<&str, RuleFilter> {
-    tag_no_case("default")
-        .map(|_| RuleFilter::Default)
-        .parse(input)
+fn filter_default(input: &str) -> IResult<&str, Filter> {
+    tag_no_case("default").map(|_| Filter::Default).parse(input)
 }
 
-fn rule_filter(input: &str) -> IResult<&str, RuleFilter> {
+fn rule_filter(input: &str) -> IResult<&str, Filter> {
     alt((filter_dst_domain, filter_listen_port, filter_default))(input)
 }
 
@@ -92,25 +85,29 @@ fn caps1(input: &str) -> IResult<&str, Vec<SharedStr>> {
     separated_list1(tuple((space1, tag_no_case("or"), space1)), cap_name)(input)
 }
 
-fn action_require(input: &str) -> IResult<&str, RuleAction> {
+fn action_require(input: &str) -> IResult<&str, Action> {
     tuple((tag_no_case("require"), space1, caps1))
-        .map(|(_, _, caps)| RuleAction::Require(CapSet::new(caps.into_iter())))
+        .map(|(_, _, caps)| {
+            let mut set = HashSet::new();
+            set.insert(CapSet::new(caps.into_iter()));
+            ActionType::Require(set).into()
+        })
         .parse(input)
 }
 
-fn action_direct(input: &str) -> IResult<&str, RuleAction> {
+fn action_direct(input: &str) -> IResult<&str, Action> {
     tag_no_case("direct")
-        .map(|_| RuleAction::Direct)
+        .map(|_| ActionType::Direct.into())
         .parse(input)
 }
 
-fn action_reject(input: &str) -> IResult<&str, RuleAction> {
+fn action_reject(input: &str) -> IResult<&str, Action> {
     tag_no_case("reject")
-        .map(|_| RuleAction::Reject)
+        .map(|_| ActionType::Reject.into())
         .parse(input)
 }
 
-fn rule_action(input: &str) -> IResult<&str, RuleAction> {
+fn rule_action(input: &str) -> IResult<&str, Action> {
     alt((action_require, action_direct, action_reject)).parse(input)
 }
 
@@ -163,44 +160,46 @@ fn test_parse_domain_name() {
 fn test_listen_port_filter() {
     let (rem, port) = filter_listen_port("listen port 1234\n").unwrap();
     assert_eq!("\n", rem);
-    assert_eq!(RuleFilter::ListenPort(1234), port);
+    assert_eq!(Filter::ListenPort(1234), port);
 }
 
 #[test]
 fn test_dst_domain_filter() {
     let (rem, parts) = filter_dst_domain("dst domain test\n").unwrap();
     assert_eq!("\n", rem);
-    assert_eq!(RuleFilter::Sni(shared_str!("test")), parts);
+    assert_eq!(Filter::Sni(shared_str!("test")), parts);
 }
 
 #[test]
 fn test_dst_default_filter() {
     let (rem, parts) = filter_default("default\n").unwrap();
     assert_eq!("\n", rem);
-    assert_eq!(RuleFilter::Default, parts);
+    assert_eq!(Filter::Default, parts);
 }
 
 #[test]
 fn test_action() {
     let (rem, action) = rule_action("require a or b\n").unwrap();
     assert_eq!("\n", rem);
-    assert_eq!(
-        RuleAction::Require(CapSet::new(["a", "b"].into_iter())),
-        action
-    );
+    assert!(matches!(
+        action.action,
+        ActionType::Require(caps) if caps.iter().next().unwrap() == &CapSet::new(["a", "b"].into_iter()),
+    ));
     let (_, action) = rule_action("direct\n").unwrap();
-    assert_eq!(RuleAction::Direct, action);
+    assert_eq!(ActionType::Direct, action.action);
     let (_, action) = rule_action("reject\n").unwrap();
-    assert_eq!(RuleAction::Reject, action);
+    assert_eq!(ActionType::Reject, action.action);
 }
 
 #[test]
 fn test_rule() {
     let (_, rule) = rule("listen port 1 require a\n").unwrap();
+    let mut set = HashSet::new();
+    set.insert(CapSet::new(["a"].into_iter()));
     assert_eq!(
         Rule {
-            filter: RuleFilter::ListenPort(1),
-            action: RuleAction::Require(CapSet::new(["a"].into_iter()))
+            filter: Filter::ListenPort(1),
+            action: ActionType::Require(set).into()
         },
         rule
     );

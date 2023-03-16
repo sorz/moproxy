@@ -14,49 +14,52 @@ use flexstr::{SharedStr, ToSharedStr};
 use capabilities::CapSet;
 use tracing::info;
 
-#[derive(Debug, Clone)]
-pub enum Action {
+use self::parser::{Filter, Rule};
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Action {
+    priority: u8,
+    pub action: ActionType,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActionType {
     Require(HashSet<CapSet>),
     Direct,
     Reject,
 }
 
-impl Default for Action {
+impl Default for ActionType {
     fn default() -> Self {
         Self::Require(Default::default())
     }
 }
 
-impl From<parser::RuleAction> for Action {
-    fn from(value: parser::RuleAction) -> Self {
-        match value {
-            parser::RuleAction::Direct => Self::Direct,
-            parser::RuleAction::Reject => Self::Reject,
-            parser::RuleAction::Require(caps) => {
-                let mut set = HashSet::new();
-                set.insert(caps);
-                Self::Require(set)
-            }
+impl From<ActionType> for Action {
+    fn from(action: ActionType) -> Self {
+        Self {
+            priority: 0,
+            action,
         }
     }
 }
 
 impl Action {
     fn len(&self) -> usize {
-        match self {
-            Self::Direct | Self::Reject => 1,
-            Self::Require(set) => set.len(),
+        match &self.action {
+            ActionType::Direct | ActionType::Reject => 1,
+            ActionType::Require(set) => set.len(),
         }
     }
 
     fn extend(&mut self, other: Self) {
-        match other {
-            Self::Direct | Self::Reject => *self = other,
-            Self::Require(new_caps) => {
-                if let Self::Require(caps) = self {
+        match other.action {
+            ActionType::Direct | ActionType::Reject => *self = other,
+            ActionType::Require(new_caps) => {
+                if let ActionType::Require(caps) = &mut self.action {
                     caps.extend(new_caps.into_iter())
                 } else {
-                    *self = Self::Require(new_caps)
+                    self.action = ActionType::Require(new_caps)
                 }
             }
         }
@@ -70,10 +73,10 @@ type ListenPortRuleSet = RuleSet<u16>;
 type DstDomainRuleSet = RuleSet<SharedStr>;
 
 impl<K: Eq + Hash> RuleSet<K> {
-    fn add(&mut self, key: K, action: parser::RuleAction) {
+    fn add(&mut self, key: K, action: Action) {
         // TODO: warning duplicated rules
         let value = self.0.entry(key).or_default();
-        value.extend(action.into())
+        value.extend(action)
     }
 
     fn get<'a>(&'a self, key: &'a K) -> impl Iterator<Item = &'a Action> {
@@ -125,13 +128,13 @@ impl Policy {
     }
 
     fn add_rule(&mut self, rule: parser::Rule) {
-        let parser::Rule { filter, action } = rule;
+        let Rule { filter, action } = rule;
         match filter {
-            parser::RuleFilter::Default => self.default_action.extend(action.into()),
-            parser::RuleFilter::ListenPort(port) => {
+            Filter::Default => self.default_action.extend(action),
+            Filter::ListenPort(port) => {
                 self.listen_port_ruleset.add(port, action);
             }
-            parser::RuleFilter::Sni(parts) => {
+            Filter::Sni(parts) => {
                 self.dst_domain_ruleset.add(parts.to_shared_str(), action);
             }
         }
@@ -172,12 +175,12 @@ fn test_policy_listen_port() {
     ";
     let policy = Policy::load(rules.as_bytes()).unwrap();
     assert_eq!(3, policy.rule_count());
-    let p1 = match policy.matches(Some(1), None) {
-        Action::Require(a) => a,
+    let p1 = match policy.matches(Some(1), None).action {
+        ActionType::Require(a) => a,
         _ => panic!(),
     };
-    let p2 = match policy.matches(Some(2), None) {
-        Action::Require(a) => a,
+    let p2 = match policy.matches(Some(2), None).action {
+        ActionType::Require(a) => a,
         _ => panic!(),
     };
     let abc = CapSet::new(["a", "b", "c"].into_iter());
@@ -221,17 +224,17 @@ fn test_policy_action() {
     let policy = Policy::load(rules.as_bytes()).unwrap();
     // listen-port/direct override default/require
     let direct1 = policy.matches(Some(2), Some("abcd".into()));
-    assert!(matches!(direct1, Action::Direct));
+    assert!(matches!(direct1.action, ActionType::Direct));
     // d.test/direct override others
     let direct2 = policy.matches(Some(1), Some("a.d.test".into()));
-    assert!(matches!(direct2, Action::Direct));
+    assert!(matches!(direct2.action, ActionType::Direct));
     // just default/require
     let require1 = policy.matches(Some(3), Some("abcd".into()));
-    assert!(matches!(require1, Action::Require(a) if a.len() == 1));
+    assert!(matches!(require1.action, ActionType::Require(a) if a.len() == 1));
     // default/require + dst-domain/require
     let require2 = policy.matches(None, Some("test".into()));
-    assert!(matches!(require2, Action::Require(a) if a.len() == 2));
+    assert!(matches!(require2.action, ActionType::Require(a) if a.len() == 2));
     // default/require + dst-domain/require + listen-port/require
     let require3 = policy.matches(Some(1), Some("test".into()));
-    assert!(matches!(require3, Action::Require(a) if a.len() == 3));
+    assert!(matches!(require3.action, ActionType::Require(a) if a.len() == 3));
 }

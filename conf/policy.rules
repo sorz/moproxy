@@ -2,21 +2,42 @@
 
 # One rule per line, comment starts with a hashtag.
 # Each rule are composited by two parts, FILTER and ACTION.
+# Keywords and domain name are case-insensitive.
 # 
 # Supported filters:
-# - default (matches everything / no filter)
-# - listen port <port-number> (moproxy's TCP listen port number)
-# - dst domain <domain-name> (domain name in TLS SNI or SOCKSv5 request)
+# - DEFUALT (matches everything / no filter)
+# - LISTEN PORT <port-number> (moproxy's TCP listen port number)
+# - DST DOMAIN <domain-name> (domain name in TLS SNI or SOCKSv5 request)
 # 
 # Supported actions:
-# - require <cap1> [or <cap2>|...] (limit avaiable upstream proxies)
-# - direct (do not use proxy, go direct, even if --allow-direct unset)
-# - reject (close connection immediately)
+# - REQUIRE <cap1> [or <cap2>|...] (limit avaiable upstream proxies)
+# - DIRECT (do not use proxy, go direct, even if --allow-direct unset)
+# - REJECT (close connection immediately)
+# 
+# Evaluation order:
+# For each incoming connection, rules are evaluated in the order according 
+# to their filter type: DEFAULT -> LSITEN PORT -> DST DOMAIN
+# 
+# Multiple matches:
+# One connection may be matched by multiple rules, depending on their actions:
+# - REQUIRE actions accumulate with themself
+# - DIRECT & REJECT are exclusive, they override other action and been
+#   overridden by others
+# (Can be tweaked by priority)
+# 
+# Action priority:
+# One or more exclamation marks (!) after action promote its priority (up to 5).
+# Actions with higher priority always override lower one.
+#
+# Example:
+# 
 
-# Connection to TCP 8001 requires "cap1" on proxy's capabilities,
-# TCP 8002 requires "cap1" or "cap2".
+# Connection to TCP 8001 requires "cap1" on proxy's capabilities
+# TCP 8002 requires "cap1" or "cap2"
+# TCP 8003 requires "cap3" only. It ignore all rules without 3 or more "!".
 listen port 8001 require cap1
 listen port 8002 require cap1 or cap2
+listen port 8003 require!!! cap3
 
 # *.netflix.com goes to proxies with BOTH "streaming" AND "us".
 dst domain netflix.com require streaming
@@ -27,9 +48,11 @@ dst domain netflix.com require us
 dst domain cn direct
 dst domain edu.cn require edu
 
-# *.edu.au will match both rules, and require proxies with BOTH "us" AND "edu"
-dst domain au require us
+# *.edu.au will match both rules, thus requires BOTH "au" AND "edu"
+# However, *.anu.edu.au requires just "au" due to its higher priority
+dst domain au require au
 dst domain edu.au require edu
+dst domain anu.edu.au require! au
 
 # `dst domain` lookup for SOCKSv5 hostname if it exists, or TLS SNI if
 # `--remote-dns` is enabled. Explicit SOCKSv5 hostname get the priority.

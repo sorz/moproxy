@@ -6,7 +6,7 @@ use nom::{
     bytes::complete::{tag_no_case, take_till1},
     character::complete::{char, not_line_ending, space0, space1, u16},
     combinator::{eof, opt, recognize, verify},
-    multi::{many1, separated_list0, separated_list1},
+    multi::{many0_count, many1, separated_list0, separated_list1},
     sequence::tuple,
     IResult, Parser,
 };
@@ -85,25 +85,31 @@ fn caps1(input: &str) -> IResult<&str, Vec<SharedStr>> {
     separated_list1(tuple((space1, tag_no_case("or"), space1)), cap_name)(input)
 }
 
+fn action_priority(input: &str) -> IResult<&str, u8> {
+    verify(many0_count(tag_no_case("!")), |n| *n <= 5)
+        .map(|n| n as u8)
+        .parse(input)
+}
+
 fn action_require(input: &str) -> IResult<&str, Action> {
-    tuple((tag_no_case("require"), space1, caps1))
-        .map(|(_, _, caps)| {
+    tuple((tag_no_case("require"), action_priority, space1, caps1))
+        .map(|(_, priority, _, caps)| {
             let mut set = HashSet::new();
             set.insert(CapSet::new(caps.into_iter()));
-            ActionType::Require(set).into()
+            ActionType::Require(set).wrap(priority)
         })
         .parse(input)
 }
 
 fn action_direct(input: &str) -> IResult<&str, Action> {
-    tag_no_case("direct")
-        .map(|_| ActionType::Direct.into())
+    tuple((tag_no_case("direct"), action_priority))
+        .map(|(_, priority)| ActionType::Direct.wrap(priority))
         .parse(input)
 }
 
 fn action_reject(input: &str) -> IResult<&str, Action> {
-    tag_no_case("reject")
-        .map(|_| ActionType::Reject.into())
+    tuple((tag_no_case("reject"), action_priority))
+        .map(|(_, priority)| ActionType::Reject.wrap(priority))
         .parse(input)
 }
 
@@ -192,17 +198,33 @@ fn test_action() {
 }
 
 #[test]
+fn test_action_priority() {
+    let (_, action) = rule_action("require a").unwrap();
+    assert_eq!(0, action.priority);
+    let (_, action) = rule_action("require! a").unwrap();
+    assert_eq!(1, action.priority);
+    let (_, action) = rule_action("direct!!").unwrap();
+    assert_eq!(2, action.priority);
+    let (_, action) = rule_action("reject!!!!!").unwrap();
+    assert_eq!(5, action.priority);
+    assert!(rule_action("reject!!!!!!").is_err());
+    assert!(rule_action("require!!!1 a").is_err());
+}
+
+#[test]
 fn test_rule() {
-    let (_, rule) = rule("listen port 1 require a\n").unwrap();
+    let (_, result) = rule("listen port 1 require!! a\n").unwrap();
     let mut set = HashSet::new();
     set.insert(CapSet::new(["a"].into_iter()));
     assert_eq!(
         Rule {
             filter: Filter::ListenPort(1),
-            action: ActionType::Require(set).into()
+            action: ActionType::Require(set).wrap(2)
         },
-        rule
+        result
     );
+    assert!(rule("default require!!!1 a\n").is_err());
+    assert!(rule("default require ! a\n").is_err());
 }
 
 #[test]

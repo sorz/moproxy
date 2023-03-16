@@ -35,6 +35,15 @@ impl Default for ActionType {
     }
 }
 
+impl ActionType {
+    fn wrap(self, priority: u8) -> Action {
+        Action {
+            priority,
+            action: self,
+        }
+    }
+}
+
 impl From<ActionType> for Action {
     fn from(action: ActionType) -> Self {
         Self {
@@ -53,16 +62,21 @@ impl Action {
     }
 
     fn extend(&mut self, other: Self) {
-        match other.action {
-            ActionType::Direct | ActionType::Reject => *self = other,
-            ActionType::Require(new_caps) => {
-                if let ActionType::Require(caps) = &mut self.action {
-                    caps.extend(new_caps.into_iter())
-                } else {
-                    self.action = ActionType::Require(new_caps)
+        if self.priority < other.priority {
+            *self = other;
+        } else if self.priority == other.priority {
+            match other.action {
+                ActionType::Direct | ActionType::Reject => *self = other,
+                ActionType::Require(new_caps) => {
+                    if let ActionType::Require(caps) = &mut self.action {
+                        caps.extend(new_caps.into_iter())
+                    } else {
+                        self.action = ActionType::Require(new_caps)
+                    }
                 }
             }
         }
+        // Do nothing if self.priority > other.priority
     }
 }
 
@@ -237,4 +251,35 @@ fn test_policy_action() {
     // default/require + dst-domain/require + listen-port/require
     let require3 = policy.matches(Some(1), Some("test".into()));
     assert!(matches!(require3.action, ActionType::Require(a) if a.len() == 3));
+}
+
+#[test]
+fn test_policy_action_priority() {
+    let rules = "
+        default require! def
+        listen port 1 reject # always ignore
+        dst domain a require! a
+        dst domain a.a reject! # same-level override
+        dst domain a.a.a require!! aaa # level override
+        dst domain a.a.a.a require!! aaaa #same-level append
+    ";
+    let policy = Policy::load(rules.as_bytes()).unwrap();
+
+    let def = policy.matches(Some(10), None);
+    assert!(matches!(&def.action, ActionType::Require(a) if a.len() == 1));
+    assert_eq!(1, def.priority);
+
+    let action = policy.matches(Some(1), None);
+    assert_eq!(def, action);
+
+    let action = policy.matches(Some(1), Some("a.a".into()));
+    assert!(matches!(&action.action, ActionType::Reject));
+
+    let action = policy.matches(Some(1), Some("a.a.a".into()));
+    assert!(matches!(&action.action, ActionType::Require(a) if a.len() == 1));
+    assert_eq!(2, action.priority);
+
+    let action = policy.matches(Some(1), Some("a.a.a.a".into()));
+    assert!(matches!(&action.action, ActionType::Require(a) if a.len() == 2));
+    assert_eq!(2, action.priority);
 }

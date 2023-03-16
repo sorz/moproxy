@@ -18,6 +18,7 @@ use tracing::info;
 pub enum Action {
     Require(HashSet<CapSet>),
     Direct,
+    Reject,
 }
 
 impl Default for Action {
@@ -30,6 +31,7 @@ impl From<parser::RuleAction> for Action {
     fn from(value: parser::RuleAction) -> Self {
         match value {
             parser::RuleAction::Direct => Self::Direct,
+            parser::RuleAction::Reject => Self::Reject,
             parser::RuleAction::Require(caps) => {
                 let mut set = HashSet::new();
                 set.insert(caps);
@@ -42,14 +44,14 @@ impl From<parser::RuleAction> for Action {
 impl Action {
     fn len(&self) -> usize {
         match self {
-            Self::Direct => 1,
+            Self::Direct | Self::Reject => 1,
             Self::Require(set) => set.len(),
         }
     }
 
     fn extend(&mut self, other: Self) {
         match other {
-            Self::Direct => *self = Self::Direct,
+            Self::Direct | Self::Reject => *self = other,
             Self::Require(new_caps) => {
                 if let Self::Require(caps) = self {
                     caps.extend(new_caps.into_iter())

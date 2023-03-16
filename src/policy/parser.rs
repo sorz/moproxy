@@ -68,7 +68,7 @@ fn filter_dst_domain(input: &str) -> IResult<&str, RuleFilter> {
 }
 
 fn filter_listen_port(input: &str) -> IResult<&str, RuleFilter> {
-    tuple((tag_no_case("listen-port"), space1, port_number))
+    tuple((tag_no_case("listen port"), space1, port_number))
         .map(|(_, _, n)| RuleFilter::ListenPort(n))
         .parse(input)
 }
@@ -154,7 +154,7 @@ fn test_parse_domain_name() {
 
 #[test]
 fn test_listen_port_filter() {
-    let (rem, port) = filter_listen_port("listen-port 1234\n").unwrap();
+    let (rem, port) = filter_listen_port("listen port 1234\n").unwrap();
     assert_eq!("\n", rem);
     assert_eq!(RuleFilter::ListenPort(1234), port);
 }
@@ -187,7 +187,7 @@ fn test_action() {
 
 #[test]
 fn test_rule() {
-    let (_, rule) = rule("listen-port 1 require a\n").unwrap();
+    let (_, rule) = rule("listen port 1 require a\n").unwrap();
     assert_eq!(
         Rule {
             filter: RuleFilter::ListenPort(1),

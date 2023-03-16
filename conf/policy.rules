@@ -5,7 +5,7 @@
 # 
 # Supported filters:
 # - default (matches everything / no filter)
-# - listen-port <port-number> (moproxy's TCP listen port number)
+# - listen port <port-number> (moproxy's TCP listen port number)
 # - dst domain <domain-name> (domain name in TLS SNI or SOCKSv5 request)
 # 
 # Supported actions:
@@ -14,8 +14,8 @@
 
 # Connection to TCP 8001 requires "cap1" on proxy's capabilities,
 # TCP 8002 requires "cap1" or "cap2".
-listen-port 8001 require cap1
-listen-port 8002 require cap1 or cap2
+listen port 8001 require cap1
+listen port 8002 require cap1 or cap2
 
 # *.netflix.com goes to proxies with BOTH "streaming" AND "us".
 dst domain netflix.com require streaming

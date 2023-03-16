@@ -164,9 +164,9 @@ fn test_policy_listen_port() {
     use capabilities::CheckAllCapsMeet;
 
     let rules = "
-        listen-port 1 require a
-        listen-port 2 require b
-        listen-port 2 require c or d
+        listen port 1 require a
+        listen port 2 require b
+        listen port 2 require c or d
     ";
     let policy = Policy::load(rules.as_bytes()).unwrap();
     assert_eq!(3, policy.rule_count());
@@ -211,8 +211,8 @@ fn test_policy_get_domain_caps_requirements() {
 fn test_policy_action() {
     let rules = "
         default require def
-        listen-port 1 require a
-        listen-port 2 direct
+        listen port 1 require a
+        listen port 2 direct
         dst domain test require c
         dst domain d.test direct
     ";

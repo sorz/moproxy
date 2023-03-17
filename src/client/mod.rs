@@ -2,7 +2,7 @@ mod connect;
 mod tls_parser;
 use bytes::{Bytes, BytesMut};
 use flexstr::SharedStr;
-use std::{borrow::Cow, cmp, io, net::SocketAddr, sync::Arc, time::Duration};
+use std::{borrow::Cow, io, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -246,29 +246,36 @@ impl NewClient {
         proxies: Vec<Arc<ProxyServer>>,
         n_parallel: usize,
     ) -> Result<ConnectedClient, FailedClient> {
+        if proxies.is_empty() {
+            warn!("No avaiable proxy");
+            return Err(FailedClient::Recoverable(self));
+        }
         let (n_parallel, wait_response) = match self.tls {
-            Some(ref tls) if tls.has_full_tls_hello => (cmp::min(proxies.len(), n_parallel), true),
+            Some(ref tls) if tls.has_full_tls_hello => (n_parallel.clamp(1, proxies.len()), true),
             _ => (1, false),
         };
-
-        let result = try_connect_all(
+        let proxies_len = proxies.len();
+        match try_connect_all(
             &self.dest,
             proxies,
             n_parallel,
             wait_response,
             self.pending_data(),
         )
-        .await;
-        if let Some((server, right)) = result {
-            info!(proxy = %server.tag, "Proxy connected");
-            Ok(ConnectedClient {
-                orig: self,
-                right,
-                server,
-            })
-        } else {
-            warn!("No avaiable proxy");
-            Err(FailedClient::Recoverable(self))
+        .await
+        {
+            Ok((server, right)) => {
+                info!(proxy = %server.tag, "Proxy connected");
+                Ok(ConnectedClient {
+                    orig: self,
+                    right,
+                    server,
+                })
+            }
+            Err(err) => {
+                warn!("Tried {} proxies but failed: {}", proxies_len, err);
+                Err(FailedClient::Recoverable(self))
+            }
         }
     }
 }

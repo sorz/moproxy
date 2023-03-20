@@ -2,7 +2,8 @@ mod cli;
 mod server;
 
 use clap::Parser;
-use cli::Commands;
+use cli::{Commands, PolicyCommands};
+use moproxy::policy::ActionType;
 use server::MoProxy;
 use std::str::FromStr;
 #[cfg(unix)]
@@ -77,6 +78,28 @@ async fn main() {
             info!("Configuration checked");
             return;
         }
+        Some(Commands::Policy { command }) => match command {
+            PolicyCommands::Get {
+                listen_port,
+                dst_domain,
+            } => {
+                let policy = moproxy.policy.read();
+                let action = policy.matches(*listen_port, dst_domain.as_ref());
+                println!("Policy: {action}");
+                if let ActionType::Require(caps) = action.action {
+                    let mut tags: Vec<_> = moproxy
+                        .monitor
+                        .servers()
+                        .iter()
+                        .filter(|s| caps.iter().all(|c| s.capable_anyof(c)))
+                        .map(|s| s.tag.clone())
+                        .collect();
+                    tags.sort();
+                    println!("Allowed: {}", tags.join(", "));
+                }
+                return;
+            }
+        },
         _ => {}
     }
 
@@ -101,6 +124,7 @@ async fn main() {
     match &command {
         None => listener.handle_forever().await,
         Some(Commands::Check { .. }) => info!("Configuration checked"),
+        _ => unreachable!(),
     }
 }
 

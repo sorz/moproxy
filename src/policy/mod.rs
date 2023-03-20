@@ -3,6 +3,7 @@ pub mod parser;
 
 use std::{
     collections::{HashMap, HashSet},
+    fmt::Display,
     fs::File,
     hash::Hash,
     io::{self, BufRead, BufReader},
@@ -162,7 +163,11 @@ impl Policy {
             .fold(0, |acc, v| acc + v.len())
     }
 
-    pub fn matches(&self, listen_port: Option<u16>, dst_domain: Option<SharedStr>) -> Action {
+    pub fn matches<S: AsRef<str>>(
+        &self,
+        listen_port: Option<u16>,
+        dst_domain: Option<S>,
+    ) -> Action {
         let mut action: Action = self.default_action.clone();
         if let Some(port) = listen_port {
             self.listen_port_ruleset
@@ -171,10 +176,34 @@ impl Policy {
         }
         if let Some(name) = dst_domain {
             self.dst_domain_ruleset
-                .get_recursive(&name)
+                .get_recursive(name.as_ref())
                 .for_each(|a| action.extend(a.clone()));
         }
         action
+    }
+}
+
+impl Display for Action {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.action {
+            ActionType::Direct => write!(f, "DIRECT"),
+            ActionType::Reject => write!(f, "REJECT"),
+            ActionType::Require(_) => write!(f, "REQUIRE "),
+        }?;
+        for _ in 0..self.priority {
+            write!(f, "!")?;
+        }
+        if let ActionType::Require(ref caps) = self.action {
+            let caps = Vec::from_iter(caps);
+            match caps.first() {
+                Some(cap) => write!(f, "{}", cap)?,
+                None => write!(f, "NOTHING")?,
+            }
+            for cap in caps.iter().skip(1) {
+                write!(f, " AND {}", cap)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -189,11 +218,11 @@ fn test_policy_listen_port() {
     ";
     let policy = Policy::load(rules.as_bytes()).unwrap();
     assert_eq!(3, policy.rule_count());
-    let p1 = match policy.matches(Some(1), None).action {
+    let p1 = match policy.matches(Some(1), Option::<String>::None).action {
         ActionType::Require(a) => a,
         _ => panic!(),
     };
-    let p2 = match policy.matches(Some(2), None).action {
+    let p2 = match policy.matches(Some(2), Option::<String>::None).action {
         ActionType::Require(a) => a,
         _ => panic!(),
     };
@@ -237,19 +266,19 @@ fn test_policy_action() {
     ";
     let policy = Policy::load(rules.as_bytes()).unwrap();
     // listen-port/direct override default/require
-    let direct1 = policy.matches(Some(2), Some("abcd".into()));
+    let direct1 = policy.matches(Some(2), Some("abcd"));
     assert!(matches!(direct1.action, ActionType::Direct));
     // d.test/direct override others
-    let direct2 = policy.matches(Some(1), Some("a.d.test".into()));
+    let direct2 = policy.matches(Some(1), Some("a.d.test"));
     assert!(matches!(direct2.action, ActionType::Direct));
     // just default/require
-    let require1 = policy.matches(Some(3), Some("abcd".into()));
+    let require1 = policy.matches(Some(3), Some("abcd"));
     assert!(matches!(require1.action, ActionType::Require(a) if a.len() == 1));
     // default/require + dst-domain/require
-    let require2 = policy.matches(None, Some("test".into()));
+    let require2 = policy.matches(None, Some("test"));
     assert!(matches!(require2.action, ActionType::Require(a) if a.len() == 2));
     // default/require + dst-domain/require + listen-port/require
-    let require3 = policy.matches(Some(1), Some("test".into()));
+    let require3 = policy.matches(Some(1), Some("test"));
     assert!(matches!(require3.action, ActionType::Require(a) if a.len() == 3));
 }
 
@@ -265,21 +294,55 @@ fn test_policy_action_priority() {
     ";
     let policy = Policy::load(rules.as_bytes()).unwrap();
 
-    let def = policy.matches(Some(10), None);
+    let def = policy.matches(Some(10), Option::<String>::None);
     assert!(matches!(&def.action, ActionType::Require(a) if a.len() == 1));
     assert_eq!(1, def.priority);
 
-    let action = policy.matches(Some(1), None);
+    let action = policy.matches(Some(1), Option::<String>::None);
     assert_eq!(def, action);
 
-    let action = policy.matches(Some(1), Some("a.a".into()));
+    let action = policy.matches(Some(1), Some("a.a"));
     assert!(matches!(&action.action, ActionType::Reject));
 
-    let action = policy.matches(Some(1), Some("a.a.a".into()));
+    let action = policy.matches(Some(1), Some("a.a.a"));
     assert!(matches!(&action.action, ActionType::Require(a) if a.len() == 1));
     assert_eq!(2, action.priority);
 
-    let action = policy.matches(Some(1), Some("a.a.a.a".into()));
+    let action = policy.matches(Some(1), Some("a.a.a.a"));
     assert!(matches!(&action.action, ActionType::Require(a) if a.len() == 2));
     assert_eq!(2, action.priority);
+}
+
+#[test]
+fn test_action_type_display() {
+    assert_eq!(
+        "DIRECT",
+        Action {
+            action: ActionType::Direct,
+            priority: 0
+        }
+        .to_string()
+    );
+    assert_eq!(
+        "REJECT!!",
+        Action {
+            action: ActionType::Reject,
+            priority: 2
+        }
+        .to_string()
+    );
+    assert_eq!("REQUIRE NOTHING", Action::default().to_string());
+    let caps = HashSet::from_iter(vec![
+        CapSet::new(["a"].into_iter()),
+        CapSet::new(["b", "c"].into_iter()),
+    ]);
+    let action = ActionType::Require(caps);
+    assert_eq!(
+        "REQUIRE! a AND (b OR c)",
+        Action {
+            action,
+            priority: 1
+        }
+        .to_string()
+    );
 }

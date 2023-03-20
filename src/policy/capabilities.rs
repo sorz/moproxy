@@ -1,4 +1,4 @@
-use std::mem;
+use std::{fmt::Display, mem};
 
 use flexstr::SharedStr;
 use serde::Serialize;
@@ -40,6 +40,25 @@ impl CapSet {
     }
 }
 
+impl Display for CapSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.0.len() > 1 {
+            write!(f, "(")?;
+        }
+        match self.0.first() {
+            Some(cap) => write!(f, "{}", cap),
+            None => write!(f, "(EMPTY)"),
+        }?;
+        for cap in self.0.iter().skip(1) {
+            write!(f, " OR {}", cap)?;
+        }
+        if self.0.len() > 1 {
+            write!(f, ")")?;
+        }
+        Ok(())
+    }
+}
+
 pub trait CheckAllCapsMeet {
     fn all_meet_by(self, caps: &CapSet) -> bool;
 }
@@ -66,4 +85,11 @@ fn test_capset_intersection() {
     assert!(def.has_intersection(&aeg));
     assert!(aeg.has_intersection(&def));
     assert!(abc.has_intersection(&aeg));
+}
+
+#[test]
+fn test_capset_display() {
+    assert_eq!("(EMPTY)", CapSet::default().to_string());
+    assert_eq!("a", CapSet::new(["a"].into_iter()).to_string());
+    assert_eq!("(a OR b)", CapSet::new(["a", "b"].into_iter()).to_string());
 }

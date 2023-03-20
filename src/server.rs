@@ -22,9 +22,9 @@ use moproxy::{
 pub(crate) struct MoProxy {
     cli_args: Arc<CliArgs>,
     server_list_config: Arc<ServerListConfig>,
-    monitor: Monitor,
+    pub(crate) monitor: Monitor,
     direct_server: Arc<ProxyServer>,
-    policy: Arc<RwLock<Policy>>,
+    pub(crate) policy: Arc<RwLock<Policy>>,
     #[cfg(feature = "web_console")]
     web_server: Option<WebServer>,
 }

@@ -120,6 +120,23 @@ pub(crate) enum Commands {
         #[arg(long)]
         no_bind: bool,
     },
+
+    /// Policy ruleset related commands
+    Policy {
+        #[command(subcommand)]
+        command: PolicyCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum PolicyCommands {
+    /// Given connection info, return policy with filtered upstream proxies
+    Get {
+        #[arg(long)]
+        listen_port: Option<u16>,
+        #[arg(long)]
+        dst_domain: Option<String>,
+    },
 }
 
 fn parse_duration_in_seconds(s: &str) -> Result<Duration, String> {

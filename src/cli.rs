@@ -17,20 +17,33 @@ pub(crate) struct CliArgs {
 
     /// Port number to bind on. Multiple ports may be given (will selected
     /// accroding to the SERVER-LIST ini config).
-    #[arg(short = 'p', long, value_name = "PORT", required = true)]
-    #[arg(num_args = 1..)]
+    #[arg(
+        short = 'p',
+        long,
+        value_name = "PORT",
+        required = true,
+        value_delimiter = ','
+    )]
     pub(crate) port: Vec<u16>,
 
     /// SOCKSv5 server list. IP address can omit for localhost.
-    #[arg(short = 's', long = "socks5", value_name = "SOCKS5-SERVERS")]
-    #[arg(value_parser = parse_socket_addr_default_on_localhost)]
-    #[arg(num_args = 0..)]
+    #[arg(
+        short = 's',
+        long = "socks5",
+        value_name = "SOCKS5-SERVERS",
+        value_delimiter = ',',
+        value_parser = parse_socket_addr_default_on_localhost
+    )]
     pub(crate) socks5_servers: Vec<SocketAddr>,
 
     /// HTTP proxy server list. IP address can omit for localhost.
-    #[arg(short = 't', long = "http", value_name = "HTTP-SERVERS")]
-    #[arg(value_parser = parse_socket_addr_default_on_localhost)]
-    #[arg(num_args = 0..)]
+    #[arg(
+        short = 't',
+        long = "http",
+        value_name = "HTTP-SERVERS",
+        value_delimiter = ',',
+        value_parser = parse_socket_addr_default_on_localhost
+    )]
     pub(crate) http_servers: Vec<SocketAddr>,
 
     /// INI file contains list of proxy servers.
@@ -46,8 +59,7 @@ pub(crate) struct CliArgs {
     pub(crate) probe_secs: u64,
 
     /// Address of a DNS server with TCP support to do delay probing.
-    #[arg(long, value_name = "IP-ADDR:PORT")]
-    #[arg(default_value = "8.8.8.8:53")]
+    #[arg(long, value_name = "IP-ADDR:PORT", default_value = "8.8.8.8:53")]
     pub(crate) test_dns: SocketAddr,
 
     /// Where the web server that shows statistics bind.
@@ -64,8 +76,7 @@ pub(crate) struct CliArgs {
     /// the first proxy that return valid data. Currently only support
     /// TLS as application layer. Must turn on --remote-dns otherwise it
     /// will be ignored.
-    #[arg(long, value_name = "N")]
-    #[arg(default_value_t = 0)]
+    #[arg(long, value_name = "N", default_value_t = 0)]
     pub(crate) n_parallel: usize,
 
     /// Set TCP congestion control algorithm on local (client) side.
@@ -84,8 +95,7 @@ pub(crate) struct CliArgs {
 
     /// Level of verbosity [possible values: off, error, warn, info, debug,
     /// trace]
-    #[arg(long)]
-    #[arg(default_value = "info")]
+    #[arg(long, default_value = "info")]
     pub(crate) log_level: LevelFilter,
 
     /// Lua script that customize proxy score
@@ -95,9 +105,7 @@ pub(crate) struct CliArgs {
 
     /// Max waiting time in seconds for connection establishment before
     /// timeout. Applied for both probe & normal proxy connections.
-    #[arg(long, value_name = "SECONDS")]
-    #[arg(value_parser = parse_duration_in_seconds)]
-    #[arg(default_value = "4")]
+    #[arg(long, value_name = "SECONDS", default_value = "4", value_parser = parse_duration_in_seconds)]
     pub(crate) max_wait: Duration,
 }
 

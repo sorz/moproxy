@@ -2,11 +2,12 @@ mod cli;
 mod server;
 
 use clap::Parser;
+use cli::Commands;
 use server::MoProxy;
 use std::str::FromStr;
 #[cfg(unix)]
 use tokio::signal::unix::{signal, SignalKind};
-use tracing::{debug, error, instrument, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 #[cfg(all(feature = "systemd", target_os = "linux"))]
 use moproxy::linux::systemd;
@@ -33,7 +34,8 @@ where
 
 #[tokio::main]
 async fn main() {
-    let args = cli::CliArgs::parse();
+    let mut args = cli::CliArgs::parse();
+    let command = args.command.take();
     let mut log_registry: Option<_> = tracing_subscriber::registry().with(args.log_level).into();
 
     #[cfg(all(feature = "systemd", target_os = "linux"))]
@@ -70,6 +72,14 @@ async fn main() {
         });
     }
 
+    match &command {
+        Some(Commands::Check { no_bind }) if *no_bind => {
+            info!("Configuration checked");
+            return;
+        }
+        _ => {}
+    }
+
     // Listen on TCP ports
     let listener = moproxy
         .listen()
@@ -88,8 +98,10 @@ async fn main() {
     #[cfg(all(feature = "systemd", target_os = "linux"))]
     systemd::notify_ready();
 
-    // Handle incoming clients
-    listener.handle_forever().await;
+    match &command {
+        None => listener.handle_forever().await,
+        Some(Commands::Check { .. }) => info!("Configuration checked"),
+    }
 }
 
 #[instrument(skip_all)]

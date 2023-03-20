@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use clap::{arg, command, Parser};
+use clap::{arg, command, Parser, Subcommand};
 use tracing::metadata::LevelFilter;
 
 #[derive(Parser, Debug)]
@@ -107,6 +107,19 @@ pub(crate) struct CliArgs {
     /// timeout. Applied for both probe & normal proxy connections.
     #[arg(long, value_name = "SECONDS", default_value = "4", value_parser = parse_duration_in_seconds)]
     pub(crate) max_wait: Duration,
+
+    #[command(subcommand)]
+    pub(crate) command: Option<Commands>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum Commands {
+    /// Load & check configure and then exit
+    Check {
+        /// Do not try to bind socket
+        #[arg(long)]
+        no_bind: bool,
+    },
 }
 
 fn parse_duration_in_seconds(s: &str) -> Result<Duration, String> {

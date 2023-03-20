@@ -7,13 +7,15 @@ use tokio::net::{TcpListener, TcpStream};
 use tracing::{error, info, instrument, warn};
 
 use crate::{cli::CliArgs, FromOptionStr};
+#[cfg(feature = "web_console")]
+use moproxy::web::WebServer;
 use moproxy::{
     client::{FailedClient, NewClient},
     futures_stream::TcpListenerStream,
     monitor::Monitor,
     policy::{parser, ActionType, Policy},
     proxy::{ProxyProto, ProxyServer, UserPassAuthCredential},
-    web::{self, AutoRemoveFile},
+    web::WebServerListener,
 };
 
 #[derive(Clone)]
@@ -23,13 +25,15 @@ pub(crate) struct MoProxy {
     monitor: Monitor,
     direct_server: Arc<ProxyServer>,
     policy: Arc<RwLock<Policy>>,
-    #[cfg(all(feature = "web_console", unix))]
-    _sock_file: Arc<Option<AutoRemoveFile<String>>>,
+    #[cfg(feature = "web_console")]
+    web_server: Option<WebServer>,
 }
 
 pub(crate) struct MoProxyListener {
     moproxy: MoProxy,
     listeners: Vec<TcpListenerStream>,
+    #[cfg(feature = "web_console")]
+    web_server: Option<WebServerListener>,
 }
 
 #[derive(Debug)]
@@ -72,33 +76,12 @@ impl MoProxy {
         }
 
         // Setup web console
-        #[cfg(all(feature = "web_console", unix))]
-        let mut sock_file = None;
         #[cfg(feature = "web_console")]
-        {
-            if let Some(ref http_addr) = args.web_bind {
-                info!("http run on {}", http_addr);
-                if !http_addr.starts_with('/') || cfg!(not(unix)) {
-                    let listener = TcpListener::bind(&http_addr)
-                        .await
-                        .expect("fail to bind web server");
-                    let serv = web::run_server(TcpListenerStream(listener), monitor.clone());
-                    tokio::spawn(serv);
-                }
-                #[cfg(unix)]
-                {
-                    use moproxy::futures_stream::UnixListenerStream;
-                    use tokio::net::UnixListener;
-                    if http_addr.starts_with('/') {
-                        let sock = web::AutoRemoveFile::new(http_addr.clone());
-                        let listener = UnixListener::bind(&sock).expect("fail to bind web server");
-                        let serv = web::run_server(UnixListenerStream(listener), monitor.clone());
-                        tokio::spawn(serv);
-                        sock_file = Some(sock);
-                    }
-                }
-            }
-        }
+        let web_server = if let Some(addr) = &args.web_bind {
+            Some(WebServer::new(monitor.clone(), addr.into())?)
+        } else {
+            None
+        };
 
         // Launch monitor
         if args.probe_secs > 0 {
@@ -111,7 +94,8 @@ impl MoProxy {
             direct_server,
             monitor,
             policy,
-            _sock_file: Arc::new(sock_file),
+            #[cfg(feature = "web_console")]
+            web_server,
         })
     }
 
@@ -152,9 +136,18 @@ impl MoProxy {
             }
             listeners.push(TcpListenerStream(listener));
         }
+        #[cfg(feature = "web_console")]
+        let web_server = if let Some(web) = &self.web_server {
+            Some(web.listen().await?)
+        } else {
+            None
+        };
+
         Ok(MoProxyListener {
             moproxy: self.clone(),
             listeners,
+            #[cfg(feature = "web_console")]
+            web_server,
         })
     }
 
@@ -217,6 +210,11 @@ impl MoProxy {
 
 impl MoProxyListener {
     pub(crate) async fn handle_forever(mut self) {
+        #[cfg(feature = "web_console")]
+        if let Some(web) = self.web_server {
+            web.run_background()
+        }
+
         let mut clients = stream::select_all(self.listeners.iter_mut());
         while let Some(sock) = clients.next().await {
             let moproxy = self.moproxy.clone();

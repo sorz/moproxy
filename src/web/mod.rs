@@ -2,6 +2,8 @@ mod helpers;
 mod open_metrics;
 #[cfg(feature = "rich_web")]
 mod rich;
+use anyhow::Context;
+use flexstr::SharedStr;
 use futures_core::Stream;
 use helpers::{DurationExt, RequestExt};
 use hyper::{
@@ -17,6 +19,7 @@ use std::{
     error::Error,
     fmt::Write,
     fs,
+    net::SocketAddr,
     path::Path,
     sync::Arc,
     time::{Duration, Instant},
@@ -24,10 +27,12 @@ use std::{
 use tokio::{
     self,
     io::{AsyncRead, AsyncWrite},
+    net::{TcpListener, UnixListener},
 };
-use tracing::{instrument, warn};
+use tracing::{info, instrument, warn};
 
 use crate::{
+    futures_stream::{TcpListenerStream, UnixListenerStream},
     monitor::{Monitor, Throughput},
     proxy::{Delay, ProxyServer},
 };
@@ -224,8 +229,88 @@ fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Res
     }
 }
 
+#[derive(Debug, Clone)]
+enum ListenAddr {
+    TcpSocket(SocketAddr),
+    UnixPath(SharedStr),
+}
+
+enum Listener {
+    Tcp(TcpListener),
+    #[cfg(unix)]
+    Unix {
+        listener: UnixListener,
+        file: AutoRemoveFile,
+    },
+}
+
+#[derive(Clone)]
+pub struct WebServer {
+    monitor: Monitor,
+    bind_addr: ListenAddr,
+}
+
+pub struct WebServerListener {
+    monitor: Monitor,
+    listener: Listener,
+}
+
+impl WebServer {
+    pub fn new(monitor: Monitor, bind_addr: SharedStr) -> anyhow::Result<Self> {
+        let bind_addr = if !bind_addr.starts_with('/') || cfg!(not(unix)) {
+            // TCP socket
+            let addr = str::parse(bind_addr.as_str())
+                .context("Not valid TCP socket address for web server")?;
+            ListenAddr::TcpSocket(addr)
+        } else {
+            ListenAddr::UnixPath(bind_addr)
+        };
+        Ok(Self { monitor, bind_addr })
+    }
+
+    pub async fn listen(&self) -> anyhow::Result<WebServerListener> {
+        let listener = match &self.bind_addr {
+            ListenAddr::TcpSocket(addr) => {
+                info!("Web console listen on tcp:{}", addr);
+                let listener = TcpListener::bind(&addr)
+                    .await
+                    .context("fail to bind web server")?;
+                Listener::Tcp(listener)
+            }
+            #[cfg(unix)]
+            ListenAddr::UnixPath(addr) => {
+                info!("Web console listen on unix:{}", addr);
+                let file = AutoRemoveFile(addr.clone());
+                let listener = UnixListener::bind(&file).context("fail to bind web server")?;
+                Listener::Unix { listener, file }
+            }
+        };
+        Ok(WebServerListener {
+            monitor: self.monitor.clone(),
+            listener,
+        })
+    }
+}
+
+impl WebServerListener {
+    pub fn run_background(self) {
+        match self.listener {
+            Listener::Tcp(tcp) => {
+                tokio::spawn(run_server(TcpListenerStream(tcp), self.monitor));
+            }
+            #[cfg(unix)]
+            Listener::Unix { listener, file } => {
+                tokio::spawn(async move {
+                    run_server(UnixListenerStream(listener), self.monitor).await;
+                    drop(file);
+                });
+            }
+        }
+    }
+}
+
 #[instrument(name = "web_server", skip_all)]
-pub async fn run_server<S, IO, E>(stream: S, monitor: Monitor)
+async fn run_server<S, IO, E>(stream: S, monitor: Monitor)
 where
     S: Stream<Item = Result<IO, E>>,
     E: Into<Box<dyn Error + Send + Sync>>,
@@ -253,26 +338,18 @@ where
 }
 
 /// File on this path will be removed on `drop()`.
-pub struct AutoRemoveFile<T: AsRef<Path>> {
-    path: T,
-}
+struct AutoRemoveFile(SharedStr);
 
-impl<T: AsRef<Path>> AutoRemoveFile<T> {
-    pub fn new(path: T) -> Self {
-        AutoRemoveFile { path }
-    }
-}
-
-impl<T: AsRef<Path>> Drop for AutoRemoveFile<T> {
+impl Drop for AutoRemoveFile {
     fn drop(&mut self) {
-        if let Err(err) = fs::remove_file(&self.path) {
-            warn!("fail to remove {}: {}", self.path.as_ref().display(), err);
+        if let Err(err) = fs::remove_file(self.0.as_str()) {
+            warn!("fail to remove {}: {}", self.0, err);
         }
     }
 }
 
-impl<T: AsRef<Path>> AsRef<Path> for AutoRemoveFile<T> {
+impl AsRef<Path> for AutoRemoveFile {
     fn as_ref(&self) -> &Path {
-        self.path.as_ref()
+        self.0.as_str().as_ref()
     }
 }

@@ -40,9 +40,7 @@ futures-util  = "0.3"
 httparse = "1"
 rlua = { version = "0.19", optional = true }
 bytes = "1"
-zip = { version = "0.6", optional = true, default-features = false, features = [
-    "deflate"
-] }
+zip = { version = "0.6", optional = true, default-features = false, features = ["zstd"] }
 base64 = "0.21"
 nom = "7"
 flexstr = { version = "0.9", features = ["serde"] }
@@ -62,7 +60,7 @@ score_script = ["rlua"]
 systemd = ["sd-notify", "tracing-journald"]
 
 [build-dependencies]
-reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "blocking"] }
+zip = { version = "0.6", optional = true, default-features = false, features = ["zstd"] }
 
 [package.metadata.deb]
 section = "net"

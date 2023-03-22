@@ -31,11 +31,17 @@ fn main() {
 }
 
 fn pack_zip(src: &Path, dst: &Path) -> io::Result<()> {
-    let mut file = File::create(dst)?;
-    let mut zip = ZipWriter::new(&mut file);
+    let level = match std::env::var("PROFILE").as_deref() {
+        Ok("debug") => Some(1),
+        Ok("release") => Some(16),
+        _ => panic!("PROFILE not set or unknown"),
+    };
     let opts = FileOptions::default()
         .compression_method(zip::CompressionMethod::Zstd)
-        .compression_level(Some(12));
+        .compression_level(level);
+
+    let mut file = File::create(dst)?;
+    let mut zip = ZipWriter::new(&mut file);
     for entry in src.read_dir()? {
         let entry = entry?;
         zip.start_file(entry.file_name().into_string().unwrap(), opts)?;

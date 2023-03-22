@@ -1,0 +1,12 @@
+[package]
+name = "moproxy-web"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+repository = { workspace = true }
+license = { workspace = true }
+description = "Rich web frontend for moproxy"
+readme = "README.md"
+
+[dependencies]
+yew = { version="0.20", features=["csr"] }

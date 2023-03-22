@@ -1,5 +1,10 @@
 [workspace]
+members = ["program", "web"]
+default-members = ["program"]
 
-members = [
-    "program",
-]
+[workspace.package]
+version = "0.4.2"
+authors = ["sorz <me@sorz.org>"]
+edition = "2021"
+repository = "https://github.com/sorz/moproxy"
+license = "MIT"

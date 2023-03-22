@@ -11,6 +11,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+          profile: minimal
+      - uses: jetli/trunk-action@v0.1.0
+      - uses: actions-rs/install@v0.1
+        with:
+          crate: wasm-bindgen-cli
+          use-tool-cache: true
+      - run: trunk build --build web/index.html
       - uses: actions-rs/install@v0.1
         with:
           crate: cargo-deb
@@ -30,6 +41,17 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+          profile: minimal
+      - uses: jetli/trunk-action@v0.1.0
+      - uses: actions-rs/install@v0.1
+        with:
+          crate: wasm-bindgen-cli
+          use-tool-cache: true
+      - run: trunk build --build web/index.html
       - uses: actions-rs/cargo@v1
         with:
           command: build
@@ -45,6 +67,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+          profile: minimal
+      - uses: jetli/trunk-action@v0.1.0
+      - uses: actions-rs/install@v0.1
+        with:
+          crate: wasm-bindgen-cli
+          use-tool-cache: true
+      - run: trunk build --build web/index.html
       - uses: actions-rs/cargo@v1
         with:
           use-cross: true

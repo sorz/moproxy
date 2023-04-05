@@ -134,6 +134,12 @@ async fn accept_socks5(client: &mut TcpStream) -> io::Result<Destination> {
     Ok((addr, port).into())
 }
 
+async fn transparent_dest(client: &mut TcpStream) -> io::Result<Destination> {
+    // Transparent firewall redirection (unmodified destination address)
+    // (for example, ipfw firewall with 'fwd' rule)
+    Ok((client.local_addr()?).into())
+}
+
 impl NewClient {
     #[instrument(name = "retrieve_dest", skip_all)]
     pub async fn from_socket(mut left: TcpStream, list: ServerList) -> io::Result<Self> {
@@ -151,6 +157,9 @@ impl NewClient {
         // No NAT supported
         #[cfg(not(target_os = "linux"))]
         let dest: Option<SocketAddr> = None;
+
+        #[cfg(target_os = "freebsd")]
+        let dest = (transparent_dest(&mut left).await?).into();
 
         let dest = if let Some(dest) = dest {
             debug!(?dest, "Retrived destination via NAT info");

@@ -1,12 +1,16 @@
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    str::FromStr,
+};
 
 use flexstr::{shared_str, SharedStr, ToCase};
 use nom::{
     branch::alt,
-    bytes::complete::{tag_no_case, take_till1},
-    character::complete::{char, not_line_ending, space0, space1, u16},
-    combinator::{eof, opt, recognize, verify},
-    multi::{many0_count, many1, separated_list0, separated_list1},
+    bytes::complete::{tag, tag_no_case, take_till1},
+    character::complete::{char, hex_digit1, not_line_ending, space0, space1, u16, u8},
+    combinator::{eof, fail, opt, recognize, verify},
+    multi::{many0_count, many1, many_m_n, separated_list0, separated_list1},
     sequence::tuple,
     IResult, Parser,
 };
@@ -17,7 +21,8 @@ use super::{capabilities::CapSet, Action, ActionType};
 pub enum Filter {
     Default,
     ListenPort(u16),
-    Sni(SharedStr),
+    DstSni(SharedStr),
+    DstIp((IpAddr, u8)),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -28,6 +33,34 @@ pub struct Rule {
 
 fn port_number(input: &str) -> IResult<&str, u16> {
     verify(u16, |&n| n != 0)(input)
+}
+
+fn ipv4_addr(input: &str) -> IResult<&str, Ipv4Addr> {
+    tuple((u8, tag("."), u8, tag("."), u8, tag("."), u8))
+        .map(|(a, _, b, _, c, _, d)| Ipv4Addr::new(a, b, c, d))
+        .parse(input)
+}
+
+fn ipv6_addr(input: &str) -> IResult<&str, Ipv6Addr> {
+    let (rem, str) =
+        recognize(separated_list1(tag(":"), many_m_n(0, 4, hex_digit1))).parse(input)?;
+    match Ipv6Addr::from_str(str) {
+        Ok(addr) => Ok((rem, addr)),
+        Err(_) => fail(str),
+    }
+}
+
+fn ip_addr_prefix_len(input: &str) -> IResult<&str, (IpAddr, u8)> {
+    let v4 = ipv4_addr.map(|ip| IpAddr::V4(ip));
+    let v6 = ipv6_addr.map(|ip| IpAddr::V6(ip));
+    let prefix_len = tuple((tag("/"), u8)).map(|(_, n)| n);
+    let (rem, (ip, len)) = tuple((alt((v4, v6)), opt(prefix_len))).parse(input)?;
+    let len = len.unwrap_or(if ip.is_ipv4() { 32 } else { 128 });
+    match ip {
+        IpAddr::V4(_) if len > 32 => fail(input),
+        IpAddr::V6(_) if len > 128 => fail(input),
+        _ => Ok((rem, (ip, len))),
+    }
 }
 
 fn id_chars(input: &str) -> IResult<&str, &str> {
@@ -57,9 +90,15 @@ fn domain_name(input: &str) -> IResult<&str, SharedStr> {
     ))(input)
 }
 
+fn filter_dst_ip(input: &str) -> IResult<&str, Filter> {
+    tuple((tag_no_case("dst ip"), space1, ip_addr_prefix_len))
+        .map(|(_, _, net)| Filter::DstIp(net))
+        .parse(input)
+}
+
 fn filter_dst_domain(input: &str) -> IResult<&str, Filter> {
     tuple((tag_no_case("dst domain"), space1, domain_name))
-        .map(|(_, _, parts)| Filter::Sni(parts))
+        .map(|(_, _, parts)| Filter::DstSni(parts))
         .parse(input)
 }
 
@@ -74,7 +113,12 @@ fn filter_default(input: &str) -> IResult<&str, Filter> {
 }
 
 fn rule_filter(input: &str) -> IResult<&str, Filter> {
-    alt((filter_dst_domain, filter_listen_port, filter_default))(input)
+    alt((
+        filter_dst_ip,
+        filter_dst_domain,
+        filter_listen_port,
+        filter_default,
+    ))(input)
 }
 
 fn cap_name(input: &str) -> IResult<&str, SharedStr> {
@@ -86,7 +130,7 @@ fn caps1(input: &str) -> IResult<&str, Vec<SharedStr>> {
 }
 
 fn action_priority(input: &str) -> IResult<&str, u8> {
-    verify(many0_count(tag_no_case("!")), |n| *n <= 5)
+    verify(many0_count(tag("!")), |n| *n <= 5)
         .map(|n| n as u8)
         .parse(input)
 }
@@ -129,7 +173,7 @@ fn comment(input: &str) -> IResult<&str, ()> {
 
 pub fn capabilities(input: &str) -> IResult<&str, CapSet> {
     separated_list0(
-        alt((recognize(tuple((space0, tag_no_case(","), space0))), space1)),
+        alt((recognize(tuple((space0, tag(","), space0))), space1)),
         cap_name,
     )
     .map(|caps| CapSet::new(caps.into_iter()))
@@ -173,7 +217,14 @@ fn test_listen_port_filter() {
 fn test_dst_domain_filter() {
     let (rem, parts) = filter_dst_domain("dst domain test\n").unwrap();
     assert_eq!("\n", rem);
-    assert_eq!(Filter::Sni(shared_str!("test")), parts);
+    assert_eq!(Filter::DstSni(shared_str!("test")), parts);
+}
+
+#[test]
+fn test_dst_ip_filter() {
+    let (rem, filter) = filter_dst_ip("dst ip ::\n").unwrap();
+    assert_eq!("\n", rem);
+    assert!(matches!(filter, Filter::DstIp((_, 128))));
 }
 
 #[test]
@@ -181,6 +232,48 @@ fn test_dst_default_filter() {
     let (rem, parts) = filter_default("default\n").unwrap();
     assert_eq!("\n", rem);
     assert_eq!(Filter::Default, parts);
+}
+
+#[test]
+fn test_ipv4_addr() {
+    let (_, ip) = ipv4_addr("255.0.1.2").unwrap();
+    assert_eq!(ip, Ipv4Addr::new(255, 0, 1, 2));
+    assert!(ipv4_addr("256.0.0.0").is_err());
+    assert!(ipv4_addr("127.0.1").is_err());
+    assert!(ipv4_addr("0").is_err());
+    assert!(ipv4_addr("").is_err());
+}
+
+#[test]
+fn test_ipv6_addr() {
+    let addrs = ["::", "::1", "1::", "1::1", "1:0:ffff:fff:ff:0f:0000:8"];
+    for addr in addrs {
+        let (_, parsed) = ipv6_addr(addr).unwrap();
+        assert_eq!(parsed, Ipv6Addr::from_str(addr).unwrap());
+    }
+    let addrs = ["", "0", "1::2::3", "g::0", "1:2:3:4:5:6:7:8:9"];
+    for addr in addrs {
+        assert!(ipv6_addr(addr).is_err());
+    }
+}
+
+#[test]
+fn test_ip_addr_prefix_len() {
+    let (_, (ip, len)) = ip_addr_prefix_len("0.0.0.0/0").unwrap();
+    assert_eq!(ip, IpAddr::from_str("0.0.0.0").unwrap());
+    assert_eq!(len, 0);
+    let (_, (ip, len)) = ip_addr_prefix_len("127.0.0.1").unwrap();
+    assert_eq!(ip, IpAddr::from_str("127.0.0.1").unwrap());
+    assert_eq!(len, 32);
+    let (_, (ip, len)) = ip_addr_prefix_len("::/0").unwrap();
+    assert_eq!(ip, IpAddr::from_str("::").unwrap());
+    assert_eq!(len, 0);
+    let (_, (ip, len)) = ip_addr_prefix_len("::1").unwrap();
+    assert_eq!(ip, IpAddr::from_str("::1").unwrap());
+    assert_eq!(len, 128);
+
+    assert!(ip_addr_prefix_len("0.0.0.0/33").is_err());
+    assert!(ip_addr_prefix_len("::/129").is_err());
 }
 
 #[test]

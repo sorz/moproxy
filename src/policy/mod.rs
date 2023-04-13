@@ -149,8 +149,11 @@ impl Policy {
             Filter::ListenPort(port) => {
                 self.listen_port_ruleset.add(port, action);
             }
-            Filter::Sni(parts) => {
+            Filter::DstSni(parts) => {
                 self.dst_domain_ruleset.add(parts.to_shared_str(), action);
+            }
+            Filter::DstIp((ip, len)) => {
+                todo!()
             }
         }
     }

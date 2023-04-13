@@ -7,6 +7,7 @@
 # Supported filters:
 # - DEFUALT (matches everything / no filter)
 # - LISTEN PORT <port-number> (moproxy's TCP listen port number)
+# - DST IP <ipv4/6-addr>[/<prefix-len>] (destination IP address, won't resolve)
 # - DST DOMAIN <domain-name> (domain name in TLS SNI or SOCKSv5 request)
 # 
 # Supported actions:
@@ -16,7 +17,7 @@
 # 
 # Evaluation order:
 # For each incoming connection, rules are evaluated in the order according 
-# to their filter type: DEFAULT -> LSITEN PORT -> DST DOMAIN
+# to their filter type: DEFAULT -> LSITEN PORT -> DST IP -> DST DOMAIN
 # 
 # Multiple matches:
 # One connection may be matched by multiple rules, depending on their actions:

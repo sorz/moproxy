@@ -15,12 +15,11 @@ pub(crate) struct CliArgs {
     #[arg(default_value_t = Ipv6Addr::UNSPECIFIED.into())]
     pub(crate) host: IpAddr,
 
-    /// Port number to bind on. Multiple ports may be given (will selected
-    /// accroding to the SERVER-LIST ini config).
+    /// Port number to bind on. Multiple ports can be delimited by comma (,)
     #[arg(
         short = 'p',
         long,
-        value_name = "PORT",
+        value_name = "PORTS",
         required = true,
         value_delimiter = ','
     )]
@@ -50,6 +49,7 @@ pub(crate) struct CliArgs {
     #[arg(short = 'l', long = "list", value_name = "SERVER-LIST")]
     pub(crate) server_list: Option<PathBuf>,
 
+    /// Rule file for proxy selection policy
     #[arg(long = "policy", value_name = "POLICY")]
     pub(crate) policy: Option<PathBuf>,
 
@@ -104,7 +104,7 @@ pub(crate) struct CliArgs {
     pub(crate) score_script: Option<PathBuf>,
 
     /// Max waiting time in seconds for connection establishment before
-    /// timeout. Applied for both probe & normal proxy connections.
+    /// timeout. Applied for both probe & regular proxy connections.
     #[arg(long, value_name = "SECONDS", default_value = "4", value_parser = parse_duration_in_seconds)]
     pub(crate) max_wait: Duration,
 

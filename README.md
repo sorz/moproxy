@@ -5,11 +5,13 @@ A transparent TCP to SOCKSv5/HTTP proxy on *Linux* written in Rust.
 Features:
 
  * Transparent TCP proxy with `iptables -j REDIRECT` or `nft redirect to`
- * Support multiple SOCKSv5/HTTP upstream proxy servers
- * SOCKS/HTTP-layer alive & latency probe
- * Prioritize upstream proxy servers according to latency
+ * Downstream SOCKSv5 as a supplement to transparent proxy
+ * Multiple SOCKSv5/HTTP upstream proxy servers
+ * SOCKS/HTTP-layer alive & latency probe for upstreams
+ * Prioritize upstreams according to connection quality (latency & error rate)
  * Full IPv6 support
- * Multiple listen ports, each for a subset of proxy servers
+ * Proxy selection policy (see [conf/policy.rules](conf/policy.rules))
+ * Multiple downstream listen ports (for proxy selection policy)
  * Remote DNS resolving for TLS with SNI (extract domain name from TLS
    handshaking)
  * Optional try-in-parallel for TLS (try multiple proxies and choose the one
@@ -23,7 +25,7 @@ Features:
 
 ```
 +-----+  TCP  +-----------+       SOCKSv5   +---------+
-| App |------>| iptables  |    +----------->| Proxy 1 |--->
+| App |------>| firewall  |    +----------->| Proxy 1 |--->
 +-----+       +-----------+    |            +---------+
             redirect |         |
 +-----+           to v         |      HTTP  +---------+
@@ -31,10 +33,21 @@ Features:
 +-----+       ||         ||----+   |        +---------+
    |          || MOPROXY ||--------+             :
    +--------->||         ||-----------···        :
-   SOCKSv5    \\=========// choose one  |   +---------+
-                                        +-->| Proxy N |--->
-                                            +---------+
+   SOCKSv5    \\=========//  Selection  |   +---------+
+                          |  policy     +-->| Proxy N |--->
+                          |                 +---------+
+                          |
+                          +----------- Direct ------------>
 ```
+
+## Breaking changes
+
+There are CLI and/or configure changes among:
+
+- [v0.4 => v0.5](MIGRATION.md/#v04-to-v05) 
+- [v0.3 => v0.4](MIGRATION.md/#v03-to-v04) 
+
+See [MIGRATION.md](MIGRATION.md)
 
 ## Usage
 
@@ -78,7 +91,7 @@ Pass file path to `moproxy` via `--list` argument.
 
 Signal `SIGHUP` will trigger the program to reload the list.
 
-### Policy file
+### Proxy selection policy file
 Let specified connections use only a subset of upstream proxies.
 
 [See policy.rules example](conf/policy.rules) for details.

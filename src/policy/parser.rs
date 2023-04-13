@@ -51,8 +51,8 @@ fn ipv6_addr(input: &str) -> IResult<&str, Ipv6Addr> {
 }
 
 fn ip_addr_prefix_len(input: &str) -> IResult<&str, (IpAddr, u8)> {
-    let v4 = ipv4_addr.map(|ip| IpAddr::V4(ip));
-    let v6 = ipv6_addr.map(|ip| IpAddr::V6(ip));
+    let v4 = ipv4_addr.map(IpAddr::V4);
+    let v6 = ipv6_addr.map(IpAddr::V6);
     let prefix_len = tuple((tag("/"), u8)).map(|(_, n)| n);
     let (rem, (ip, len)) = tuple((alt((v4, v6)), opt(prefix_len))).parse(input)?;
     let len = len.unwrap_or(if ip.is_ipv4() { 32 } else { 128 });

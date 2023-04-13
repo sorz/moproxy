@@ -2,7 +2,13 @@ mod connect;
 mod tls_parser;
 use bytes::{Bytes, BytesMut};
 use flexstr::SharedStr;
-use std::{borrow::Cow, io, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    borrow::Cow,
+    io,
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
@@ -14,6 +20,7 @@ use tracing::{debug, info, instrument, warn};
 use crate::linux::tcp::TcpStreamExt;
 use crate::{
     client::connect::try_connect_all,
+    policy::RequestFeatures,
     proxy::{copy::pipe, Traffic},
     proxy::{Address, Destination, ProxyServer},
 };
@@ -28,8 +35,14 @@ pub struct TlsData {
 #[derive(Debug)]
 pub struct NewClient {
     left: TcpStream,
+    /// Destination IP address or domain name with port number.
+    /// Retrived from firewall or SOCKSv5 request initially, may be override
+    /// by TLS SNI.
     pub dest: Destination,
-    pub from_port: u16,
+    /// Destination IP address. Unlike `dest`, it won't be override by SNI.
+    dest_ip_addr: Option<IpAddr>,
+    /// Server's TCP port number.
+    from_port: u16,
     pub tls: Option<TlsData>,
 }
 
@@ -156,9 +169,15 @@ impl NewClient {
             dest
         };
 
+        let dest_ip_addr = match dest.host {
+            Address::Ip(ip) => Some(ip),
+            Address::Domain(_) => None,
+        };
+
         Ok(NewClient {
             left,
             dest,
+            dest_ip_addr,
             from_port,
             tls: None,
         })
@@ -166,6 +185,14 @@ impl NewClient {
 
     fn pending_data(&self) -> Option<Bytes> {
         Some(self.tls.as_ref()?.pending_data.as_ref()?.clone())
+    }
+
+    pub fn features(&self) -> RequestFeatures<SharedStr> {
+        RequestFeatures {
+            listen_port: Some(self.from_port),
+            dst_domain: self.dest.host.domain(),
+            dst_ip: self.dest_ip_addr,
+        }
     }
 
     pub fn override_dest_with_sni(&mut self) -> bool {

@@ -152,11 +152,7 @@ impl MoProxy {
     }
 
     fn apply_policy(&self, client: &NewClient) -> PolicyResult {
-        let from_port = client.from_port;
-        let action = self
-            .policy
-            .read()
-            .matches(Some(from_port), client.dest.host.domain());
+        let action = self.policy.read().matches(&client.features());
         match action.action {
             ActionType::Reject => PolicyResult::Reject,
             ActionType::Direct => PolicyResult::Direct,

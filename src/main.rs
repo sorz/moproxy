@@ -3,7 +3,7 @@ mod server;
 
 use clap::Parser;
 use cli::{Commands, PolicyCommands};
-use moproxy::policy::ActionType;
+use moproxy::policy::{ActionType, RequestFeatures};
 use server::MoProxy;
 use std::str::FromStr;
 #[cfg(unix)]
@@ -81,10 +81,16 @@ async fn main() {
         Some(Commands::Policy { command }) => match command {
             PolicyCommands::Get {
                 listen_port,
+                dst_ip,
                 dst_domain,
             } => {
                 let policy = moproxy.policy.read();
-                let action = policy.matches(*listen_port, dst_domain.as_ref());
+                let features = RequestFeatures {
+                    listen_port: *listen_port,
+                    dst_ip: *dst_ip,
+                    dst_domain: dst_domain.as_deref(),
+                };
+                let action = policy.matches(&features);
                 println!("Policy: {action}");
                 if let ActionType::Require(caps) = action.action {
                     let mut tags: Vec<_> = moproxy

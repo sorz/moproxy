@@ -135,6 +135,8 @@ pub(crate) enum PolicyCommands {
         #[arg(long)]
         listen_port: Option<u16>,
         #[arg(long)]
+        dst_ip: Option<IpAddr>,
+        #[arg(long)]
         dst_domain: Option<String>,
     },
 }

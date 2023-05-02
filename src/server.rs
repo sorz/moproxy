@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Context};
 use futures_util::{stream, StreamExt};
 use ini::Ini;
 use parking_lot::RwLock;
-use std::{collections::HashSet, io, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{collections::HashSet, io, net::SocketAddr, net::ToSocketAddrs, path::PathBuf, sync::Arc, time::Duration};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{error, info, instrument, warn};
 
@@ -286,8 +286,9 @@ impl ServerListConfig {
                 let addr: SocketAddr = props
                     .get("address")
                     .ok_or(anyhow!("address not specified"))?
-                    .parse()
-                    .context("not a valid socket address")?;
+                    .to_socket_addrs()
+                    .context("not a valid socket address")?
+                    .next().unwrap();
                 let base = props
                     .get("score base")
                     .parse()

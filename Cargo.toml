@@ -51,7 +51,7 @@ ip_network_table-deps-treebitmap = "0.5.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
-nix = "0.26"
+nix = { version = "0.27", features = ["fs", "net", "socket"] }
 sd-notify = { version = "0.4", optional = true }
 tracing-journald = { version = "0.3", optional = true }
 

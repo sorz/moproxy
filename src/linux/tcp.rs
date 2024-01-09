@@ -6,7 +6,7 @@ use std::{
     ffi::OsStr,
     io::{self, ErrorKind},
     net::{SocketAddr, SocketAddrV4, SocketAddrV6},
-    os::unix::io::AsRawFd,
+    os::fd::AsFd,
 };
 use tokio::net::{TcpListener, TcpStream};
 
@@ -35,16 +35,16 @@ impl TcpStreamExt for TcpStream {
 impl TcpListenerExt for TcpListener {
     fn set_congestion<S: AsRef<OsStr>>(&self, alg: S) -> io::Result<()> {
         let val = alg.as_ref().into();
-        setsockopt(self.as_raw_fd(), TcpCongestion, &val)?;
+        setsockopt(self, TcpCongestion, &val)?;
         Ok(())
     }
 }
 
 fn get_original_dest_v4<F>(fd: &F) -> io::Result<SocketAddrV4>
 where
-    F: AsRawFd,
+    F: AsFd,
 {
-    let addr = getsockopt(fd.as_raw_fd(), OriginalDst)?;
+    let addr = getsockopt(fd, OriginalDst)?;
     Ok(SocketAddrV4::new(
         u32::from_be(addr.sin_addr.s_addr).into(),
         u16::from_be(addr.sin_port),
@@ -53,9 +53,9 @@ where
 
 fn get_original_dest_v6<F>(fd: &F) -> io::Result<SocketAddrV6>
 where
-    F: AsRawFd,
+    F: AsFd,
 {
-    let sockaddr = getsockopt(fd.as_raw_fd(), Ip6tOriginalDst)?;
+    let sockaddr = getsockopt(fd, Ip6tOriginalDst)?;
     Ok(SocketAddrV6::new(
         sockaddr.sin6_addr.s6_addr.into(),
         u16::from_be(sockaddr.sin6_port),

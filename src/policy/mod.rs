@@ -263,7 +263,8 @@ impl Display for Action {
             write!(f, "!")?;
         }
         if let ActionType::Require(ref caps) = self.action {
-            let caps = Vec::from_iter(caps);
+            let mut caps = Vec::from_iter(caps);
+            caps.sort_unstable();
             match caps.first() {
                 Some(cap) => write!(f, " {}", cap)?,
                 None => write!(f, " NOTHING")?,

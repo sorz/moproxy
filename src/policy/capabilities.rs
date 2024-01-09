@@ -3,7 +3,7 @@ use std::{fmt::Display, mem};
 use flexstr::SharedStr;
 use serde::Serialize;
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Default, Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Default, Serialize, PartialOrd, Ord)]
 pub struct CapSet(Box<[SharedStr]>);
 
 impl CapSet {

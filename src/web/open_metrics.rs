@@ -1,10 +1,10 @@
-use hyper::{Body, Response};
+use hyper::Response;
 use std::{
     fmt::{Display, Write},
     time::Instant,
 };
 
-use super::{ServerStatus, Status};
+use super::{BytesResult, ServerStatus, Status};
 use crate::{monitor::Monitor, proxy::Delay};
 
 const CONTENT_TYPE: &str = "application/openmetrics-text; version=1.0.0; charset=utf-8";
@@ -31,7 +31,7 @@ where
     }
 }
 
-pub fn exporter(start_time: &Instant, monitor: &Monitor) -> Response<Body> {
+pub fn exporter(start_time: &Instant, monitor: &Monitor) -> BytesResult {
     let status = Status::from(start_time, monitor);
     let mut buf = String::new();
 
@@ -85,5 +85,4 @@ pub fn exporter(start_time: &Instant, monitor: &Monitor) -> Response<Body> {
     Response::builder()
         .header("Content-Type", CONTENT_TYPE)
         .body(buf.into())
-        .unwrap()
 }

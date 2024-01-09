@@ -3,22 +3,21 @@ mod open_metrics;
 #[cfg(feature = "rich_web")]
 mod rich;
 use anyhow::Context;
+use bytes::Bytes;
 use flexstr::SharedStr;
-use futures_core::Stream;
 use helpers::{DurationExt, RequestExt};
+use http_body_util::Full;
 use hyper::{
-    server::{accept::from_stream, conn::Http},
-    service::{make_service_fn, service_fn},
-    Body, Method, Request, Response, StatusCode,
+    body::Incoming, server::conn::http1, service::service_fn, Method, Request, Response, StatusCode,
 };
+use hyper_util::rt::TokioIo;
 #[cfg(feature = "rich_web")]
 use once_cell::sync::Lazy;
 use prettytable::{cell, format::consts::FORMAT_NO_LINESEP_WITH_TITLE, row, Table};
 use serde_derive::Serialize;
 use std::{
-    error::Error,
     fmt::Write,
-    fs,
+    fs, io,
     net::SocketAddr,
     path::Path,
     sync::Arc,
@@ -27,12 +26,11 @@ use std::{
 use tokio::{
     self,
     io::{AsyncRead, AsyncWrite},
-    net::{TcpListener, UnixListener},
+    net::{TcpListener, TcpStream, UnixListener, UnixStream},
 };
 use tracing::{info, instrument, warn};
 
 use crate::{
-    futures_stream::{TcpListenerStream, UnixListenerStream},
     monitor::{Monitor, Throughput},
     proxy::{Delay, ProxyServer},
 };
@@ -73,14 +71,15 @@ impl Status {
     }
 }
 
-fn home_page(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Response<Body> {
+type BytesResult = Result<Response<Full<Bytes>>, http::Error>;
+
+fn home_page(req: &Request<Incoming>, start_time: &Instant, monitor: &Monitor) -> BytesResult {
     if req.accept_html() {
         #[cfg(feature = "rich_web")]
         let resp = BUNDLE.get("/index.html").map(|(mime, content)| {
             Response::builder()
                 .header("Content-Type", mime)
                 .body(content.into())
-                .unwrap()
         });
         #[cfg(not(feature = "rich_web"))]
         let resp = None;
@@ -88,7 +87,6 @@ fn home_page(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Re
             Response::builder()
                 .header("Content-Type", "text/html")
                 .body(include_str!("index.html").into())
-                .unwrap()
         })
     } else {
         plaintext_status_response(start_time, monitor)
@@ -175,46 +173,41 @@ fn plaintext_status(start_time: &Instant, monitor: &Monitor) -> String {
     buf
 }
 
-fn plaintext_status_response(start_time: &Instant, monitor: &Monitor) -> Response<Body> {
+fn plaintext_status_response(start_time: &Instant, monitor: &Monitor) -> BytesResult {
     Response::builder()
         .header("Content-Type", "text/plain; charset=utf-8")
         .body(plaintext_status(start_time, monitor).into())
-        .unwrap()
 }
 
-fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Response<Body> {
+fn response(req: &Request<Incoming>, start_time: Instant, monitor: Monitor) -> BytesResult {
     if req.method() != Method::GET {
         return Response::builder()
             .status(StatusCode::METHOD_NOT_ALLOWED)
             .header("Allow", "GET")
             .header("Content-Type", "text/plain")
-            .body("only GET is allowed".into())
-            .unwrap();
+            .body("only GET is allowed".into());
     }
 
     match req.uri().path() {
-        "/" | "/index.html" => home_page(req, start_time, monitor),
-        "/plain" => plaintext_status_response(start_time, monitor),
+        "/" | "/index.html" => home_page(req, &start_time, &monitor),
+        "/plain" => plaintext_status_response(&start_time, &monitor),
         "/version" => Response::builder()
             .header("Content-Type", "text/plain")
-            .body(env!("CARGO_PKG_VERSION").into())
-            .unwrap(),
+            .body(env!("CARGO_PKG_VERSION").into()),
         "/status" => {
-            let json = serde_json::to_string(&Status::from(start_time, monitor))
+            let json = serde_json::to_string(&Status::from(&start_time, &monitor))
                 .expect("fail to serialize servers to json");
             Response::builder()
                 .header("Content-Type", "application/json")
                 .body(json.into())
-                .unwrap()
         }
-        "/metrics" => open_metrics::exporter(start_time, monitor),
+        "/metrics" => open_metrics::exporter(&start_time, &monitor),
         path => {
             #[cfg(feature = "rich_web")]
             let resp = BUNDLE.get(path).map(|(mime, body)| {
                 Response::builder()
                     .header("Content-Type", mime)
                     .body(body.into())
-                    .unwrap()
             });
             #[cfg(not(feature = "rich_web"))]
             let resp = None;
@@ -223,7 +216,6 @@ fn response(req: &Request<Body>, start_time: &Instant, monitor: &Monitor) -> Res
                     .status(StatusCode::NOT_FOUND)
                     .header("Content-Type", "text/plain")
                     .body("page not found".into())
-                    .unwrap()
             })
         }
     }
@@ -242,6 +234,24 @@ enum Listener {
         listener: UnixListener,
         file: AutoRemoveFile,
     },
+}
+
+trait Accept<IO> {
+    async fn accept(&self) -> io::Result<IO>;
+}
+
+impl Accept<TcpStream> for TcpListener {
+    async fn accept(&self) -> io::Result<TcpStream> {
+        let (client, _) = self.accept().await?;
+        Ok(client)
+    }
+}
+
+impl Accept<UnixStream> for UnixListener {
+    async fn accept(&self) -> io::Result<UnixStream> {
+        let (client, _) = self.accept().await?;
+        Ok(client)
+    }
 }
 
 #[derive(Clone)]
@@ -296,12 +306,12 @@ impl WebServerListener {
     pub fn run_background(self) {
         match self.listener {
             Listener::Tcp(tcp) => {
-                tokio::spawn(run_server(TcpListenerStream(tcp), self.monitor));
+                tokio::spawn(run_server(tcp, self.monitor));
             }
             #[cfg(unix)]
             Listener::Unix { listener, file } => {
                 tokio::spawn(async move {
-                    run_server(UnixListenerStream(listener), self.monitor).await;
+                    run_server(listener, self.monitor).await;
                     drop(file);
                 });
             }
@@ -310,30 +320,36 @@ impl WebServerListener {
 }
 
 #[instrument(name = "web_server", skip_all)]
-async fn run_server<S, IO, E>(stream: S, monitor: Monitor)
+async fn run_server<L, IO>(listener: L, monitor: Monitor)
 where
-    S: Stream<Item = Result<IO, E>>,
-    E: Into<Box<dyn Error + Send + Sync>>,
+    L: Accept<IO> + Unpin,
     IO: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     tokio::spawn(monitor.clone().monitor_throughput());
     let start_time = Instant::now();
 
-    let make_svc = make_service_fn(move |_sock| {
+    loop {
+        let stream = match listener.accept().await {
+            Ok(stream) => stream,
+            Err(err) => {
+                warn!("failed to accept: {}", err);
+                break;
+            }
+        };
         let monitor = monitor.clone();
-        async move {
-            Ok::<_, hyper::Error>(service_fn(move |req| {
-                let monitor = monitor.clone();
-                async move { Ok::<_, hyper::Error>(response(&req, &start_time, &monitor)) }
-            }))
-        }
-    });
-    let http = Http::new();
-    let accept = from_stream(stream);
-    let server = hyper::server::Builder::new(accept, http).serve(make_svc);
-    if let Err(e) = server.await {
-        warn!("web server error: {}", e);
+        let service = service_fn(move |req: Request<Incoming>| {
+            let monitor = monitor.clone();
+            async move { response(&req, start_time, monitor) }
+        });
+
+        tokio::spawn(async move {
+            let conn = http1::Builder::new().serve_connection(TokioIo::new(stream), service);
+            if let Err(e) = conn.await {
+                warn!("web server error: {}", e);
+            }
+        });
     }
+
     warn!("web server stopped");
 }
 

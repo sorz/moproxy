@@ -285,6 +285,10 @@ impl ServerListConfig {
         if let Some(path) = &self.path {
             let ini = Ini::load_from_file(path).context("cannot read server list file")?;
             for (section, props) in ini.iter() {
+                if section.is_none() && props.is_empty() {
+                    // `rust-ini` always return empty general section on 0.19 & 0.20
+                    continue;
+                }
                 let server = self
                     .load_proxy_from_ini_section(section, props)
                     .with_context(|| {

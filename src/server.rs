@@ -284,93 +284,16 @@ impl ServerListConfig {
         let mut servers = self.cli_servers.clone();
         if let Some(path) = &self.path {
             let ini = Ini::load_from_file(path).context("cannot read server list file")?;
-            for (tag, props) in ini.iter() {
-                let tag = props.get("tag").or(tag);
-                let addr: SocketAddr = props
-                    .get("address")
-                    .ok_or(anyhow!("address not specified"))?
-                    .to_socket_addrs()
-                    .context("not a valid socket address")?
-                    .next()
-                    .unwrap();
-                let base = props
-                    .get("score base")
-                    .parse()
-                    .context("score base not a integer")?;
-                let test_dns = props
-                    .get("test dns")
-                    .parse()
-                    .context("not a valid socket address")?
-                    .unwrap_or(self.default_test_dns);
-                let max_wait = props
-                    .get("max wait")
-                    .parse()
-                    .context("not a valid number")?
-                    .map(Duration::from_secs)
-                    .unwrap_or(self.default_max_wait);
-                if props.get("listen ports").is_some() {
-                    // TODO: add a link to how-to --policy
-                    error!("`listen ports` is not longer supported, use --policy instead");
-                }
-                let (_, capabilities) =
-                    parser::capabilities(props.get("capabilities").unwrap_or_default())
-                        .map_err(|e| e.to_owned())
-                        .context("not a valid list of capabilities")?;
-                let proto = match props
-                    .get("protocol")
-                    .context("protocol not specified")?
-                    .to_lowercase()
-                    .as_str()
-                {
-                    "socks5" | "socksv5" => {
-                        let fake_hs = props
-                            .get("socks fake handshaking")
-                            .parse()
-                            .context("not a boolean value")?
-                            .unwrap_or(false);
-                        let username = props.get("socks username").unwrap_or("");
-                        let password = props.get("socks password").unwrap_or("");
-                        match (username.len(), password.len()) {
-                            (0, 0) => ProxyProto::socks5(fake_hs),
-                            (0, _) | (_, 0) => bail!("socks username/password is empty"),
-                            (u, p) if u > 255 || p > 255 => {
-                                bail!("socks username/password too long")
-                            }
-                            _ => ProxyProto::socks5_with_auth(UserPassAuthCredential::new(
-                                username, password,
-                            )),
-                        }
-                    }
-                    "http" => {
-                        let cwp = props
-                            .get("http allow connect payload")
-                            .parse()
-                            .context("not a boolean value")?
-                            .unwrap_or(false);
-                        let credential =
-                            match (props.get("http username"), props.get("http password")) {
-                                (None, None) => None,
-                                (Some(user), _) if user.contains(':') => {
-                                    bail!("semicolon (:) in http username")
-                                }
-                                (user, pass) => Some(UserPassAuthCredential::new(
-                                    user.unwrap_or(""),
-                                    pass.unwrap_or(""),
-                                )),
-                            };
-                        ProxyProto::http(cwp, credential)
-                    }
-                    _ => bail!("unknown proxy protocol"),
-                };
-                let server = ProxyServer::new(
-                    addr,
-                    proto,
-                    test_dns,
-                    max_wait,
-                    Some(capabilities),
-                    tag,
-                    base,
-                );
+            for (section, props) in ini.iter() {
+                let server = self
+                    .load_proxy_from_ini_section(section, props)
+                    .with_context(|| {
+                        format!(
+                            "load [{}] from {}",
+                            section.unwrap_or("<general>"),
+                            path.display()
+                        )
+                    })?;
                 servers.push(Arc::new(server));
             }
         }
@@ -379,5 +302,96 @@ impl ServerListConfig {
         }
         info!("total {} server(s) loaded", servers.len());
         Ok(servers)
+    }
+
+    fn load_proxy_from_ini_section(
+        &self,
+        section: Option<&str>,
+        props: &ini::Properties,
+    ) -> anyhow::Result<ProxyServer> {
+        let tag = props.get("tag").or(section);
+        let addr: SocketAddr = props
+            .get("address")
+            .ok_or(anyhow!("address not specified"))?
+            .to_socket_addrs()
+            .context("not a valid socket address")?
+            .next()
+            .unwrap();
+        let base = props
+            .get("score base")
+            .parse()
+            .context("score base not a integer")?;
+        let test_dns = props
+            .get("test dns")
+            .parse()
+            .context("not a valid socket address")?
+            .unwrap_or(self.default_test_dns);
+        let max_wait = props
+            .get("max wait")
+            .parse()
+            .context("not a valid number")?
+            .map(Duration::from_secs)
+            .unwrap_or(self.default_max_wait);
+        if props.get("listen ports").is_some() {
+            // TODO: add a link to how-to --policy
+            error!("`listen ports` is not longer supported, use --policy instead");
+        }
+        let (_, capabilities) = parser::capabilities(props.get("capabilities").unwrap_or_default())
+            .map_err(|e| e.to_owned())
+            .context("not a valid list of capabilities")?;
+        let proto = match props
+            .get("protocol")
+            .context("protocol not specified")?
+            .to_lowercase()
+            .as_str()
+        {
+            "socks5" | "socksv5" => {
+                let fake_hs = props
+                    .get("socks fake handshaking")
+                    .parse()
+                    .context("not a boolean value")?
+                    .unwrap_or(false);
+                let username = props.get("socks username").unwrap_or("");
+                let password = props.get("socks password").unwrap_or("");
+                match (username.len(), password.len()) {
+                    (0, 0) => ProxyProto::socks5(fake_hs),
+                    (0, _) | (_, 0) => bail!("socks username/password is empty"),
+                    (u, p) if u > 255 || p > 255 => {
+                        bail!("socks username/password too long")
+                    }
+                    _ => ProxyProto::socks5_with_auth(UserPassAuthCredential::new(
+                        username, password,
+                    )),
+                }
+            }
+            "http" => {
+                let cwp = props
+                    .get("http allow connect payload")
+                    .parse()
+                    .context("not a boolean value")?
+                    .unwrap_or(false);
+                let credential = match (props.get("http username"), props.get("http password")) {
+                    (None, None) => None,
+                    (Some(user), _) if user.contains(':') => {
+                        bail!("semicolon (:) in http username")
+                    }
+                    (user, pass) => Some(UserPassAuthCredential::new(
+                        user.unwrap_or(""),
+                        pass.unwrap_or(""),
+                    )),
+                };
+                ProxyProto::http(cwp, credential)
+            }
+            _ => bail!("unknown proxy protocol"),
+        };
+        Ok(ProxyServer::new(
+            addr,
+            proto,
+            test_dns,
+            max_wait,
+            Some(capabilities),
+            tag,
+            base,
+        ))
     }
 }

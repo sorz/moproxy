@@ -10,6 +10,7 @@ jobs:
     name: Release - ${{ matrix.platform.release_for }}
     if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/tags/test-release'
     strategy:
+      fail-fast: false
       matrix:
         platform:
           - release_for: Linux-x86_64
@@ -41,12 +42,6 @@ jobs:
             target: aarch64-linux-android
             suffix: linux_aarch64_android.bin
             toolchain: stable
-
-          - release_for: Linux-mips
-            os: ubuntu-latest
-            target: mips-unknown-linux-musl
-            suffix: linux_mips_musl.bin
-            toolchain: nightly
 
     runs-on: ${{ matrix.platform.os }}
     steps:

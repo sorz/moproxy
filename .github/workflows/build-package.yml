@@ -3,12 +3,12 @@ name: build-package
 on:
   push:
     tags:
-      - '*'
+      - 'v*'
 
 jobs:
   release:
     name: Release - ${{ matrix.platform.release_for }}
-    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/tags/test-release'
+    if: startsWith(github.ref, 'refs/tags/v')
     strategy:
       fail-fast: false
       matrix:
@@ -37,11 +37,14 @@ jobs:
             suffix: linux_armv7_gnueabihf.bin
             toolchain: stable
 
-          - release_for: Android-aarch64
-            os: ubuntu-latest
-            target: aarch64-linux-android
-            suffix: linux_aarch64_android.bin
-            toolchain: stable
+          # Disabled until corss release a new version
+          # https://github.com/cross-rs/cross/issues/1222
+          #
+          #- release_for: Android-aarch64
+          #  os: ubuntu-latest
+          #  target: aarch64-linux-android
+          #  suffix: linux_aarch64_android.bin
+          #  toolchain: stable
 
     runs-on: ${{ matrix.platform.os }}
     steps:
@@ -49,6 +52,9 @@ jobs:
         uses: actions/checkout@v4
       - name: Setup cache
         uses: Swatinem/rust-cache@v2
+      - name: Install musl-tools
+        if: contains(matrix.platform.target, 'linux-musl')
+        run: sudo apt install musl-tools
       - name: Build
         uses: houseabsolute/actions-rust-cross@v0
         with:
@@ -60,7 +66,7 @@ jobs:
       - name: Packaging for Debian
         if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
         run: |
-          cargo install deb
+          cargo install cargo-deb
           cargo deb --target=${{ matrix.platform.target }} --no-build
       - name: Packaging binary
         run: |

@@ -23,10 +23,12 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+#[cfg(unix)]
+use tokio::net::{UnixListener, UnixStream};
 use tokio::{
     self,
     io::{AsyncRead, AsyncWrite},
-    net::{TcpListener, TcpStream, UnixListener, UnixStream},
+    net::{TcpListener, TcpStream},
 };
 use tracing::{info, instrument, warn};
 
@@ -224,6 +226,7 @@ fn response(req: &Request<Incoming>, start_time: Instant, monitor: Monitor) -> B
 #[derive(Debug, Clone)]
 enum ListenAddr {
     TcpSocket(SocketAddr),
+    #[cfg(unix)]
     UnixPath(SharedStr),
 }
 
@@ -247,6 +250,7 @@ impl Accept<TcpStream> for TcpListener {
     }
 }
 
+#[cfg(unix)]
 impl Accept<UnixStream> for UnixListener {
     async fn accept(&self) -> io::Result<UnixStream> {
         let (client, _) = self.accept().await?;
@@ -273,7 +277,12 @@ impl WebServer {
                 .context("Not valid TCP socket address for web server")?;
             ListenAddr::TcpSocket(addr)
         } else {
-            ListenAddr::UnixPath(bind_addr)
+            #[cfg(unix)]
+            {
+                ListenAddr::UnixPath(bind_addr)
+            }
+            #[cfg(not(unix))]
+            anyhow::bail!("No UNIX domain socket support on this system")
         };
         Ok(Self { monitor, bind_addr })
     }

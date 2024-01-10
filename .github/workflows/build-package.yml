@@ -68,10 +68,10 @@ jobs:
         run: |
           cargo install cargo-deb
           cargo deb --target=${{ matrix.platform.target }} --no-build
-      - name: Packaging binary
+      - name: Packaging binary for Linux
         if: contains(matrix.platform.os, 'ubuntu')
         run: xz -kfS "_${GITHUB_REF#*/v}${{ matrix.platform.suffix }}.xz" target/${{ matrix.platform.target }}/release/moproxy
-      - name: Packaging binary
+      - name: Packaging binary for Windows
         if: contains(matrix.platform.os, 'windows')
         run: xz -kf target/${{ matrix.platform.target }}/release/moproxy.exe > "moproxy_${GITHUB_REF#*/v}_${{ matrix.platform.suffix }}.xz"
       - name: Release

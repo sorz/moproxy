@@ -3,75 +3,77 @@ name: build-package
 on:
   push:
     tags:
-      - v*
+      - '*'
 
 jobs:
-  build-linux:
-    name: Build for Linux
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/install@v0.1
-        with:
-          crate: cargo-deb
-          use-tool-cache: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: deb
-          args: -- --all-features
-      - run: xz -kfS "_${GITHUB_REF#*/v}_linux_amd64.bin.xz" target/release/moproxy 
-      - uses: ncipollo/release-action@v1
-        with:
-          artifacts: target/debian/*.deb,target/release/*.bin.xz
-          token: ${{ secrets.GITHUB_TOKEN }}
-          allowUpdates: true
-  build-windows:
-    name: Build for Windows
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --all-features
-      - run: xz -kf target/release/moproxy.exe > "moproxy_${GITHUB_REF#*/v}_windows_amd64.exe.xz"
-      - uses: ncipollo/release-action@v1
-        with:
-          artifacts: target/release/*.exe.xz
-          token: ${{ secrets.GITHUB_TOKEN }}
-          allowUpdates: true
-  build-linux-cross:
-    name: Cross-build for various on Linux
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/cargo@v1
-        with:
-          use-cross: true
-          command: build
-          args: --target x86_64-unknown-linux-musl --release
-      - uses: actions-rs/cargo@v1
-        with:
-          use-cross: true
-          command: build
-          args: --target armv7-unknown-linux-gnueabihf --release
-      - uses: actions-rs/cargo@v1
-        with:
-          use-cross: true
-          command: build
-          args: --target aarch64-linux-android --release
-      - uses: actions-rs/cargo@v1
-        with:
-          use-cross: true
-          command: build
-          args: --target mips-unknown-linux-musl --release
-      - run: xz -kfS "_${GITHUB_REF#*/v}_linux_x86_64_musl.bin.xz" target/x86_64-unknown-linux-musl/release/moproxy
-      - run: xz -kfS "_${GITHUB_REF#*/v}_linux_armv7_gnueabihf.bin.xz" target/armv7-unknown-linux-gnueabihf/release/moproxy 
-      - run: xz -kfS "_${GITHUB_REF#*/v}_linux_aarch64_android.bin.xz" target/aarch64-linux-android/release/moproxy 
-      - run: xz -kfS "_${GITHUB_REF#*/v}_linux_mips_musl.bin.xz" target/mips-unknown-linux-musl/release/moproxy
-      - uses: ncipollo/release-action@v1
-        with:
-          artifacts: "target/**/*.bin.xz"
-          token: ${{ secrets.GITHUB_TOKEN }}
-          allowUpdates: true
+  release:
+    name: Release - ${{ matrix.platform.release_for }}
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/tags/test-release'
+    strategy:
+      matrix:
+        platform:
+          - release_for: Linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            suffix: linux_amd64.bin
 
+          - release_for: Windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            suffix: windows_amd64.exe
+
+          - release_for: Linux-x86_64-musl
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            suffix: linux_x86_64_musl.bin
+
+          - release_for: Linux-armv7
+            os: ubuntu-latest
+            target: armv7-unknown-linux-gnueabihf
+            suffix: linux_armv7_gnueabihf.bin
+
+          - release_for: Android-aarch64
+            os: ubuntu-latest
+            target: aarch64-linux-android
+            suffix: linux_aarch64_android.bin
+
+          - release_for: Linux-mips
+            os: ubuntu-latest
+            target: mips-unknown-linux-musl
+            suffix: linux_mips_musl.bin
+    runs-on: ${{ matrix.platform.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup cache
+        uses: Swatinem/rust-cache@v2
+      - name: Build
+        uses: houseabsolute/actions-rust-cross@v0
+        with:
+          command: build
+          target: ${{ matrix.platform.target }}
+          args: --release
+          strip: yes
+      - name: Packaging for Debian
+        if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          cargo install deb
+          cargo deb --target=${{ matrix.platform.target }} --no-build
+      - name: Packaging binary
+        run: |
+          if [[ "${{ matrix.platform.os }}" == "windows-latest" ]]; then
+            xz -kf target/${{ matrix.platform.target }}/release/moproxy.exe > "moproxy_${GITHUB_REF#*/v}_${{ matrix.platform.suffix }}.xz"
+          else
+            xz -kfS "_${GITHUB_REF#*/v}${{ matrix.platform.suffix }}.xz" target/${{ matrix.platform.target }}/release/moproxy
+          fi
+      - name: Publish binary artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.platform.target }}
+          path: target/${{ matrix.platform.target }}/release/*.xz
+          compression-level: 0
+      - name: Release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "target/${{ matrix.platform.target }}/*.xz,target/${{ matrix.platform.target }}/*.deb"
+          draft: true

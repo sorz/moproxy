@@ -16,31 +16,38 @@ jobs:
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             suffix: linux_amd64.bin
+            toolchain: stable
 
           - release_for: Windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
             suffix: windows_amd64.exe
+            toolchain: stable
 
           - release_for: Linux-x86_64-musl
             os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             suffix: linux_x86_64_musl.bin
+            toolchain: stable
 
           - release_for: Linux-armv7
             os: ubuntu-latest
             target: armv7-unknown-linux-gnueabihf
             suffix: linux_armv7_gnueabihf.bin
+            toolchain: stable
 
           - release_for: Android-aarch64
             os: ubuntu-latest
             target: aarch64-linux-android
             suffix: linux_aarch64_android.bin
+            toolchain: stable
 
           - release_for: Linux-mips
             os: ubuntu-latest
             target: mips-unknown-linux-musl
             suffix: linux_mips_musl.bin
+            toolchain: nightly
+
     runs-on: ${{ matrix.platform.os }}
     steps:
       - name: Checkout
@@ -52,6 +59,7 @@ jobs:
         with:
           command: build
           target: ${{ matrix.platform.target }}
+          toolchain: ${{ matrix.platform.toolchain }}
           args: --release
           strip: yes
       - name: Packaging for Debian

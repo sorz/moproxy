@@ -9,6 +9,7 @@ repository = "https://github.com/sorz/moproxy"
 license = "MIT"
 keywords = ["proxy", "socksv5"]
 categories = ["command-line-utilities"]
+rust-version = "1.75.0"
 
 [dependencies]
 rand = "0.8"

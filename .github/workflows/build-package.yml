@@ -69,20 +69,15 @@ jobs:
           cargo install cargo-deb
           cargo deb --target=${{ matrix.platform.target }} --no-build
       - name: Packaging binary
-        run: |
-          if [[ "${{ matrix.platform.os }}" == "windows-latest" ]]; then
-            xz -kf target/${{ matrix.platform.target }}/release/moproxy.exe > "moproxy_${GITHUB_REF#*/v}_${{ matrix.platform.suffix }}.xz"
-          else
-            xz -kfS "_${GITHUB_REF#*/v}${{ matrix.platform.suffix }}.xz" target/${{ matrix.platform.target }}/release/moproxy
-          fi
-      - name: Publish binary artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: binary-${{ matrix.platform.target }}
-          path: target/${{ matrix.platform.target }}/release/*.xz
-          compression-level: 0
+        if: contains(matrix.platform.os, 'ubuntu')
+        run: xz -kfS "_${GITHUB_REF#*/v}${{ matrix.platform.suffix }}.xz" target/${{ matrix.platform.target }}/release/moproxy
+      - name: Packaging binary
+        if: contains(matrix.platform.os, 'windows')
+        run: xz -kf target/${{ matrix.platform.target }}/release/moproxy.exe > "moproxy_${GITHUB_REF#*/v}_${{ matrix.platform.suffix }}.xz"
       - name: Release
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "target/${{ matrix.platform.target }}/*.xz,target/${{ matrix.platform.target }}/*.deb"
+          artifacts: "*.xz,target/**/*.xz,target/**/*.deb"
           draft: true
+          allowUpdates: true
+          updateOnlyUnreleased: true

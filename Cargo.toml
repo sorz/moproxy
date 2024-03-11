@@ -77,3 +77,13 @@ assets = [
     ["conf/proxy.ini", "etc/moproxy/", "644"],
     ["conf/simple_score.lua", "etc/moproxy/", "644"],
 ]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/moproxy", dest = "/usr/bin/moproxy", mode = "755" },
+    { source = "README.md", dest = "/usr/share/doc/moproxy/README", mode = "644" },
+    { source = "conf/moproxy.service", dest = "/usr/lib/systemd/system/moproxy.service", mode = "644" },
+    { source = "conf/config.env", dest = "/etc/moproxy/config.env", mode = "644" },
+    { source = "conf/proxy.ini", dest = "/etc/moproxy/proxy.ini", mode = "644" },
+    { source = "conf/simple_score.lua", dest = "/etc/moproxy/simple_score.lua", mode = "644" },
+]

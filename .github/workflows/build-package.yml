@@ -36,6 +36,12 @@ jobs:
             target: armv7-unknown-linux-gnueabihf
             suffix: linux_armv7_gnueabihf.bin
             toolchain: stable
+            
+          - release_for: Linux-aarch64
+            os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            suffix: linux_aarch64.bin
+            toolchain: stable
 
           # Disabled until corss release a new version
           # https://github.com/cross-rs/cross/issues/1222
@@ -55,6 +61,14 @@ jobs:
       - name: Install musl-tools
         if: contains(matrix.platform.target, 'linux-musl')
         run: sudo apt install musl-tools
+      - name: Install RPM tools
+        if: contains(matrix.platform.target, 'linux-gnu')
+        run: sudo apt-get install rpm
+      - name: Install aarch64 binutils
+        if: matrix.platform.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get install binutils-aarch64-linux-gnu build-essential crossbuild-essential-arm64 pkg-config libc6-arm64-cross libgcc1-arm64-cross libstdc++6-arm64-cross
+          sudo dpkg --add-architecture arm64
       - name: Build
         uses: houseabsolute/actions-rust-cross@v0
         with:
@@ -63,11 +77,26 @@ jobs:
           toolchain: ${{ matrix.platform.toolchain }}
           args: --release
           strip: yes
-      - name: Packaging for Debian
+      - name: Packaging for Debian - x84_64
         if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
         run: |
           cargo install cargo-deb
           cargo deb --target=${{ matrix.platform.target }} --no-build
+      - name: Packaging for Debian - aarch64
+        if: matrix.platform.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          cargo install cargo-deb
+          cargo deb --target=${{ matrix.platform.target }} --no-build --no-strip
+      - name: Packaging for RPM - x86_64
+        if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          cargo install cargo-generate-rpm
+          cargo generate-rpm --target=${{ matrix.platform.target }}
+      - name: Packaging for RPM - aarch64
+        if: matrix.platform.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          cargo install cargo-generate-rpm
+          cargo generate-rpm --target=${{ matrix.platform.target }}
       - name: Packaging binary for Linux
         if: contains(matrix.platform.os, 'ubuntu')
         run: xz -kfS "_${GITHUB_REF#*/v}_${{ matrix.platform.suffix }}.xz" target/${{ matrix.platform.target }}/release/moproxy
@@ -77,7 +106,7 @@ jobs:
       - name: Release
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "*.xz,target/**/*.xz,target/**/*.deb"
+          artifacts: "*.xz,target/**/*.xz,target/**/*.deb,target/**/*.rpm"
           draft: true
           allowUpdates: true
           updateOnlyUnreleased: true

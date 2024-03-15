@@ -74,6 +74,9 @@ nft add rule nat prerouting tcp dport {80, 443} redirect to 2080
 # or the legacy iptables equivalent
 iptables -t nat -A OUTPUT -p tcp -m multiport --dports 80,443 -j REDIRECT --to-port 2080
 iptables -t nat -A PREROUTING -p tcp -m multiport --dports 80,443 -j REDIRECT --to-port 2080
+
+# or ipfw (FreeBSD)
+ipfw add 100 fwd 127.0.0.1,2080 tcp from me to not me dst-port 80,443
 ```
 
 SOCKSv5 server is also launched alongs with transparent proxy on the same port:

@@ -91,31 +91,27 @@ impl StreamWithBuffer {
     }
 
     pub fn poll_read_to_buffer(&mut self, cx: &mut Context) -> Poll<io::Result<usize>> {
-        let stream = Pin::new(&mut self.stream);
-
-        let n = try_poll!(if let Some(ref mut buf) = self.buf {
+        let mut read = |buf: &mut [u8]| {
+            let stream = Pin::new(&mut self.stream);
             let mut buf = ReadBuf::new(buf);
-            stream
-                .poll_read(cx, &mut buf)
-                .map_ok(|_| buf.filled().len())
-        } else {
-            SHARED_BUFFER.with(|buf| {
-                let shared_buf = &mut buf.borrow_mut()[..];
-                let mut buf = ReadBuf::new(shared_buf);
-                stream
-                    .poll_read(cx, &mut buf)
-                    .map_ok(|_| buf.filled().len())
+            stream.poll_read(cx, &mut buf).map_ok(|_| {
+                let n = buf.filled().len();
+                if n == 0 {
+                    self.read_eof = true;
+                } else {
+                    self.pos = 0;
+                    self.cap = n;
+                }
+                trace!("{} bytes read", n);
+                n
             })
-        });
+        };
 
-        if n == 0 {
-            self.read_eof = true;
+        if let Some(buf) = self.buf.as_deref_mut() {
+            read(buf)
         } else {
-            self.pos = 0;
-            self.cap = n;
+            SHARED_BUFFER.with(|buf| read(&mut *buf.borrow_mut()))
         }
-        trace!("{} bytes read", n);
-        Poll::Ready(Ok(n))
     }
 
     pub fn poll_write_buffer_to(

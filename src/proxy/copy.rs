@@ -124,7 +124,7 @@ impl StreamWithBuffer {
         let result = if let Some(ref buf) = self.buf {
             writer.poll_write(cx, &buf[self.pos..self.cap])
         } else {
-            SHARED_BUFFER.with(|buf| writer.poll_write(cx, &buf.borrow_mut()[self.pos..self.cap]))
+            SHARED_BUFFER.with(|buf| writer.poll_write(cx, &buf.borrow()[self.pos..self.cap]))
         };
         match result {
             Poll::Ready(Ok(0)) => Poll::Ready(Err(io::Error::new(

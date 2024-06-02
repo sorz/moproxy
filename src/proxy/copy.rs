@@ -124,7 +124,23 @@ impl StreamWithBuffer {
         let result = if let Some(buf) = self.buf.as_deref() {
             writer.poll_write(cx, &buf[self.pos..self.cap])
         } else {
-            SHARED_BUFFER.with(|buf| writer.poll_write(cx, &buf.borrow()[self.pos..self.cap]))
+            SHARED_BUFFER.with(|buf| {
+                let buf = &buf.borrow()[self.pos..self.cap];
+                match writer.poll_write(cx, buf) {
+                    Poll::Pending => {
+                        // Move remaining data to the private buffer
+                        let n = self.cap - self.pos;
+                        trace!("allocate private buffer for {} bytes", n);
+                        let mut shared = Vec::with_capacity(cmp::max(PRIVATE_BUF_SIZE, n));
+                        shared.extend_from_slice(buf);
+                        self.pos = 0;
+                        self.cap = n;
+                        self.buf = Some(shared.into_boxed_slice());
+                        Poll::Pending
+                    }
+                    any => any,
+                }
+            })
         };
         match result {
             Poll::Ready(Ok(0)) => Poll::Ready(Err(io::Error::new(
@@ -135,20 +151,6 @@ impl StreamWithBuffer {
                 self.pos += n;
                 trace!("{} bytes written", n);
                 Poll::Ready(Ok(n))
-            }
-            Poll::Pending if self.buf.is_none() => {
-                // Move remaining data to the private buffer
-                let n = self.cap - self.pos;
-                trace!("allocate private buffer for {} bytes", n);
-                SHARED_BUFFER.with(|shared_buf| {
-                    let shared_buf = shared_buf.borrow();
-                    let mut buf = vec![0; cmp::max(PRIVATE_BUF_SIZE, n)];
-                    buf[..n].copy_from_slice(&shared_buf[self.pos..self.cap]);
-                    self.pos = 0;
-                    self.cap = n;
-                    self.buf = Some(buf.into_boxed_slice());
-                });
-                Poll::Pending
             }
             _ => result,
         }

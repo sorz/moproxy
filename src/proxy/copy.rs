@@ -121,7 +121,7 @@ impl StreamWithBuffer {
     ) -> Poll<io::Result<usize>> {
         let writer = Pin::new(writer);
 
-        let result = if let Some(ref buf) = self.buf {
+        let result = if let Some(buf) = self.buf.as_deref() {
             writer.poll_write(cx, &buf[self.pos..self.cap])
         } else {
             SHARED_BUFFER.with(|buf| writer.poll_write(cx, &buf.borrow()[self.pos..self.cap]))
